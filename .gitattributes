@@ -1,0 +1,13 @@
+# Normalise line endings. Shell scripts and Docker files MUST stay LF or the
+# Linux container entrypoint fails with a `/bin/sh^M` error.
+* text=auto
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+Dockerfile text eol=lf
+*.conf text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary

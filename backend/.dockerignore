@@ -1,0 +1,16 @@
+# Dependencies & build artifacts (rebuilt in the image)
+vendor/
+node_modules/
+
+# Local-only config and secrets — production uses env vars via app.php
+config/app_local.php
+config/.env
+
+# Don't ship tests or VCS into the runtime image
+tests/
+.git/
+.github/
+
+# Logs
+*.log
+logs/*.log

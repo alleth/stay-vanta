@@ -1,0 +1,212 @@
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Card, Table, Button, Badge, Modal, Form, Alert, Spinner,
+} from 'react-bootstrap'
+import { useAuth } from '../context/AuthContext'
+import { useProperty } from '../context/PropertyContext'
+import { useSubmit } from '../hooks/useSubmit'
+import {
+  listStaff, createStaff, updateStaff, resetStaffPassword,
+} from '../api/staff'
+
+const ROLE_VARIANT = { admin: 'primary', receptionist: 'info' }
+
+export default function Staff() {
+  const { role } = useAuth()
+  const { propertyId } = useProperty()
+  const [staff, setStaff] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [modal, setModal] = useState(null) // 'add' | { type: 'reset', user }
+
+  const refresh = useCallback(async () => {
+    if (!propertyId) return
+    try {
+      setStaff(await listStaff(propertyId))
+      setError(null)
+    } catch {
+      setError('Could not load staff.')
+    } finally {
+      setLoading(false)
+    }
+  }, [propertyId])
+
+  useEffect(() => {
+    // Loads happen after the awaited request resolves; safe data effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refresh()
+  }, [refresh])
+
+  async function toggleActive(user) {
+    await updateStaff(user.id, { is_active: !user.is_active })
+    refresh()
+  }
+
+  if (!propertyId)
+    return <Alert variant="info">Select or create a property to manage staff.</Alert>
+
+  return (
+    <div>
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h1 className="h3 fw-bold mb-0">Staff</h1>
+          <small className="text-muted">
+            {role === 'owner'
+              ? 'Add admins and receptionists for the selected property.'
+              : 'Add receptionists for your property.'}
+          </small>
+        </div>
+        <Button onClick={() => setModal('add')}>Add staff</Button>
+      </div>
+
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      {loading ? (
+        <div className="text-center py-5"><Spinner /></div>
+      ) : (
+        <Card className="shadow-sm">
+          <Table responsive hover className="mb-0 align-middle">
+            <thead>
+              <tr>
+                <th>Name</th><th>Email</th><th>Role</th><th>Status</th>
+                <th className="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {staff.length === 0 && (
+                <tr><td colSpan={5} className="text-center text-muted py-4">No staff yet.</td></tr>
+              )}
+              {staff.map((u) => (
+                <tr key={u.id} className={u.is_active ? '' : 'text-muted'}>
+                  <td className="fw-semibold">{u.name}</td>
+                  <td>{u.email}</td>
+                  <td><Badge bg={ROLE_VARIANT[u.role] ?? 'secondary'}>{u.role}</Badge></td>
+                  <td>
+                    {u.is_active
+                      ? <Badge bg="success">active</Badge>
+                      : <Badge bg="secondary">inactive</Badge>}
+                  </td>
+                  <td className="text-end">
+                    <Button size="sm" variant="outline-secondary" className="me-2"
+                      onClick={() => setModal({ type: 'reset', user: u })}>
+                      Reset password
+                    </Button>
+                    <Button size="sm" variant={u.is_active ? 'outline-danger' : 'outline-success'}
+                      onClick={() => toggleActive(u)}>
+                      {u.is_active ? 'Deactivate' : 'Reactivate'}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card>
+      )}
+
+      {modal === 'add' && (
+        <AddStaffModal
+          role={role}
+          propertyId={propertyId}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); refresh() }}
+        />
+      )}
+      {modal?.type === 'reset' && (
+        <ResetPasswordModal
+          user={modal.user}
+          onClose={() => setModal(null)}
+          onSaved={() => setModal(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function AddStaffModal({ role, propertyId, onClose, onSaved }) {
+  // Owners choose the role; admins can only add receptionists.
+  const allowedRoles = role === 'owner' ? ['admin', 'receptionist'] : ['receptionist']
+  const [form, setForm] = useState({
+    name: '', email: '', password: '', role: allowedRoles[0],
+  })
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+  const { run, busy, err } = useSubmit(async () => {
+    await createStaff(form, propertyId)
+    onSaved()
+  })
+
+  return (
+    <Modal show onHide={onClose} centered>
+      <Form onSubmit={run}>
+        <Modal.Header closeButton><Modal.Title>Add staff</Modal.Title></Modal.Header>
+        <Modal.Body>
+          {err && <Alert variant="danger">{err}</Alert>}
+          <Form.Group className="mb-3">
+            <Form.Label>Role</Form.Label>
+            <Form.Select value={form.role} onChange={set('role')} disabled={allowedRoles.length === 1}>
+              {allowedRoles.map((r) => <option key={r} value={r}>{r}</option>)}
+            </Form.Select>
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Name</Form.Label>
+            <Form.Control value={form.name} onChange={set('name')} required autoFocus />
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Email</Form.Label>
+            <Form.Control type="email" value={form.email} onChange={set('email')} required />
+          </Form.Group>
+          <Form.Group>
+            <Form.Label>Temporary password</Form.Label>
+            <Form.Control type="text" value={form.password} onChange={set('password')}
+              minLength={8} required placeholder="min 8 characters" />
+            <Form.Text muted>Share this with the staff member; they can sign in immediately.</Form.Text>
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : 'Create account'}</Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  )
+}
+
+function ResetPasswordModal({ user, onClose, onSaved }) {
+  const [password, setPassword] = useState('')
+  const [done, setDone] = useState(false)
+  const { run, busy, err } = useSubmit(async () => {
+    await resetStaffPassword(user.id, password)
+    setDone(true)
+  })
+
+  return (
+    <Modal show onHide={onClose} centered>
+      <Form onSubmit={run}>
+        <Modal.Header closeButton><Modal.Title>Reset password — {user.name}</Modal.Title></Modal.Header>
+        <Modal.Body>
+          {err && <Alert variant="danger">{err}</Alert>}
+          {done ? (
+            <Alert variant="success" className="mb-0">
+              Password updated. Any existing session for this user was revoked.
+            </Alert>
+          ) : (
+            <Form.Group>
+              <Form.Label>New temporary password</Form.Label>
+              <Form.Control type="text" value={password} onChange={(e) => setPassword(e.target.value)}
+                minLength={8} required autoFocus placeholder="min 8 characters" />
+            </Form.Group>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          {done ? (
+            <Button onClick={onSaved}>Done</Button>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={onClose}>Cancel</Button>
+              <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : 'Reset'}</Button>
+            </>
+          )}
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  )
+}

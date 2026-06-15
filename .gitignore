@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+/backend/vendor/
+
+# Builds
+/frontend/dist/
+/backend/tmp/cache/
+/backend/logs/
+
+# Local config & secrets (CakePHP)
+/backend/config/app_local.php
+/backend/config/.env
+
+# Frontend env
+/frontend/.env
+/frontend/.env.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log

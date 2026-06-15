@@ -1,0 +1,37 @@
+import client from './client'
+
+const withProp = (params, propertyId) =>
+  propertyId ? { ...params, property_id: propertyId } : params
+
+// Menu
+export const listMenu = (propertyId, params = {}) =>
+  client.get('/food-menu-items', { params: withProp(params, propertyId) }).then((r) => r.data.menuItems)
+
+export const createMenuItem = (data, propertyId) =>
+  client.post('/food-menu-items', withProp(data, propertyId)).then((r) => r.data.menuItem)
+
+export const updateMenuItem = (id, data) =>
+  client.patch(`/food-menu-items/${id}`, data).then((r) => r.data.menuItem)
+
+// Orders
+export const listOrders = (propertyId, params = {}) =>
+  client.get('/food-orders', { params: withProp(params, propertyId) }).then((r) => r.data.orders)
+
+export const createOrder = (data, propertyId) =>
+  client.post('/food-orders', withProp(data, propertyId)).then((r) => r.data.order)
+
+export const serveOrder = (id) =>
+  client.post(`/food-orders/${id}/serve`).then((r) => r.data.order)
+
+export const cancelOrder = (id) =>
+  client.post(`/food-orders/${id}/cancel`).then((r) => r.data.order)
+
+// Invoices
+export const listInvoices = (propertyId, params = {}) =>
+  client.get('/invoices', { params: withProp(params, propertyId) }).then((r) => r.data.invoices)
+
+export const getInvoice = (id) =>
+  client.get(`/invoices/${id}`).then((r) => r.data.invoice)
+
+export const settleInvoice = (id) =>
+  client.post(`/invoices/${id}/settle`).then((r) => r.data.invoice)

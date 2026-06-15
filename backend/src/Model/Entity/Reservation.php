@@ -1,0 +1,42 @@
+<?php
+declare(strict_types=1);
+
+namespace App\Model\Entity;
+
+use Cake\ORM\Entity;
+
+/**
+ * Reservation entity.
+ *
+ * `receptionist_id` is the LAST receptionist to act on the booking (created it
+ * or performed a check-in/out/cancel) — the accountability stamp for the room.
+ *
+ * @property int $id
+ * @property int $property_id
+ * @property int|null $room_id
+ * @property int|null $guest_id
+ * @property int|null $receptionist_id
+ * @property \Cake\I18n\Date|null $check_in
+ * @property \Cake\I18n\Date|null $check_out
+ * @property string $status         booked | checked_in | checked_out | cancelled
+ * @property string $source         walk_in | cocotel | agoda | trip_com | tripadvisor
+ * @property string|null $promo_rate
+ * @property string $discount_type  none | senior | pwd
+ * @property int $additional_beds
+ */
+class Reservation extends Entity
+{
+    protected array $_accessible = [
+        'property_id' => true,
+        'room_id' => true,
+        'guest_id' => true,
+        'receptionist_id' => true,
+        'check_in' => true,
+        'check_out' => true,
+        'status' => true,
+        'source' => true,
+        'promo_rate' => true,
+        'discount_type' => true,
+        'additional_beds' => true,
+    ];
+}

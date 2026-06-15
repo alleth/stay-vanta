@@ -1,0 +1,9 @@
+@import 'bootstrap/dist/css/bootstrap.min.css';
+@import 'tailwindcss';
+
+/* StayVanta global styles. Bootstrap provides the component baseline;
+   Tailwind utilities layer on top for spacing/layout tweaks. */
+body {
+  margin: 0;
+  background-color: #f5f6f8;
+}
