@@ -16,7 +16,10 @@ WORKDIR /var/www/html
 # Install PHP dependencies (skip post-install scripts so the interactive
 # CakePHP installer / app_local.php generation never runs in the image).
 COPY . .
+# tmp/ and logs/ are empty in the repo (untracked by git), so recreate the
+# runtime dirs CakePHP needs and make them writable by Apache.
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-scripts \
+    && mkdir -p tmp/cache/models tmp/cache/persistent tmp/sessions tmp/tests logs \
     && chown -R www-data:www-data tmp logs
 
 # Apache vhost -> CakePHP webroot, plus the entrypoint that binds $PORT.
