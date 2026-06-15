@@ -6,7 +6,10 @@ FROM php:8.2-apache
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip libicu-dev libonig-dev libzip-dev \
     && docker-php-ext-install -j"$(nproc)" intl pdo_mysql mbstring zip opcache \
-    && a2enmod rewrite \
+    # mod_php needs exactly one MPM (prefork). Disable any others that the apt
+    # step may have enabled, otherwise Apache fails: "More than one MPM loaded".
+    && a2dismod mpm_event mpm_worker 2>/dev/null || true \
+    && a2enmod mpm_prefork rewrite \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
