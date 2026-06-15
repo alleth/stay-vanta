@@ -6,10 +6,13 @@ FROM php:8.2-apache
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip libicu-dev libonig-dev libzip-dev \
     && docker-php-ext-install -j"$(nproc)" intl pdo_mysql mbstring zip opcache \
-    # mod_php needs exactly one MPM (prefork). Disable any others that the apt
-    # step may have enabled, otherwise Apache fails: "More than one MPM loaded".
-    && a2dismod mpm_event mpm_worker 2>/dev/null || true \
+    # mod_php needs exactly one MPM (prefork). Remove the event/worker module
+    # symlinks directly (a2dismod can silently no-op), then enable prefork,
+    # otherwise Apache fails to start: "More than one MPM loaded". The ls line
+    # prints the surviving MPM(s) into the build log for verification.
+    && rm -f /etc/apache2/mods-enabled/mpm_event.* /etc/apache2/mods-enabled/mpm_worker.* \
     && a2enmod mpm_prefork rewrite \
+    && echo "MPM modules still enabled:" && (ls /etc/apache2/mods-enabled/ | grep -i mpm || true) \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
