@@ -1,6 +1,3 @@
-/* Elegant serif for the brand & headings; clean sans for everything else. */
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap');
-
 /* --- Cascade layer order (this is the fix that makes Tailwind actually work) ---
    Tailwind v4 emits its utilities into @layer utilities. Bootstrap, imported as
    plain CSS, is UNLAYERED and therefore always beats anything in a layer — so
@@ -15,20 +12,21 @@
 @import 'bootstrap/dist/css/bootstrap.min.css' layer(bootstrap);
 @import 'tailwindcss/utilities.css' layer(utilities);
 
-/* --- Design tokens: clean, warm, boutique-hotel palette --- */
+/* --- Design tokens: monochrome, crisp, with a single amber accent --- */
 :root {
-  --sv-bg: #f7f5f1;          /* warm off-white canvas */
+  --sv-bg: #f7f7f8;          /* neutral off-white canvas */
   --sv-surface: #ffffff;
-  --sv-border: #e8e2d8;      /* soft warm stone */
-  --sv-text: #2b2925;        /* warm near-black */
-  --sv-muted: #8a8276;       /* warm gray */
-  --sv-ink: #232c2b;         /* deep charcoal-green for primary actions */
-  --sv-ink-hover: #303d3b;
-  --sv-accent: #b08d57;      /* resort gold */
-  --sv-accent-soft: #f3ecdf;
+  --sv-border: #e8e8ec;      /* neutral gray hairline */
+  --sv-subtle: #f1f1f3;      /* quiet fill for chips / active nav */
+  --sv-text: #1a1a1e;        /* near-black */
+  --sv-muted: #6b7280;       /* gray */
+  --sv-ink: #1f2430;         /* near-black primary actions */
+  --sv-ink-hover: #2c3242;
+  --sv-accent: #d99211;      /* amber — the one accent */
+  --sv-accent-soft: #fdf3e0; /* amber tint */
 
   --sv-radius: 0.75rem;
-  --sv-shadow: 0 1px 2px rgba(43, 41, 37, 0.04), 0 1px 3px rgba(43, 41, 37, 0.06);
+  --sv-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
 
   /* Map Bootstrap's body tokens onto the palette. */
   --bs-body-bg: var(--sv-bg);
@@ -50,15 +48,17 @@ body {
 /* Minimalist component refinements. Kept in @layer app so any Tailwind utility
    you add in markup still overrides these. */
 @layer app {
+  /* Crisp display headings — tight-tracked sans rather than a serif. */
   .sv-serif {
-    font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
-    letter-spacing: -0.01em;
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.02em;
   }
   .sv-accent { color: var(--sv-accent); }
 
-  h1, h2, h3, .h1, .h2, .h3 { color: var(--sv-text); }
+  h1, h2, h3, .h1, .h2, .h3 { color: var(--sv-text); letter-spacing: -0.01em; }
 
-  /* Cards — flat, thin warm border, gentle radius, whisper of shadow. */
+  /* Cards — flat, thin border, gentle radius, whisper of shadow. */
   .card {
     border: 1px solid var(--sv-border);
     border-radius: var(--sv-radius);
@@ -79,15 +79,15 @@ body {
     --bs-btn-border-color: var(--sv-ink);
     --bs-btn-hover-bg: var(--sv-ink-hover);
     --bs-btn-hover-border-color: var(--sv-ink-hover);
-    --bs-btn-active-bg: #1b2322;
-    --bs-btn-active-border-color: #1b2322;
+    --bs-btn-active-bg: #161a23;
+    --bs-btn-active-border-color: #161a23;
     --bs-btn-disabled-bg: var(--sv-ink);
     --bs-btn-disabled-border-color: var(--sv-ink);
   }
   .btn-outline-secondary {
     --bs-btn-color: var(--sv-text);
     --bs-btn-border-color: var(--sv-border);
-    --bs-btn-hover-bg: var(--sv-accent-soft);
+    --bs-btn-hover-bg: var(--sv-subtle);
     --bs-btn-hover-border-color: var(--sv-border);
     --bs-btn-hover-color: var(--sv-text);
   }
@@ -95,8 +95,8 @@ body {
     --bs-btn-bg: var(--sv-accent);
     --bs-btn-border-color: var(--sv-accent);
     --bs-btn-color: #fff;
-    --bs-btn-hover-bg: #9c7a47;
-    --bs-btn-hover-border-color: #9c7a47;
+    --bs-btn-hover-bg: #c0800c;
+    --bs-btn-hover-border-color: #c0800c;
     --bs-btn-hover-color: #fff;
   }
 
@@ -108,7 +108,7 @@ body {
   }
   .form-control:focus, .form-select:focus {
     border-color: var(--sv-accent);
-    box-shadow: 0 0 0 3px rgba(176, 141, 87, 0.15);
+    box-shadow: 0 0 0 3px rgba(217, 146, 17, 0.15);
   }
   .form-label { font-weight: 500; font-size: 0.875rem; color: var(--sv-text); }
 
@@ -129,10 +129,10 @@ body {
     background: transparent;
   }
 
-  /* Badges — soft, muted chips. */
+  /* Badges — soft, neutral chips. */
   .badge.bg-secondary {
-    background-color: var(--sv-accent-soft) !important;
-    color: #8a6d3f;
+    background-color: var(--sv-subtle) !important;
+    color: var(--sv-muted);
     font-weight: 500;
   }
 
@@ -151,6 +151,6 @@ body {
   .sv-nav .nav-link:hover { color: var(--sv-text); }
   .sv-nav .nav-link.active {
     color: var(--sv-text);
-    background-color: var(--sv-accent-soft);
+    background-color: var(--sv-subtle);
   }
 }
