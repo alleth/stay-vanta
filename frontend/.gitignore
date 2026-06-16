@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# package-lock.json is intentionally not committed: a Windows-generated
+# lock omits Linux-only optional deps and breaks Cloudflare (Linux) `npm ci`.
+# Cloudflare runs `npm install` without it, which resolves correctly.
+package-lock.json
