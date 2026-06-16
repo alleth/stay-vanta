@@ -1,7 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Navbar, Nav, Container, Button, Badge, Form } from 'react-bootstrap'
+import { Navbar, Nav, Container, Button, Badge } from 'react-bootstrap'
 import { useAuth } from '../context/AuthContext'
-import { useProperty } from '../context/PropertyContext'
 
 // Navigation items, scoped by role. Owner = platform operator (revenue +
 // subscribers); admin = hotel/resort head (operations); receptionist = the
@@ -18,7 +17,6 @@ const NAV = [
 
 export default function Layout() {
   const { user, logout, role } = useAuth()
-  const { isOwner, properties, propertyId, choose } = useProperty()
   const navigate = useNavigate()
 
   function handleLogout() {
@@ -44,20 +42,6 @@ export default function Layout() {
             ))}
           </Nav>
           <Nav className="align-items-lg-center gap-3">
-            {isOwner && properties.length > 0 && (
-              <Form.Select
-                size="sm"
-                style={{ width: 'auto' }}
-                value={propertyId ?? ''}
-                onChange={(e) => choose(Number(e.target.value))}
-              >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Form.Select>
-            )}
             <span className="small text-nowrap" style={{ color: 'var(--sv-text)' }}>
               {user?.name} <Badge bg="secondary" className="ms-1">{role}</Badge>
             </span>
