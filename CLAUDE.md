@@ -131,8 +131,9 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 Implemented frontend pages (all five modules): `src/pages/Inventory.jsx`, `src/pages/Staff.jsx`,
 `src/pages/FrontDesk.jsx` (Reservations / Rooms / Rates), `src/pages/Guests.jsx`
 (count cards + registry + stay history), and `src/pages/Food.jsx` (Orders / Menu / Invoices).
-The owner-only `src/pages/Reports.jsx` shows platform subscription reporting. `Properties.jsx`
-is still a `ModuleStub`.
+`src/pages/Reports.jsx` is role-aware (owner + admin): the owner sees platform subscription
+reporting, an admin sees a guest-count report for their property (reuses `GET /api/guests/stats`,
+which is already property-scoped via `scopeToProperty`). `Properties.jsx` is still a `ModuleStub`.
 
 ### Subscription model & owner reports
 StayVanta is subscription-based: the `owner` role is the **platform operator** (no property),

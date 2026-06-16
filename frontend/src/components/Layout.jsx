@@ -11,7 +11,7 @@ const NAV = [
   { to: '/guests', label: 'Guests' },
   { to: '/food', label: 'Food & Orders' },
   { to: '/properties', label: 'Properties', roles: ['owner'] },
-  { to: '/reports', label: 'Reports', roles: ['owner'] },
+  { to: '/reports', label: 'Reports', roles: ['owner', 'admin'] },
   { to: '/staff', label: 'Staff', roles: ['owner', 'admin'] },
 ]
 
