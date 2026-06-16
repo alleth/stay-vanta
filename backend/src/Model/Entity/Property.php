@@ -15,6 +15,7 @@ use Cake\ORM\Entity;
  * @property bool $is_active
  * @property string $subscription_status   active | inactive
  * @property \Cake\I18n\Date|null $subscription_expires_at
+ * @property string $subscription_fee   monthly fee paid to the platform owner
  * @property bool $subscription_active   (virtual) status active AND not past expiry
  * @property \Cake\I18n\DateTime|null $created
  * @property \Cake\I18n\DateTime|null $modified
@@ -28,6 +29,7 @@ class Property extends Entity
         'is_active' => true,
         'subscription_status' => true,
         'subscription_expires_at' => true,
+        'subscription_fee' => true,
         'users' => true,
         '*' => false,
     ];

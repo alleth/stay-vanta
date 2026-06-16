@@ -3,16 +3,17 @@ import { Navbar, Nav, Container, Button, Badge, Form } from 'react-bootstrap'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 
-// Navigation items. `roles` (when set) restricts visibility.
+// Navigation items, scoped by role. Owner = platform operator (revenue +
+// subscribers); admin = hotel/resort head (operations); receptionist = the
+// front-line tabs they act on.
 const NAV = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/inventory', label: 'Inventory' },
-  { to: '/front-desk', label: 'Front Desk' },
-  { to: '/guests', label: 'Guests' },
-  { to: '/food', label: 'Food & Orders' },
-  { to: '/properties', label: 'Properties', roles: ['owner'] },
-  { to: '/reports', label: 'Reports', roles: ['owner', 'admin'] },
-  { to: '/staff', label: 'Staff', roles: ['owner', 'admin'] },
+  { to: '/', label: 'Dashboard', end: true, roles: ['owner', 'admin'] },
+  { to: '/subscribers', label: 'Subscribers', roles: ['owner'] },
+  { to: '/inventory', label: 'Inventory', roles: ['admin', 'receptionist'] },
+  { to: '/front-desk', label: 'Front Desk', roles: ['admin', 'receptionist'] },
+  { to: '/guests', label: 'Guests', roles: ['admin', 'receptionist'] },
+  { to: '/food', label: 'Food & Orders', roles: ['admin', 'receptionist'] },
+  { to: '/staff', label: 'Staff', roles: ['admin'] },
 ]
 
 export default function Layout() {

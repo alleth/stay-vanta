@@ -22,6 +22,12 @@ class PropertiesController extends AppController
         // Non-owners only ever see their own property.
         if ($this->currentUser->property_id !== null) {
             $query->where(['Properties.id' => $this->currentUser->property_id]);
+        } else {
+            // Owner: include each subscriber's admin(s) for the Subscribers page.
+            $query->contain(['Users' => function ($q) {
+                return $q->where(['Users.role' => 'admin'])
+                    ->select(['Users.id', 'Users.property_id', 'Users.name', 'Users.email', 'Users.is_active']);
+            }]);
         }
 
         $this->set('properties', $query->all());
@@ -43,6 +49,7 @@ class PropertiesController extends AppController
             'name' => $this->request->getData('name'),
             'type' => $this->request->getData('type') ?? 'hotel',
             'address' => $this->request->getData('address'),
+            'subscription_fee' => $this->request->getData('subscription_fee') ?? 0,
         ]);
 
         if (!$properties->save($property)) {
@@ -73,7 +80,7 @@ class PropertiesController extends AppController
         $properties = $this->fetchTable('Properties');
         $property = $properties->get($id);
         $properties->patchEntity($property, $this->request->getData(), [
-            'fields' => ['name', 'type', 'address', 'is_active', 'subscription_status', 'subscription_expires_at'],
+            'fields' => ['name', 'type', 'address', 'is_active', 'subscription_status', 'subscription_expires_at', 'subscription_fee'],
         ]);
 
         if (!$properties->save($property)) {

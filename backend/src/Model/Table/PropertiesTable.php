@@ -47,6 +47,11 @@ class PropertiesTable extends Table
             ->date('subscription_expires_at')
             ->allowEmptyDate('subscription_expires_at');
 
+        $validator
+            ->numeric('subscription_fee')
+            ->greaterThanOrEqual('subscription_fee', 0)
+            ->allowEmptyString('subscription_fee');
+
         return $validator;
     }
 }

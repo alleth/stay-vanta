@@ -7,9 +7,11 @@ import Inventory from './pages/Inventory'
 import FrontDesk from './pages/FrontDesk'
 import Guests from './pages/Guests'
 import Food from './pages/Food'
-import Properties from './pages/Properties'
-import Reports from './pages/Reports'
+import Subscribers from './pages/Subscribers'
 import Staff from './pages/Staff'
+
+// Roles allowed in the operational (hotel-floor) tabs.
+const OPS = ['admin', 'receptionist']
 
 export default function App() {
   return (
@@ -23,31 +25,53 @@ export default function App() {
           </ProtectedRoute>
         }
       >
+        {/* Dashboard is owner + admin; receptionists are redirected to Front Desk
+            from within the Dashboard component. */}
         <Route index element={<Dashboard />} />
-        <Route path="inventory" element={<Inventory />} />
-        <Route path="front-desk" element={<FrontDesk />} />
-        <Route path="guests" element={<Guests />} />
-        <Route path="food" element={<Food />} />
         <Route
-          path="properties"
+          path="inventory"
           element={
-            <ProtectedRoute roles={['owner']}>
-              <Properties />
+            <ProtectedRoute roles={OPS}>
+              <Inventory />
             </ProtectedRoute>
           }
         />
         <Route
-          path="reports"
+          path="front-desk"
           element={
-            <ProtectedRoute roles={['owner', 'admin']}>
-              <Reports />
+            <ProtectedRoute roles={OPS}>
+              <FrontDesk />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="guests"
+          element={
+            <ProtectedRoute roles={OPS}>
+              <Guests />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="food"
+          element={
+            <ProtectedRoute roles={OPS}>
+              <Food />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="subscribers"
+          element={
+            <ProtectedRoute roles={['owner']}>
+              <Subscribers />
             </ProtectedRoute>
           }
         />
         <Route
           path="staff"
           element={
-            <ProtectedRoute roles={['owner', 'admin']}>
+            <ProtectedRoute roles={['admin']}>
               <Staff />
             </ProtectedRoute>
           }

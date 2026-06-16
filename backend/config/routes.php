@@ -68,8 +68,9 @@ return function (RouteBuilder $routes): void {
         $builder->put('/properties/{id}', ['controller' => 'Properties', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
-        // Platform-owner reports.
-        $builder->get('/reports/overview', ['controller' => 'Reports', 'action' => 'overview']);
+        // Role dashboards.
+        $builder->get('/reports/owner-dashboard', ['controller' => 'Reports', 'action' => 'ownerDashboard']);
+        $builder->get('/reports/admin-dashboard', ['controller' => 'Reports', 'action' => 'adminDashboard']);
 
         // Staff (users).
         $builder->get('/users', ['controller' => 'Users', 'action' => 'index']);

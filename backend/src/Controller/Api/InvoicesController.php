@@ -58,6 +58,7 @@ class InvoicesController extends AppController
             throw new BadRequestException('Invoice is not open.');
         }
         $invoice->set('status', 'settled');
+        $invoice->set('settled_at', \Cake\I18n\DateTime::now());
         $invoices->saveOrFail($invoice);
 
         $this->set('invoice', $invoice);

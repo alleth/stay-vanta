@@ -114,8 +114,9 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 
 ## API endpoints (implemented)
 - `POST /api/auth/login` · `GET /api/auth/me` · `POST /api/auth/logout`
-- `GET|POST /api/properties` (owner-only create) · `PATCH|PUT /api/properties/{id}` (owner-only edit, incl. subscription_status)
-- `GET /api/reports/overview` (owner-only) — platform reports: registered hotel/resort count + list, active vs inactive subscription counts
+- `GET|POST /api/properties` (owner-only create; owner index contains each property's admin) · `PATCH|PUT /api/properties/{id}` (owner-only edit, incl. subscription_status & subscription_fee)
+- `GET /api/reports/owner-dashboard` (owner-only) — subscription revenue (week/month/YTD from each subscriber's monthly fee) + counts (hotels, active subscriptions, admins)
+- `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items, occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time)
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; see `UsersController`)
 - `GET|POST /api/inventory-categories`
 - `GET|POST /api/inventory-items` · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (edit never touches quantity)
@@ -131,18 +132,36 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 Implemented frontend pages (all five modules): `src/pages/Inventory.jsx`, `src/pages/Staff.jsx`,
 `src/pages/FrontDesk.jsx` (Reservations / Rooms / Rates), `src/pages/Guests.jsx`
 (count cards + registry + stay history), and `src/pages/Food.jsx` (Orders / Menu / Invoices).
-`src/pages/Reports.jsx` is role-aware (owner + admin): the owner sees platform subscription
-reporting, an admin sees a guest-count report for their property (reuses `GET /api/guests/stats`,
-which is already property-scoped via `scopeToProperty`). `Properties.jsx` is still a `ModuleStub`.
+`src/pages/Subscribers.jsx` (owner-only) manages subscribing hotels/resorts + their admins + fee.
 
-### Subscription model & owner reports
+### Navigation & dashboards are role-scoped
+Nav visibility is driven by `roles` per item in `Layout.jsx`; **enforce the same on the backend
+and via `ProtectedRoute roles=` in `App.jsx`** (frontend guards are UX only):
+- **owner** (platform operator) → Dashboard + Subscribers only. Dashboard = subscription revenue
+  (week/month/YTD) + active-user counts (`/reports/owner-dashboard`).
+- **admin** (hotel/resort head) → Dashboard, Inventory, Front Desk, Guests, Food & Orders, Staff.
+  Dashboard = ops cards + collected revenue (`/reports/admin-dashboard`). Admin adds Receptionists.
+- **receptionist** → Inventory, Front Desk, Guests, Food & Orders only (no Dashboard/Staff/
+  Subscribers). `Dashboard.jsx` redirects receptionists to `/front-desk`.
+
+### Revenue model
+- **Owner (subscription) revenue**: `properties.subscription_fee` is each subscriber's monthly
+  fee; owner revenue is that fee projected (week = MRR·12/52, month = MRR, YTD = MRR·months-elapsed).
+- **Admin (hotel) revenue = collected**: Σ settled `invoices.total` (bucketed by `invoices.settled_at`,
+  stamped in `InvoicesController::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room
+  food already lives inside invoices, so only `paid` food orders are added (no double count).
+- **Room revenue is persisted on check-out**: `ReservationsController::transition` posts the
+  `quote()` total as a `reservation` line on the guest's invoice (via `InvoicesTable::addLine`),
+  so rooms become collectable revenue (previously `quote()` was read-time only).
+
+### Subscription model
 StayVanta is subscription-based: the `owner` role is the **platform operator** (no property),
 each `properties` row is a subscribing **hotel/resort**, and `admin`/`receptionist` are that
 hotel's staff. `properties.subscription_status` (`active`|`inactive`) + `subscription_expires_at`
-(nullable date) hold the subscription; the `Property::subscription_active` virtual is the source
-of truth (status `active` AND not past expiry). `ReportsController::overview` (owner-only) returns
-the registered-hotel count/list and active/inactive subscription counts; the owner flips a
-subscription via `PATCH /api/properties/{id}` (`PropertiesController::edit`).
+(nullable date) + `subscription_fee` (monthly) hold the subscription; the
+`Property::subscription_active` virtual is the source of truth (status `active` AND not past
+expiry). The owner manages subscribers (and flips a subscription) via `PATCH /api/properties/{id}`
+(`PropertiesController::edit`) from the Subscribers page.
 
 ### Food (orders, menu, invoices)
 `FoodOrdersTable::place()` is the orchestrator: in one transaction it saves the order + lines,

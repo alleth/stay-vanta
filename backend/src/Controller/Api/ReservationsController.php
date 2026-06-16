@@ -126,7 +126,7 @@ class ReservationsController extends AppController
             ));
         }
 
-        $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $rule) {
+        $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $rule, $transition) {
             $reservation->set('status', $rule['to']);
             // Re-stamp: this receptionist is now the last to act on the booking.
             $reservation->set('receptionist_id', (int)$this->currentUser->id);
@@ -137,6 +137,27 @@ class ReservationsController extends AppController
                 $room = $rooms->get($reservation->room_id);
                 $room->set('status', $rule['room']);
                 $rooms->saveOrFail($room);
+            }
+
+            // On check-out, post the room charge to the guest's invoice so it
+            // becomes collectable revenue (room revenue is otherwise computed
+            // only at read-time and never persisted).
+            if ($transition === 'check-out' && $reservation->guest_id) {
+                $quote = $reservations->quote($reservation, $this->resolveBaseRate($reservation));
+                if ($quote['total'] > 0) {
+                    $invoices = $this->fetchTable('Invoices');
+                    $invoice = $invoices->openInvoiceFor(
+                        (int)$reservation->property_id,
+                        (int)$reservation->guest_id,
+                        (int)$reservation->id
+                    );
+                    $description = sprintf(
+                        'Room %s · %d night(s)',
+                        $reservation->room_id ? '#' . $reservation->room_id : '',
+                        $quote['nights']
+                    );
+                    $invoices->addLine($invoice, $description, (float)$quote['total'], 'reservation', (int)$reservation->id);
+                }
             }
         });
 

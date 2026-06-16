@@ -15,6 +15,7 @@ use Cake\ORM\Entity;
  * @property int|null $reservation_id
  * @property string $total
  * @property string $status   open | settled
+ * @property \Cake\I18n\DateTime|null $settled_at
  */
 class Invoice extends Entity
 {
