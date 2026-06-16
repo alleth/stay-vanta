@@ -31,6 +31,10 @@ different origins in production (CORS), same origin in dev (Vite proxy).
 - Dev server: `npm run dev` (http://localhost:5173, proxies `/api` → backend)
 - Build: `npm run build` · Preview build: `npm run preview`
 - Lint: `npm run lint` (ESLint)
+- **`frontend/package-lock.json` is git-ignored on purpose** (see `frontend/.gitignore`):
+  a Windows-generated lock omits Linux-only optional deps and breaks Cloudflare Pages'
+  (Linux) `npm ci`. Don't commit it; Cloudflare resolves deps from `package.json` instead.
+  Node 22 is pinned for the Cloudflare build.
 
 ### Local MySQL
 XAMPP MySQL must be running before backend commands that touch the DB. Start it via the
@@ -84,8 +88,9 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `src/context/AuthContext.jsx` — `useAuth()` provides `{ user, role, login, logout }`;
   resolves the current user from a stored token on boot via `/auth/me`.
 - `src/components/ProtectedRoute.jsx` wraps authed routes; pass `roles={[...]}` to restrict.
-- Module pages in `src/pages/` are currently `ModuleStub` placeholders that document the
-  planned features — replace them as modules are built.
+- All five domain module pages in `src/pages/` are implemented (see below). The only
+  remaining `ModuleStub` placeholder is `Properties.jsx`; `ModuleStub` documents planned
+  features — replace it as that page is built.
 
 ### Configuration
 - Production config is **env-driven in `config/app.php`** (committed): `Datasources.default` reads
