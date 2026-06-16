@@ -26,13 +26,13 @@ export default function Login() {
   }
 
   return (
-    <div className="d-flex align-items-center justify-content-center min-vh-100">
-      <Card style={{ width: 380 }} className="shadow-sm">
-        <Card.Body className="p-4">
-          <h1 className="h4 text-center mb-1 fw-bold">
-            Stay<span className="text-warning">Vanta</span>
+    <div className="d-flex align-items-center justify-content-center min-vh-100 px-3">
+      <Card style={{ width: 400 }} className="shadow-sm">
+        <Card.Body className="p-5">
+          <h1 className="sv-serif text-center mb-1 fw-bold" style={{ fontSize: '2rem' }}>
+            Stay<span className="sv-accent">Vanta</span>
           </h1>
-          <p className="text-center text-muted small mb-4">
+          <p className="text-center small mb-4" style={{ color: 'var(--sv-muted)' }}>
             All-in-One Hotel &amp; Resort Management
           </p>
           {error && <Alert variant="danger">{error}</Alert>}

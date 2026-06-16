@@ -28,20 +28,20 @@ export default function Layout() {
 
   return (
     <div className="d-flex flex-column min-vh-100">
-      <Navbar bg="dark" variant="dark" expand="lg" className="px-3">
-        <Navbar.Brand as={NavLink} to="/" className="fw-bold">
-          Stay<span className="text-warning">Vanta</span>
+      <Navbar expand="lg" className="sv-navbar px-3 px-lg-4 py-2">
+        <Navbar.Brand as={NavLink} to="/" className="sv-serif fw-bold fs-4 m-0">
+          Stay<span className="sv-accent">Vanta</span>
         </Navbar.Brand>
         <Navbar.Toggle />
         <Navbar.Collapse>
-          <Nav className="me-auto">
+          <Nav className="sv-nav me-auto ms-lg-4 gap-1">
             {items.map((n) => (
               <Nav.Link key={n.to} as={NavLink} to={n.to} end={n.end}>
                 {n.label}
               </Nav.Link>
             ))}
           </Nav>
-          <Nav className="align-items-lg-center gap-2">
+          <Nav className="align-items-lg-center gap-3">
             {isOwner && properties.length > 0 && (
               <Form.Select
                 size="sm"
@@ -56,17 +56,17 @@ export default function Layout() {
                 ))}
               </Form.Select>
             )}
-            <span className="text-light small">
-              {user?.name} <Badge bg="secondary">{role}</Badge>
+            <span className="small text-nowrap" style={{ color: 'var(--sv-text)' }}>
+              {user?.name} <Badge bg="secondary" className="ms-1">{role}</Badge>
             </span>
-            <Button size="sm" variant="outline-light" onClick={handleLogout}>
+            <Button size="sm" variant="outline-secondary" onClick={handleLogout}>
               Logout
             </Button>
           </Nav>
         </Navbar.Collapse>
       </Navbar>
 
-      <Container fluid className="py-4 flex-grow-1">
+      <Container className="py-4 py-lg-5 flex-grow-1" style={{ maxWidth: 1200 }}>
         <Outlet />
       </Container>
     </div>

@@ -1,9 +1,156 @@
-@import 'bootstrap/dist/css/bootstrap.min.css';
-@import 'tailwindcss';
+/* Elegant serif for the brand & headings; clean sans for everything else. */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap');
 
-/* StayVanta global styles. Bootstrap provides the component baseline;
-   Tailwind utilities layer on top for spacing/layout tweaks. */
+/* --- Cascade layer order (this is the fix that makes Tailwind actually work) ---
+   Tailwind v4 emits its utilities into @layer utilities. Bootstrap, imported as
+   plain CSS, is UNLAYERED and therefore always beats anything in a layer — so
+   Tailwind classes were being silently overridden. By importing Bootstrap into a
+   layer declared *before* `utilities`, Tailwind utilities now win conflicts, while
+   React-Bootstrap components still get their component styling (Bootstrap sits
+   after Tailwind's `base`/preflight). `app` holds our minimalist theme overrides. */
+@layer theme, base, bootstrap, app, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/preflight.css' layer(base);
+@import 'bootstrap/dist/css/bootstrap.min.css' layer(bootstrap);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/* --- Design tokens: clean, warm, boutique-hotel palette --- */
+:root {
+  --sv-bg: #f7f5f1;          /* warm off-white canvas */
+  --sv-surface: #ffffff;
+  --sv-border: #e8e2d8;      /* soft warm stone */
+  --sv-text: #2b2925;        /* warm near-black */
+  --sv-muted: #8a8276;       /* warm gray */
+  --sv-ink: #232c2b;         /* deep charcoal-green for primary actions */
+  --sv-ink-hover: #303d3b;
+  --sv-accent: #b08d57;      /* resort gold */
+  --sv-accent-soft: #f3ecdf;
+
+  --sv-radius: 0.75rem;
+  --sv-shadow: 0 1px 2px rgba(43, 41, 37, 0.04), 0 1px 3px rgba(43, 41, 37, 0.06);
+
+  /* Map Bootstrap's body tokens onto the palette. */
+  --bs-body-bg: var(--sv-bg);
+  --bs-body-color: var(--sv-text);
+  --bs-border-color: var(--sv-border);
+  --bs-link-color: var(--sv-ink);
+  --bs-link-hover-color: var(--sv-accent);
+}
+
 body {
   margin: 0;
-  background-color: #f5f6f8;
+  background-color: var(--sv-bg);
+  color: var(--sv-text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Minimalist component refinements. Kept in @layer app so any Tailwind utility
+   you add in markup still overrides these. */
+@layer app {
+  .sv-serif {
+    font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+    letter-spacing: -0.01em;
+  }
+  .sv-accent { color: var(--sv-accent); }
+
+  h1, h2, h3, .h1, .h2, .h3 { color: var(--sv-text); }
+
+  /* Cards — flat, thin warm border, gentle radius, whisper of shadow. */
+  .card {
+    border: 1px solid var(--sv-border);
+    border-radius: var(--sv-radius);
+    box-shadow: none;
+    background-color: var(--sv-surface);
+  }
+  .card.shadow-sm { box-shadow: var(--sv-shadow) !important; }
+  .card-header {
+    background-color: transparent;
+    border-bottom: 1px solid var(--sv-border);
+    font-weight: 600;
+  }
+
+  /* Buttons — calm, minimal, no gradients. */
+  .btn { border-radius: 0.5rem; font-weight: 500; }
+  .btn-primary {
+    --bs-btn-bg: var(--sv-ink);
+    --bs-btn-border-color: var(--sv-ink);
+    --bs-btn-hover-bg: var(--sv-ink-hover);
+    --bs-btn-hover-border-color: var(--sv-ink-hover);
+    --bs-btn-active-bg: #1b2322;
+    --bs-btn-active-border-color: #1b2322;
+    --bs-btn-disabled-bg: var(--sv-ink);
+    --bs-btn-disabled-border-color: var(--sv-ink);
+  }
+  .btn-outline-secondary {
+    --bs-btn-color: var(--sv-text);
+    --bs-btn-border-color: var(--sv-border);
+    --bs-btn-hover-bg: var(--sv-accent-soft);
+    --bs-btn-hover-border-color: var(--sv-border);
+    --bs-btn-hover-color: var(--sv-text);
+  }
+  .btn-warning {
+    --bs-btn-bg: var(--sv-accent);
+    --bs-btn-border-color: var(--sv-accent);
+    --bs-btn-color: #fff;
+    --bs-btn-hover-bg: #9c7a47;
+    --bs-btn-hover-border-color: #9c7a47;
+    --bs-btn-hover-color: #fff;
+  }
+
+  /* Forms — quiet borders, soft focus ring in the accent tone. */
+  .form-control, .form-select {
+    border-color: var(--sv-border);
+    border-radius: 0.5rem;
+    color: var(--sv-text);
+  }
+  .form-control:focus, .form-select:focus {
+    border-color: var(--sv-accent);
+    box-shadow: 0 0 0 3px rgba(176, 141, 87, 0.15);
+  }
+  .form-label { font-weight: 500; font-size: 0.875rem; color: var(--sv-text); }
+
+  /* Tables — airy, light rules, quiet uppercase headers. */
+  .table {
+    --bs-table-border-color: var(--sv-border);
+    --bs-table-bg: transparent;
+    margin-bottom: 0;
+  }
+  .table > :not(caption) > * > * { padding: 0.75rem 1rem; }
+  .table > thead th {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    color: var(--sv-muted);
+    border-bottom: 1px solid var(--sv-border);
+    background: transparent;
+  }
+
+  /* Badges — soft, muted chips. */
+  .badge.bg-secondary {
+    background-color: var(--sv-accent-soft) !important;
+    color: #8a6d3f;
+    font-weight: 500;
+  }
+
+  /* Navbar — light, minimal, single hairline border. */
+  .sv-navbar {
+    background-color: var(--sv-surface);
+    border-bottom: 1px solid var(--sv-border);
+  }
+  .sv-nav .nav-link {
+    color: var(--sv-muted);
+    font-weight: 500;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    transition: color 0.15s ease, background-color 0.15s ease;
+  }
+  .sv-nav .nav-link:hover { color: var(--sv-text); }
+  .sv-nav .nav-link.active {
+    color: var(--sv-text);
+    background-color: var(--sv-accent-soft);
+  }
 }
