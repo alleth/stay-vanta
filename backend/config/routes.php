@@ -63,6 +63,13 @@ return function (RouteBuilder $routes): void {
         // Properties (hotels & resorts).
         $builder->get('/properties', ['controller' => 'Properties', 'action' => 'index']);
         $builder->post('/properties', ['controller' => 'Properties', 'action' => 'add']);
+        $builder->patch('/properties/{id}', ['controller' => 'Properties', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->put('/properties/{id}', ['controller' => 'Properties', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+
+        // Platform-owner reports.
+        $builder->get('/reports/overview', ['controller' => 'Reports', 'action' => 'overview']);
 
         // Staff (users).
         $builder->get('/users', ['controller' => 'Users', 'action' => 'index']);

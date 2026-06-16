@@ -15,6 +15,8 @@ class PropertiesTable extends Table
 {
     public const TYPES = ['hotel', 'resort'];
 
+    public const SUBSCRIPTION_STATUSES = ['active', 'inactive'];
+
     public function initialize(array $config): void
     {
         parent::initialize($config);
@@ -36,6 +38,14 @@ class PropertiesTable extends Table
             ->notEmptyString('name');
 
         $validator->inList('type', self::TYPES);
+
+        $validator
+            ->inList('subscription_status', self::SUBSCRIPTION_STATUSES)
+            ->allowEmptyString('subscription_status');
+
+        $validator
+            ->date('subscription_expires_at')
+            ->allowEmptyDate('subscription_expires_at');
 
         return $validator;
     }

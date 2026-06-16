@@ -56,4 +56,35 @@ class PropertiesController extends AppController
         $this->set('property', $property);
         $this->viewBuilder()->setOption('serialize', ['property']);
     }
+
+    /**
+     * PATCH|PUT /api/properties/{id}  (owner only)
+     *
+     * Edit a hotel/resort — including its subscription state (the active /
+     * inactive flag the owner reports on).
+     */
+    public function edit(int $id): void
+    {
+        $this->request->allowMethod(['patch', 'put']);
+        if (!$this->userHasRole('owner')) {
+            throw new ForbiddenException('Only the platform owner can edit properties.');
+        }
+
+        $properties = $this->fetchTable('Properties');
+        $property = $properties->get($id);
+        $properties->patchEntity($property, $this->request->getData(), [
+            'fields' => ['name', 'type', 'address', 'is_active', 'subscription_status', 'subscription_expires_at'],
+        ]);
+
+        if (!$properties->save($property)) {
+            $this->response = $this->response->withStatus(422);
+            $this->set('errors', $property->getErrors());
+            $this->viewBuilder()->setOption('serialize', ['errors']);
+
+            return;
+        }
+
+        $this->set('property', $property);
+        $this->viewBuilder()->setOption('serialize', ['property']);
+    }
 }

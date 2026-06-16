@@ -8,6 +8,7 @@ import FrontDesk from './pages/FrontDesk'
 import Guests from './pages/Guests'
 import Food from './pages/Food'
 import Properties from './pages/Properties'
+import Reports from './pages/Reports'
 import Staff from './pages/Staff'
 
 export default function App() {
@@ -32,6 +33,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={['owner']}>
               <Properties />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="reports"
+          element={
+            <ProtectedRoute roles={['owner']}>
+              <Reports />
             </ProtectedRoute>
           }
         />

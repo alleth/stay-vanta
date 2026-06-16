@@ -114,7 +114,8 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 
 ## API endpoints (implemented)
 - `POST /api/auth/login` · `GET /api/auth/me` · `POST /api/auth/logout`
-- `GET|POST /api/properties` (owner-only create)
+- `GET|POST /api/properties` (owner-only create) · `PATCH|PUT /api/properties/{id}` (owner-only edit, incl. subscription_status)
+- `GET /api/reports/overview` (owner-only) — platform reports: registered hotel/resort count + list, active vs inactive subscription counts
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; see `UsersController`)
 - `GET|POST /api/inventory-categories`
 - `GET|POST /api/inventory-items` · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (edit never touches quantity)
@@ -130,7 +131,17 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 Implemented frontend pages (all five modules): `src/pages/Inventory.jsx`, `src/pages/Staff.jsx`,
 `src/pages/FrontDesk.jsx` (Reservations / Rooms / Rates), `src/pages/Guests.jsx`
 (count cards + registry + stay history), and `src/pages/Food.jsx` (Orders / Menu / Invoices).
-No `ModuleStub` placeholders remain.
+The owner-only `src/pages/Reports.jsx` shows platform subscription reporting. `Properties.jsx`
+is still a `ModuleStub`.
+
+### Subscription model & owner reports
+StayVanta is subscription-based: the `owner` role is the **platform operator** (no property),
+each `properties` row is a subscribing **hotel/resort**, and `admin`/`receptionist` are that
+hotel's staff. `properties.subscription_status` (`active`|`inactive`) + `subscription_expires_at`
+(nullable date) hold the subscription; the `Property::subscription_active` virtual is the source
+of truth (status `active` AND not past expiry). `ReportsController::overview` (owner-only) returns
+the registered-hotel count/list and active/inactive subscription counts; the owner flips a
+subscription via `PATCH /api/properties/{id}` (`PropertiesController::edit`).
 
 ### Food (orders, menu, invoices)
 `FoodOrdersTable::place()` is the orchestrator: in one transaction it saves the order + lines,
