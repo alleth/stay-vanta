@@ -129,13 +129,6 @@ body {
     background: transparent;
   }
 
-  /* Badges — soft, neutral chips. */
-  .badge.bg-secondary {
-    background-color: var(--sv-subtle) !important;
-    color: var(--sv-muted);
-    font-weight: 500;
-  }
-
   /* Navbar — light, minimal, single hairline border. */
   .sv-navbar {
     background-color: var(--sv-surface);
@@ -153,4 +146,14 @@ body {
     color: var(--sv-text);
     background-color: var(--sv-subtle);
   }
+}
+
+/* Badges — soft, neutral chips. Bootstrap sets `.bg-secondary`'s background
+   with `!important` (which a layered override can't beat), so instead we feed
+   that rule a light value through the variable it reads — `--bs-secondary-rgb`
+   — and only restyle the text. Result: a light chip with readable dark text. */
+.badge.bg-secondary {
+  --bs-secondary-rgb: 241, 241, 243;
+  color: #5b6270 !important;
+  font-weight: 500;
 }
