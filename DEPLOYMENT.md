@@ -104,3 +104,14 @@ to the custom domains.
 
 `config/app_local.php` (git-ignored) overrides the env-driven defaults locally, so
 none of the above affects your XAMPP setup. See `README.md` / `CLAUDE.md`.
+
+## Troubleshooting
+
+- **Pages build: `npm ci ... package.json and package-lock.json not in sync`
+  (`Missing: @emnapi/*`).** Cloudflare's build image bundles **npm 10**, which records
+  optional transitive deps differently from newer npm. Regenerate the lockfile with the
+  matching npm: `cd frontend && rm -f package-lock.json && npx npm@10.9.2 install`, verify
+  with `npx npm@10.9.2 ci --dry-run`, then commit `package-lock.json`.
+- **Build keeps using an old commit.** "Retry deployment" on Railway *and* Cloudflare re-runs
+  the original commit. To deploy new code, push a commit (auto-deploys the new HEAD) or use
+  "Create deployment", and check the newest entry's commit hash — don't click Retry.
