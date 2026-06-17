@@ -173,7 +173,9 @@ movements + `removeLinesFor()`). Menu management is owner/admin-only; a menu ite
 `inventory_item_id` (optional — unlinked items, e.g. prepared dishes, don't touch stock).
 Note: `Table` subclasses get other tables via `TableRegistry::getTableLocator()->get()`
 (there is no `$this->getTableLocator()` on `Table` in CakePHP 5). Active-property selection for owners is handled by
-`src/context/PropertyContext.jsx` + the selector in `Layout.jsx`. Shared UI helpers:
+`src/context/PropertyContext.jsx` (`useProperty()` → `propertyId`): staff are bound to their
+own `property_id`; an owner's chosen property defaults to the first and persists in localStorage
+(the navbar property selector was removed). Shared UI helpers:
 `src/hooks/useSubmit.js` (form submit + CakePHP validation-error extraction) and
 `src/utils/format.js` (`formatMoney`, PHP peso).
 
@@ -211,4 +213,7 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   orders (`food_orders`). Payment is `paid` / `charge_to_room` / `unpaid`; charge-to-room flows
   onto the guest's `invoices`. Cancel reverses stock + invoice. See `FoodOrdersTable::place()`.
 
-The full schema is one migration: `backend/config/Migrations/20260615000000_InitialSchema.php`.
+The base schema is `backend/config/Migrations/20260615000000_InitialSchema.php`; later
+migrations add the subscription columns (`AddSubscriptionFieldsToProperties`) and revenue-tracking
+columns (`AddRevenueFields` — `invoices.settled_at`, etc.). `schema-dump-default.lock` is the
+regenerated dump.

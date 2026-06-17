@@ -37,6 +37,14 @@ function Loading() {
   )
 }
 
+// Surface the real failure instead of a blanket message: prefer the API's JSON
+// error, fall back to the HTTP status, then to a network-level hint.
+function dashboardError(err) {
+  const res = err?.response
+  if (res) return res.data?.message || `Request failed (${res.status}).`
+  return 'Could not reach the server. Please try again.'
+}
+
 function SectionTitle({ children }) {
   return (
     <h2 className="h6 text-uppercase mb-3" style={{ color: 'var(--sv-muted)', letterSpacing: '0.04em' }}>
@@ -51,7 +59,7 @@ function OwnerDashboard({ user }) {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    ownerDashboard().then(setData).catch(() => setError('Could not load the dashboard.'))
+    ownerDashboard().then(setData).catch((err) => setError(dashboardError(err)))
   }, [])
 
   if (error) return <Alert variant="danger">{error}</Alert>
@@ -94,7 +102,7 @@ function AdminDashboard({ user }) {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    adminDashboard().then(setData).catch(() => setError('Could not load the dashboard.'))
+    adminDashboard().then(setData).catch((err) => setError(dashboardError(err)))
   }, [])
 
   if (error) return <Alert variant="danger">{error}</Alert>

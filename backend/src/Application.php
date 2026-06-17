@@ -64,6 +64,14 @@ class Application extends BaseApplication
     public function middleware(MiddlewareQueue $middlewareQueue): MiddlewareQueue
     {
         $middlewareQueue
+            // Allow the React SPA to call the JSON API cross-origin. This is the
+            // OUTERMOST middleware on purpose: it must decorate *every* response —
+            // including error responses produced by ErrorHandlerMiddleware and
+            // rejections from HostHeaderMiddleware below — with CORS headers.
+            // Otherwise a 4xx/5xx comes back without Access-Control-Allow-Origin and
+            // the browser reports an opaque CORS failure that masks the real error.
+            ->add(new CorsMiddleware())
+
             // Catch any exceptions in the lower layers,
             // and make an error page/response
             ->add(new ErrorHandlerMiddleware(Configure::read('Error'), $this))
@@ -72,9 +80,6 @@ class Application extends BaseApplication
             // In production, ensures App.fullBaseUrl is configured and validates
             // the incoming Host header against it.
             ->add(new HostHeaderMiddleware())
-
-            // Allow the React SPA to call the JSON API cross-origin.
-            ->add(new CorsMiddleware())
 
             // Handle plugin/theme assets like CakePHP normally does.
             ->add(new AssetMiddleware([
