@@ -49,12 +49,15 @@ class GuestsController extends AppController
 
         // Guests currently staying = distinct guests with a checked-in reservation.
         $reservations = $this->fetchTable('Reservations');
-        $inHouse = $this->scopeToProperty(
-            $reservations->find()->where([
-                'Reservations.status' => 'checked_in',
-                'Reservations.guest_id IS NOT' => null,
-            ])
-        )->distinct(['Reservations.guest_id'])->count();
+        $inHouse = $this->countDistinct(
+            $this->scopeToProperty(
+                $reservations->find()->where([
+                    'Reservations.status' => 'checked_in',
+                    'Reservations.guest_id IS NOT' => null,
+                ])
+            ),
+            'Reservations.guest_id'
+        );
 
         $this->set('stats', compact('total', 'local', 'foreign', 'inHouse'));
         $this->viewBuilder()->setOption('serialize', ['stats']);

@@ -80,6 +80,24 @@ class AppController extends Controller
     }
 
     /**
+     * Count the distinct values of a column for a query.
+     *
+     * NOTE: do NOT use `$query->distinct(['col'])->count()` for this — in
+     * CakePHP that emits `GROUP BY col` while still selecting every column, and
+     * the count subquery then fails on MySQL's ONLY_FULL_GROUP_BY (the default
+     * on MySQL 8 / Railway) with "...id isn't in GROUP BY". This emits a plain
+     * `COUNT(DISTINCT col)` instead. `$column` must be a trusted identifier
+     * (never user input — it goes into the SQL verbatim).
+     */
+    protected function countDistinct(\Cake\ORM\Query\SelectQuery $query, string $column): int
+    {
+        $query->select(['c' => $query->func()->count($query->expr('DISTINCT ' . $column))]);
+        $row = $query->disableHydration()->first();
+
+        return (int)($row['c'] ?? 0);
+    }
+
+    /**
      * True when the current user holds any of the given roles.
      */
     protected function userHasRole(string ...$roles): bool

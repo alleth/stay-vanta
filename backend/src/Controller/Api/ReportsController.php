@@ -84,11 +84,12 @@ class ReportsController extends AppController
         $occupiedRooms = $this->fetchTable('Rooms')
             ->find()->where(['property_id' => $propertyId, 'status' => 'occupied'])->count();
 
-        $guestsToday = $this->fetchTable('Reservations')
-            ->find()
-            ->where(['property_id' => $propertyId, 'status' => 'checked_in', 'guest_id IS NOT' => null])
-            ->distinct(['guest_id'])
-            ->count();
+        $guestsToday = $this->countDistinct(
+            $this->fetchTable('Reservations')
+                ->find()
+                ->where(['property_id' => $propertyId, 'status' => 'checked_in', 'guest_id IS NOT' => null]),
+            'guest_id'
+        );
 
         $openFoodOrders = $this->fetchTable('FoodOrders')
             ->find()->where(['property_id' => $propertyId, 'status' => 'open'])->count();
