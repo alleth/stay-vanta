@@ -108,6 +108,10 @@ return function (RouteBuilder $routes): void {
 
         $builder->get('/room-rates', ['controller' => 'RoomRates', 'action' => 'index']);
         $builder->post('/room-rates', ['controller' => 'RoomRates', 'action' => 'add']);
+        $builder->patch('/room-rates/{id}', ['controller' => 'RoomRates', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->put('/room-rates/{id}', ['controller' => 'RoomRates', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         $builder->get('/reservations', ['controller' => 'Reservations', 'action' => 'index']);
         $builder->post('/reservations', ['controller' => 'Reservations', 'action' => 'add']);
@@ -117,6 +121,7 @@ return function (RouteBuilder $routes): void {
 
         // Guests module.
         $builder->get('/guests/stats', ['controller' => 'Guests', 'action' => 'stats']);
+        $builder->get('/guests/match', ['controller' => 'Guests', 'action' => 'match']);
         $builder->get('/guests', ['controller' => 'Guests', 'action' => 'index']);
         $builder->post('/guests', ['controller' => 'Guests', 'action' => 'add']);
         $builder->get('/guests/{id}', ['controller' => 'Guests', 'action' => 'view'])

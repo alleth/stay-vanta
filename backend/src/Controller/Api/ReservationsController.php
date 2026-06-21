@@ -130,6 +130,13 @@ class ReservationsController extends AppController
             $reservation->set('status', $rule['to']);
             // Re-stamp: this receptionist is now the last to act on the booking.
             $reservation->set('receptionist_id', (int)$this->currentUser->id);
+            // Log when the check-in/out *event* actually happened (distinct from
+            // the planned check_in/check_out dates) for the Front Desk audit log.
+            if ($transition === 'check-in') {
+                $reservation->set('checked_in_at', new \Cake\I18n\DateTime());
+            } elseif ($transition === 'check-out') {
+                $reservation->set('checked_out_at', new \Cake\I18n\DateTime());
+            }
             $reservations->saveOrFail($reservation);
 
             if ($reservation->room_id) {
@@ -184,6 +191,9 @@ class ReservationsController extends AppController
             'property_id' => $propertyId,
             'full_name' => $name,
             'nationality' => $this->request->getData('nationality'),
+            'address' => $this->request->getData('address'),
+            'contact_number' => $this->request->getData('contact_number'),
+            'email' => $this->request->getData('email'),
             'guest_type' => $this->request->getData('guest_type') ?? 'local',
         ]);
         $guests->saveOrFail($guest);

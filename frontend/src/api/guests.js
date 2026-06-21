@@ -9,6 +9,12 @@ export const listGuests = (propertyId) =>
 export const guestStats = (propertyId) =>
   client.get('/guests/stats', { params: withProp({}, propertyId) }).then((r) => r.data.stats)
 
+// Look for existing guests that look like the same person (name + email/contact).
+export const matchGuests = ({ full_name, email, contact_number }, propertyId) =>
+  client
+    .get('/guests/match', { params: withProp({ full_name, email, contact_number }, propertyId) })
+    .then((r) => r.data.duplicates)
+
 export const getGuest = (id) =>
   client.get(`/guests/${id}`).then((r) => r.data.guest)
 

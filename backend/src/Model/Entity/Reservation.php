@@ -18,6 +18,8 @@ use Cake\ORM\Entity;
  * @property int|null $receptionist_id
  * @property \Cake\I18n\Date|null $check_in
  * @property \Cake\I18n\Date|null $check_out
+ * @property \Cake\I18n\DateTime|null $checked_in_at   when check-in actually happened
+ * @property \Cake\I18n\DateTime|null $checked_out_at  when check-out actually happened
  * @property string $status         booked | checked_in | checked_out | cancelled
  * @property string $source         walk_in | cocotel | agoda | trip_com | tripadvisor
  * @property string|null $promo_rate
@@ -33,6 +35,8 @@ class Reservation extends Entity
         'receptionist_id' => true,
         'check_in' => true,
         'check_out' => true,
+        'checked_in_at' => true,
+        'checked_out_at' => true,
         'status' => true,
         'source' => true,
         'promo_rate' => true,

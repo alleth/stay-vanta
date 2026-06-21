@@ -64,6 +64,32 @@ class GuestsController extends AppController
     }
 
     /**
+     * GET /api/guests/match?full_name=&email=&contact_number=
+     *
+     * Returns existing guests that look like the same person (see
+     * GuestsTable::findDuplicates). The Front Desk / Guests forms call this to
+     * warn the receptionist before creating a possible duplicate.
+     */
+    public function match(): void
+    {
+        $propertyId = $this->effectivePropertyId();
+        if ($propertyId === null) {
+            throw new BadRequestException('property_id is required.');
+        }
+
+        $guests = $this->fetchTable('Guests');
+        $duplicates = $guests->findDuplicates(
+            $propertyId,
+            (string)$this->request->getQuery('full_name'),
+            $this->request->getQuery('email'),
+            $this->request->getQuery('contact_number')
+        );
+
+        $this->set('duplicates', $duplicates);
+        $this->viewBuilder()->setOption('serialize', ['duplicates']);
+    }
+
+    /**
      * GET /api/guests/{id} — guest with reservation history.
      */
     public function view(int $id): void
@@ -90,10 +116,32 @@ class GuestsController extends AppController
         }
 
         $guests = $this->fetchTable('Guests');
+
+        // De-dup guard: unless the user explicitly chose "create anyway" (force),
+        // surface look-alike guests so they can reuse one instead.
+        if (!$this->request->getData('force')) {
+            $duplicates = $guests->findDuplicates(
+                $propertyId,
+                (string)$this->request->getData('full_name'),
+                $this->request->getData('email'),
+                $this->request->getData('contact_number')
+            );
+            if ($duplicates) {
+                $this->response = $this->response->withStatus(409);
+                $this->set('duplicates', $duplicates);
+                $this->viewBuilder()->setOption('serialize', ['duplicates']);
+
+                return;
+            }
+        }
+
         $guest = $guests->newEntity([
             'property_id' => $propertyId,
             'full_name' => $this->request->getData('full_name'),
             'nationality' => $this->request->getData('nationality'),
+            'address' => $this->request->getData('address'),
+            'contact_number' => $this->request->getData('contact_number'),
+            'email' => $this->request->getData('email'),
             'guest_type' => $this->request->getData('guest_type') ?? 'local',
         ]);
 
@@ -120,6 +168,9 @@ class GuestsController extends AppController
         $guests->patchEntity($guest, [
             'full_name' => $this->request->getData('full_name'),
             'nationality' => $this->request->getData('nationality'),
+            'address' => $this->request->getData('address'),
+            'contact_number' => $this->request->getData('contact_number'),
+            'email' => $this->request->getData('email'),
             'guest_type' => $this->request->getData('guest_type'),
         ], ['accessibleFields' => ['property_id' => false]]);
 

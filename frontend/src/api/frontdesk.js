@@ -20,6 +20,9 @@ export const listRoomRates = (propertyId) =>
 export const createRoomRate = (data, propertyId) =>
   client.post('/room-rates', withProp(data, propertyId)).then((r) => r.data.roomRate)
 
+export const updateRoomRate = (id, data) =>
+  client.patch(`/room-rates/${id}`, data).then((r) => r.data.roomRate)
+
 // Reservations
 export const listReservations = (propertyId, params = {}) =>
   client.get('/reservations', { params: withProp(params, propertyId) }).then((r) => r.data.reservations)

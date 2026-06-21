@@ -16,8 +16,10 @@ use Cake\ORM\Entity;
  * @property int $property_id
  * @property int $inventory_category_id
  * @property string $name
+ * @property string $tracking_type  consumable | reusable
  * @property string $unit
- * @property string $quantity
+ * @property string $quantity        for reusables: the count currently available
+ * @property string|null $total_quantity  units owned (reusables only); in-use = total - quantity
  * @property string $reorder_level
  * @property int|null $last_receptionist_id
  */
@@ -27,8 +29,9 @@ class InventoryItem extends Entity
         'property_id' => true,
         'inventory_category_id' => true,
         'name' => true,
+        'tracking_type' => true,
         'unit' => true,
         'reorder_level' => true,
-        // quantity & last_receptionist_id are set only via stock movements.
+        // quantity, total_quantity & last_receptionist_id are set only via stock movements.
     ];
 }

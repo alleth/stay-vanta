@@ -62,4 +62,33 @@ class RoomRatesController extends AppController
         $this->set('roomRate', $rate);
         $this->viewBuilder()->setOption('serialize', ['roomRate']);
     }
+
+    /**
+     * PATCH/PUT /api/room-rates/{id} — fix a mistyped name, target room, or rate.
+     */
+    public function edit(int $id): void
+    {
+        $this->request->allowMethod(['patch', 'put', 'post']);
+
+        $rates = $this->fetchTable('RoomRates');
+        $rate = $this->scopeToProperty($rates->find()->where(['RoomRates.id' => $id]))->firstOrFail();
+
+        // room_id may be intentionally set to null ("all rooms"); read it raw.
+        $rates->patchEntity($rate, [
+            'name' => $this->request->getData('name'),
+            'base_rate' => $this->request->getData('base_rate'),
+            'room_id' => $this->request->getData('room_id') ?: null,
+        ], ['accessibleFields' => ['property_id' => false]]);
+
+        if (!$rates->save($rate)) {
+            $this->response = $this->response->withStatus(422);
+            $this->set('errors', $rate->getErrors());
+            $this->viewBuilder()->setOption('serialize', ['errors']);
+
+            return;
+        }
+
+        $this->set('roomRate', $rate);
+        $this->viewBuilder()->setOption('serialize', ['roomRate']);
+    }
 }

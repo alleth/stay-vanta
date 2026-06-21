@@ -44,6 +44,63 @@ class GuestsTable extends Table
 
         $validator->inList('guest_type', self::TYPES);
 
+        $validator
+            ->email('email')
+            ->allowEmptyString('email');
+
+        $validator
+            ->maxLength('contact_number', 50)
+            ->allowEmptyString('contact_number');
+
+        $validator
+            ->maxLength('address', 255)
+            ->allowEmptyString('address');
+
         return $validator;
+    }
+
+    /**
+     * Find existing guests in a property that look like the same person:
+     * the name matches AND (email matches OR contact number matches). Used to
+     * warn about — and avoid — duplicate guest records. Returns an empty list
+     * when there is no contact point to match on (we won't merge two same-named
+     * people on name alone).
+     *
+     * @return array<\App\Model\Entity\Guest>
+     */
+    public function findDuplicates(
+        int $propertyId,
+        string $fullName,
+        ?string $email = null,
+        ?string $contact = null,
+        ?int $excludeId = null,
+    ): array {
+        $fullName = trim($fullName);
+        $email = trim((string)$email);
+        $contact = trim((string)$contact);
+        if ($fullName === '' || ($email === '' && $contact === '')) {
+            return [];
+        }
+
+        // full_name compares case-insensitively via the column's CI collation.
+        $query = $this->find()->where([
+            'Guests.property_id' => $propertyId,
+            'Guests.full_name' => $fullName,
+        ]);
+
+        $or = [];
+        if ($email !== '') {
+            $or['Guests.email'] = $email;
+        }
+        if ($contact !== '') {
+            $or['Guests.contact_number'] = $contact;
+        }
+        $query->where(fn($exp) => $exp->or($or));
+
+        if ($excludeId !== null) {
+            $query->where(['Guests.id !=' => $excludeId]);
+        }
+
+        return $query->all()->toList();
     }
 }

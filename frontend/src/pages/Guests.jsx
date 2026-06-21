@@ -3,8 +3,7 @@ import {
   Row, Col, Card, Table, Button, Badge, Modal, Form, InputGroup, Alert, Spinner, ListGroup,
 } from 'react-bootstrap'
 import { useProperty } from '../context/PropertyContext'
-import { useSubmit } from '../hooks/useSubmit'
-import { listGuests, guestStats, getGuest, createGuest, updateGuest } from '../api/guests'
+import { listGuests, guestStats, getGuest, createGuest, updateGuest, matchGuests } from '../api/guests'
 
 const TYPE_VARIANT = { local: 'info', foreign: 'warning' }
 
@@ -86,17 +85,28 @@ export default function Guests() {
         ) : (
           <Table responsive hover className="mb-0 align-middle">
             <thead>
-              <tr><th>Name</th><th>Type</th><th>Nationality</th><th className="text-end">Actions</th></tr>
+              <tr>
+                <th>Name</th><th>Type</th><th>Nationality</th><th>Contact</th>
+                <th className="text-end">Actions</th>
+              </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={4} className="text-center text-muted py-4">No guests found.</td></tr>
+                <tr><td colSpan={5} className="text-center text-muted py-4">No guests found.</td></tr>
               )}
               {filtered.map((g) => (
                 <tr key={g.id}>
                   <td className="fw-semibold">{g.full_name}</td>
                   <td><Badge bg={TYPE_VARIANT[g.guest_type]}>{g.guest_type}</Badge></td>
                   <td>{g.nationality ?? '—'}</td>
+                  <td className="small">
+                    {g.contact_number || g.email ? (
+                      <>
+                        {g.contact_number && <div>{g.contact_number}</div>}
+                        {g.email && <div className="text-muted">{g.email}</div>}
+                      </>
+                    ) : '—'}
+                  </td>
                   <td className="text-end text-nowrap">
                     <Button size="sm" variant="outline-secondary" className="me-1"
                       onClick={() => setModal({ type: 'view', id: g.id })}>History</Button>
@@ -144,20 +154,66 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
     full_name: guest?.full_name ?? '',
     guest_type: guest?.guest_type ?? 'local',
     nationality: guest?.nationality ?? '',
+    address: guest?.address ?? '',
+    contact_number: guest?.contact_number ?? '',
+    email: guest?.email ?? '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
-  const { run, busy, err } = useSubmit(async () => {
-    if (editing) await updateGuest(guest.id, form)
-    else await createGuest(form, propertyId)
-    onSaved()
-  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [duplicates, setDuplicates] = useState(null) // null = not checked; [] = none
+
+  async function save(force) {
+    setBusy(true)
+    setErr(null)
+    try {
+      if (editing) {
+        await updateGuest(guest.id, form)
+      } else {
+        if (!force) {
+          // Warn before creating a look-alike guest (same name + email/contact).
+          const matches = await matchGuests(form, propertyId)
+          if (matches.length) { setDuplicates(matches); setBusy(false); return }
+        }
+        await createGuest({ ...form, force }, propertyId)
+      }
+      onSaved()
+    } catch (ex) {
+      setErr(ex?.response?.data?.message ?? 'Save failed. Check the fields and try again.')
+      setBusy(false)
+    }
+  }
 
   return (
     <Modal show onHide={onClose} centered>
-      <Form onSubmit={run}>
+      <Form onSubmit={(e) => { e.preventDefault(); save(false) }}>
         <Modal.Header closeButton><Modal.Title>{editing ? 'Edit guest' : 'Add guest'}</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
+
+          {duplicates?.length > 0 && (
+            <Alert variant="warning">
+              <div className="fw-semibold mb-1">A matching guest already exists</div>
+              <ListGroup variant="flush" className="mb-2">
+                {duplicates.map((d) => (
+                  <ListGroup.Item key={d.id} className="px-0 py-1 bg-transparent">
+                    {d.full_name}
+                    <span className="text-muted small ms-2">
+                      {[d.contact_number, d.email].filter(Boolean).join(' · ')}
+                    </span>
+                  </ListGroup.Item>
+                ))}
+              </ListGroup>
+              <div className="small mb-2">Reuse the existing guest, or create a separate record anyway.</div>
+              <Button size="sm" variant="outline-secondary" className="me-2" onClick={onClose}>
+                Keep existing
+              </Button>
+              <Button size="sm" variant="warning" disabled={busy} onClick={() => save(true)}>
+                Create new anyway
+              </Button>
+            </Alert>
+          )}
+
           <Form.Group className="mb-3">
             <Form.Label>Full name</Form.Label>
             <Form.Control value={form.full_name} onChange={set('full_name')} required autoFocus />
@@ -175,6 +231,20 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
               <Form.Control value={form.nationality} onChange={set('nationality')} placeholder="Optional" />
             </Form.Group></Col>
           </Row>
+          <Row>
+            <Col md={6}><Form.Group className="mb-3">
+              <Form.Label>Contact number</Form.Label>
+              <Form.Control value={form.contact_number} onChange={set('contact_number')} placeholder="Optional" />
+            </Form.Group></Col>
+            <Col md={6}><Form.Group className="mb-3">
+              <Form.Label>Email</Form.Label>
+              <Form.Control type="email" value={form.email} onChange={set('email')} placeholder="Optional" />
+            </Form.Group></Col>
+          </Row>
+          <Form.Group>
+            <Form.Label>Address</Form.Label>
+            <Form.Control value={form.address} onChange={set('address')} placeholder="Optional" />
+          </Form.Group>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>

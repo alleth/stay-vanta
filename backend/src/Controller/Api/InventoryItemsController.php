@@ -61,14 +61,22 @@ class InventoryItemsController extends AppController
             throw new BadRequestException('property_id is required.');
         }
 
+        $trackingType = $this->request->getData('tracking_type') === 'reusable' ? 'reusable' : 'consumable';
+
         $items = $this->fetchTable('InventoryItems');
         $item = $items->newEntity([
             'property_id' => $propertyId,
             'inventory_category_id' => $this->request->getData('inventory_category_id'),
             'name' => $this->request->getData('name'),
+            'tracking_type' => $trackingType,
             'unit' => $this->request->getData('unit') ?? 'pcs',
             'reorder_level' => $this->request->getData('reorder_level') ?? 0,
         ]);
+        // Reusables track owned units; start the total at zero so the opening
+        // 'in' (below) can raise both available and owned together.
+        if ($trackingType === 'reusable') {
+            $item->set('total_quantity', 0);
+        }
 
         if (!$items->save($item)) {
             $this->response = $this->response->withStatus(422);
@@ -85,7 +93,8 @@ class InventoryItemsController extends AppController
                 'in',
                 $opening,
                 (int)$this->currentUser->id,
-                ['reason' => 'opening_balance']
+                ['reason' => 'opening_balance'],
+                $trackingType === 'reusable' // opening units are also owned units
             );
         }
 

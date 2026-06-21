@@ -88,9 +88,8 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `src/context/AuthContext.jsx` — `useAuth()` provides `{ user, role, login, logout }`;
   resolves the current user from a stored token on boot via `/auth/me`.
 - `src/components/ProtectedRoute.jsx` wraps authed routes; pass `roles={[...]}` to restrict.
-- All five domain module pages in `src/pages/` are implemented (see below). The only
-  remaining `ModuleStub` placeholder is `Properties.jsx`; `ModuleStub` documents planned
-  features — replace it as that page is built.
+- All five domain module pages in `src/pages/` are implemented (see below); no page is a
+  placeholder.
 
 ### Configuration
 - Production config is **env-driven in `config/app.php`** (committed): `Datasources.default` reads
@@ -122,9 +121,9 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET|POST /api/inventory-items` · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (edit never touches quantity)
 - `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (the accountability action)
 - `GET|POST /api/rooms` · `PATCH|PUT /api/rooms/{id}`
-- `GET|POST /api/room-rates[?room_id=]`
-- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}`
-- `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` · `GET|PATCH /api/guests/{id}` · `POST /api/guests`
+- `GET|POST /api/room-rates[?room_id=]` · `PATCH|PUT /api/room-rates/{id}` (fix a mistyped name/rate/target room)
+- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`)
+- `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
 - `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` (owner/admin)
 - `GET|POST /api/food-orders[?status=]` · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}`
 - `GET /api/invoices[?guest_id=&status=]` · `GET /api/invoices/{id}` · `POST /api/invoices/{id}/settle`
@@ -201,7 +200,11 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   Utensils; `inventory_categories.parent_id` models sub-groups; `inventory_categories.kind`
   tags the type. Quantities change **only** via `StockMovementsTable::record()` (transactional:
   writes the ledger row, updates `quantity`, stamps `last_receptionist_id`; rejects negative stock).
-  Use it as the template for the remaining modules.
+  Use it as the template for the remaining modules. `inventory_items.tracking_type` is
+  `consumable` (depletes on use — In/Out) or `reusable` (issued out then returned). For reusables
+  `quantity` = available on the shelf and `total_quantity` = units owned, so *in use* =
+  `total_quantity − quantity`; `record()`'s `$affectsTotal` flag moves the owned total too
+  (acquire/retire) vs. only the available count (issue/return), and blocks returning more than owned.
 - **Front Desk** (UI name for "Room Monitoring") — rooms, room rates, reservations, OTA
   sources (`reservations.source`: cocotel/agoda/trip_com/tripadvisor), senior/PWD discounts,
   additional beds.
