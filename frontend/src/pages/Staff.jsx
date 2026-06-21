@@ -21,6 +21,7 @@ export default function Staff() {
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [pending, setPending] = useState(null) // id of the user whose status is updating
   const [modal, setModal] = useState(null) // 'add' | { type: 'reset', user }
 
   const refresh = useCallback(async () => {
@@ -41,9 +42,17 @@ export default function Staff() {
     refresh()
   }, [refresh])
 
-  async function toggleActive(user) {
-    await updateStaff(user.id, { is_active: !user.is_active })
-    refresh()
+  async function toggleActive(u) {
+    setPending(u.id)
+    setError(null)
+    try {
+      await updateStaff(u.id, { is_active: !u.is_active })
+      await refresh()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Could not update the account.')
+    } finally {
+      setPending(null)
+    }
   }
 
   if (!propertyId)
@@ -99,8 +108,11 @@ export default function Staff() {
                     )}
                     {u.id !== user?.id && (
                       <Button size="sm" variant={u.is_active ? 'outline-danger' : 'outline-success'}
+                        disabled={pending !== null}
                         onClick={() => toggleActive(u)}>
-                        {u.is_active ? 'Deactivate' : 'Reactivate'}
+                        {pending === u.id
+                          ? <Spinner size="sm" />
+                          : (u.is_active ? 'Deactivate' : 'Reactivate')}
                       </Button>
                     )}
                   </td>

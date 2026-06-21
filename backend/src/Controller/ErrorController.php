@@ -55,6 +55,17 @@ class ErrorController extends AppController
     {
         parent::beforeRender($event);
 
+        // API clients must get JSON errors (with a `message`) — not the HTML
+        // error page — so the SPA can surface the real reason. Without this,
+        // production (debug off) returns HTML and the frontend only sees a
+        // generic failure.
+        if (str_starts_with($this->request->getPath(), '/api') || $this->request->is('json')) {
+            $this->viewBuilder()->setClassName('Json');
+            $this->viewBuilder()->setOption('serialize', ['message', 'code', 'url']);
+
+            return;
+        }
+
         $this->viewBuilder()->setTemplatePath('Error');
     }
 

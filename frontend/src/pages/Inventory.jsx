@@ -6,7 +6,8 @@ import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
 import {
-  listCategories, createCategory, listItems, createItem, updateItem, deleteItem, listMovements, recordMovement,
+  listCategories, createCategory, deleteCategory,
+  listItems, createItem, updateItem, deleteItem, listMovements, recordMovement,
 } from '../api/inventory'
 
 const KINDS = ['food_stock', 'hygiene', 'linen', 'utensil', 'other']
@@ -39,9 +40,10 @@ export default function Inventory() {
   const [error, setError] = useState(null)
   const [view, setView] = useState('consumable') // consumable | reusable
 
-  const [modal, setModal] = useState(null) // 'category' | 'item' | 'move'
+  const [modal, setModal] = useState(null) // 'category' | 'categories' | 'item' | 'move'
   const [moveTarget, setMoveTarget] = useState(null)
   const [editTarget, setEditTarget] = useState(null) // item being edited (null = new)
+  const [pending, setPending] = useState(null) // key of the in-flight inline action
 
   const refresh = useCallback(async () => {
     if (!propertyId) return
@@ -76,12 +78,15 @@ export default function Inventory() {
 
   async function doDeleteItem(item) {
     if (!window.confirm(`Delete "${item.name}"? This removes the item and its stock history.`)) return
+    setPending(`item-${item.id}`)
     setError(null)
     try {
       await deleteItem(item.id)
-      refresh()
+      await refresh()
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Could not delete the item.')
+    } finally {
+      setPending(null)
     }
   }
 
@@ -99,6 +104,9 @@ export default function Inventory() {
         </div>
         {canManage && (
           <div className="d-flex gap-2">
+            <Button variant="outline-secondary" onClick={() => setModal('categories')}>
+              Manage categories
+            </Button>
             <Button variant="outline-secondary" onClick={() => setModal('category')}>
               New category
             </Button>
@@ -189,11 +197,15 @@ export default function Inventory() {
                         <td className="text-end text-nowrap">
                           {canManage && (
                             <Button size="sm" variant="outline-primary" className="me-1"
+                              disabled={pending !== null}
                               onClick={() => { setEditTarget(it); setModal('item') }}>Edit</Button>
                           )}
                           {canManage && (
                             <Button size="sm" variant="outline-danger" className="me-1"
-                              onClick={() => doDeleteItem(it)}>Delete</Button>
+                              disabled={pending !== null}
+                              onClick={() => doDeleteItem(it)}>
+                              {pending === `item-${it.id}` ? <Spinner size="sm" /> : 'Delete'}
+                            </Button>
                           )}
                           {canManage && (reusable ? (
                             <ButtonGroup size="sm">
@@ -254,6 +266,14 @@ export default function Inventory() {
           onSaved={() => { setModal(null); refresh() }}
         />
       )}
+      {modal === 'categories' && (
+        <CategoriesModal
+          categories={categories}
+          items={items}
+          onClose={() => setModal(null)}
+          onChanged={refresh}
+        />
+      )}
       {modal === 'item' && (
         <ItemModal
           propertyId={propertyId}
@@ -305,6 +325,61 @@ function CategoryModal({ propertyId, onClose, onSaved }) {
           <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : 'Create'}</Button>
         </Modal.Footer>
       </Form>
+    </Modal>
+  )
+}
+
+function CategoriesModal({ categories, items, onClose, onChanged }) {
+  const [busyId, setBusyId] = useState(null)
+  const [err, setErr] = useState(null)
+  const countFor = (id) => items.filter((i) => i.inventory_category_id === id).length
+
+  async function remove(c) {
+    if (!window.confirm(`Delete category "${c.name}"?`)) return
+    setBusyId(c.id)
+    setErr(null)
+    try {
+      await deleteCategory(c.id)
+      await onChanged()
+    } catch (ex) {
+      setErr(ex?.response?.data?.message ?? 'Could not delete the category.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <Modal show onHide={onClose} centered>
+      <Modal.Header closeButton><Modal.Title>Manage categories</Modal.Title></Modal.Header>
+      <Modal.Body>
+        {err && <Alert variant="danger">{err}</Alert>}
+        {categories.length === 0 ? (
+          <p className="text-muted mb-0">No categories yet.</p>
+        ) : (
+          <ul className="list-group list-group-flush">
+            {categories.map((c) => {
+              const used = countFor(c.id)
+              return (
+                <li key={c.id} className="list-group-item d-flex justify-content-between align-items-center px-0">
+                  <span>
+                    <span className="fw-semibold">{c.name}</span>
+                    <span className="text-muted small ms-2">{c.kind?.replace('_', ' ')}</span>
+                    {used > 0 && <span className="text-muted small ms-2">· {used} item(s)</span>}
+                  </span>
+                  <Button size="sm" variant="outline-danger" disabled={busyId !== null || used > 0}
+                    title={used > 0 ? 'Move or delete its items first' : 'Delete category'}
+                    onClick={() => remove(c)}>
+                    {busyId === c.id ? <Spinner size="sm" /> : 'Delete'}
+                  </Button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
+      </Modal.Footer>
     </Modal>
   )
 }

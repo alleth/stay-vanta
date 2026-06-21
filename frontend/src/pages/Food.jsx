@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Row, Col, Alert, Spinner, InputGroup,
 } from 'react-bootstrap'
@@ -29,6 +29,7 @@ export default function Food() {
   const [guests, setGuests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [pending, setPending] = useState(null) // key of the in-flight inline action
   const [modal, setModal] = useState(null) // 'order' | 'menu' | { type:'menu', item }
 
   const refresh = useCallback(async () => {
@@ -57,15 +58,32 @@ export default function Food() {
     refresh()
   }, [refresh])
 
-  async function act(fn, ...args) {
+  // `key` identifies the in-flight button so we can show a spinner on it and
+  // disable the others while the request is running.
+  async function act(key, fn, ...args) {
+    setPending(key)
     setError(null)
     try {
       await fn(...args)
-      refresh()
+      await refresh()
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Action failed.')
+    } finally {
+      setPending(null)
     }
   }
+
+  // Group the menu by its linked stock's category (prepared items that aren't
+  // linked to stock fall under "Unlinked / prepared").
+  const menuGroups = useMemo(() => {
+    const groups = new Map()
+    for (const m of menu) {
+      const cat = m.inventory_item?.inventory_category?.name ?? 'Unlinked / prepared'
+      if (!groups.has(cat)) groups.set(cat, [])
+      groups.get(cat).push(m)
+    }
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  }, [menu])
 
   if (!propertyId)
     return <Alert variant="info">Select or create a property to use Food &amp; Orders.</Alert>
@@ -111,12 +129,18 @@ export default function Food() {
                       <td className="text-end text-nowrap">
                         {o.status === 'open' && (
                           <Button size="sm" variant="outline-success" className="me-1"
-                            onClick={() => act(serveOrder, o.id)}>Serve</Button>
+                            disabled={pending !== null}
+                            onClick={() => act(`serve-${o.id}`, serveOrder, o.id)}>
+                            {pending === `serve-${o.id}` ? <Spinner size="sm" /> : 'Serve'}
+                          </Button>
                         )}
                         {o.status !== 'cancelled'
                           && !(role === 'receptionist' && o.status === 'served' && o.payment_status === 'paid') && (
                           <Button size="sm" variant="outline-danger"
-                            onClick={() => act(cancelOrder, o.id)}>Cancel</Button>
+                            disabled={pending !== null}
+                            onClick={() => act(`cancel-${o.id}`, cancelOrder, o.id)}>
+                            {pending === `cancel-${o.id}` ? <Spinner size="sm" /> : 'Cancel'}
+                          </Button>
                         )}
                       </td>
                     </tr>
@@ -145,27 +169,38 @@ export default function Food() {
                   {menu.length === 0 && (
                     <tr><td colSpan={canManageMenu ? 5 : 4} className="text-center text-muted py-4">No menu items.</td></tr>
                   )}
-                  {menu.map((m) => (
-                    <tr key={m.id}>
-                      <td className="fw-semibold">{m.name}</td>
-                      <td className="text-end">{formatMoney(m.price)}</td>
-                      <td className="small">{m.inventory_item?.name ?? <span className="text-muted">—</span>}</td>
-                      <td>
-                        {m.is_available
-                          ? <Badge bg="success">yes</Badge>
-                          : <Badge bg="secondary">no</Badge>}
-                      </td>
-                      {canManageMenu && (
-                        <td className="text-end text-nowrap">
-                          <Button size="sm" variant="outline-primary" className="me-1"
-                            onClick={() => setModal({ type: 'menu', item: m })}>Edit</Button>
-                          <Button size="sm" variant="outline-danger"
-                            onClick={() => { if (window.confirm(`Delete "${m.name}"?`)) act(deleteMenuItem, m.id) }}>
-                            Delete
-                          </Button>
+                  {menuGroups.map(([category, items]) => (
+                    <Fragment key={category}>
+                      <tr className="table-light">
+                        <td colSpan={canManageMenu ? 5 : 4} className="fw-semibold small text-uppercase text-muted">
+                          {category}
                         </td>
-                      )}
-                    </tr>
+                      </tr>
+                      {items.map((m) => (
+                        <tr key={m.id}>
+                          <td className="fw-semibold">{m.name}</td>
+                          <td className="text-end">{formatMoney(m.price)}</td>
+                          <td className="small">{m.inventory_item?.name ?? <span className="text-muted">—</span>}</td>
+                          <td>
+                            {m.is_available
+                              ? <Badge bg="success">yes</Badge>
+                              : <Badge bg="secondary">no</Badge>}
+                          </td>
+                          {canManageMenu && (
+                            <td className="text-end text-nowrap">
+                              <Button size="sm" variant="outline-primary" className="me-1"
+                                disabled={pending !== null}
+                                onClick={() => setModal({ type: 'menu', item: m })}>Edit</Button>
+                              <Button size="sm" variant="outline-danger"
+                                disabled={pending !== null}
+                                onClick={() => { if (window.confirm(`Delete "${m.name}"?`)) act(`del-menu-${m.id}`, deleteMenuItem, m.id) }}>
+                                {pending === `del-menu-${m.id}` ? <Spinner size="sm" /> : 'Delete'}
+                              </Button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
                 </tbody>
               </Table>
@@ -191,7 +226,10 @@ export default function Food() {
                       <td className="text-end">
                         {inv.status === 'open' && (
                           <Button size="sm" variant="outline-success"
-                            onClick={() => act(settleInvoice, inv.id)}>Settle</Button>
+                            disabled={pending !== null}
+                            onClick={() => act(`settle-${inv.id}`, settleInvoice, inv.id)}>
+                            {pending === `settle-${inv.id}` ? <Spinner size="sm" /> : 'Settle'}
+                          </Button>
                         )}
                       </td>
                     </tr>

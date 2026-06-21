@@ -55,6 +55,7 @@ export default function FrontDesk() {
   const [reservationDate, setReservationDate] = useState(null)
   const [calDate, setCalDate] = useState(todayStr)
   const [resFilter, setResFilter] = useState('today') // today | week | all
+  const [pending, setPending] = useState(null) // key of the in-flight inline action
   const today = todayStr()
 
   const refresh = useCallback(async () => {
@@ -133,28 +134,46 @@ export default function FrontDesk() {
   )
 
   async function doTransition(id, transition) {
+    // Checking out finalizes the stay (and posts the room charge) — confirm first.
+    if (transition === 'check-out'
+      && !window.confirm('Check out this guest? This finalizes the stay and posts the room charge to their invoice.')) {
+      return
+    }
+    setPending(`${transition}-${id}`)
     setError(null)
     try {
       await transitionReservation(id, transition)
-      refresh()
+      await refresh()
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Action failed.')
+    } finally {
+      setPending(null)
     }
   }
 
   async function changeRoomStatus(room, status) {
-    await updateRoom(room.id, { room_number: room.room_number, room_type: room.room_type, status })
-    refresh()
+    setPending(`room-${room.id}`)
+    try {
+      await updateRoom(room.id, { room_number: room.room_number, room_type: room.room_type, status })
+      await refresh()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Action failed.')
+    } finally {
+      setPending(null)
+    }
   }
 
   async function doDeleteRoom(room) {
     if (!window.confirm(`Delete room ${room.room_number}? This can't be undone.`)) return
+    setPending(`room-${room.id}`)
     setError(null)
     try {
       await deleteRoom(room.id)
-      refresh()
+      await refresh()
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Could not delete the room.')
+    } finally {
+      setPending(null)
     }
   }
 
@@ -249,15 +268,24 @@ export default function FrontDesk() {
                       <td className="text-end text-nowrap">
                         {r.status === 'booked' && (
                           <Button size="sm" variant="outline-primary" className="me-1"
-                            onClick={() => doTransition(r.id, 'check-in')}>Check in</Button>
+                            disabled={pending !== null}
+                            onClick={() => doTransition(r.id, 'check-in')}>
+                            {pending === `check-in-${r.id}` ? <Spinner size="sm" /> : 'Check in'}
+                          </Button>
                         )}
                         {r.status === 'checked_in' && (
                           <Button size="sm" variant="outline-success" className="me-1"
-                            onClick={() => doTransition(r.id, 'check-out')}>Check out</Button>
+                            disabled={pending !== null}
+                            onClick={() => doTransition(r.id, 'check-out')}>
+                            {pending === `check-out-${r.id}` ? <Spinner size="sm" /> : 'Check out'}
+                          </Button>
                         )}
                         {(r.status === 'booked' || r.status === 'checked_in') && (
                           <Button size="sm" variant="outline-danger"
-                            onClick={() => doTransition(r.id, 'cancel')}>Cancel</Button>
+                            disabled={pending !== null}
+                            onClick={() => doTransition(r.id, 'cancel')}>
+                            {pending === `cancel-${r.id}` ? <Spinner size="sm" /> : 'Cancel'}
+                          </Button>
                         )}
                       </td>
                     </tr>
@@ -285,7 +313,7 @@ export default function FrontDesk() {
                         <Badge bg={ROOM_VARIANT[room.status]}>{room.status}</Badge>
                       </div>
                       <div className="text-muted small mb-2">{room.room_type ?? 'Room'}</div>
-                      <Form.Select size="sm" value={room.status}
+                      <Form.Select size="sm" value={room.status} disabled={pending !== null}
                         onChange={(e) => onRoomStatusPick(room, e.target.value)}>
                         {statusOptions(room.status).map((s) => (
                           <option key={s} value={s}>
@@ -295,7 +323,10 @@ export default function FrontDesk() {
                       </Form.Select>
                       {canManageRooms && (
                         <Button size="sm" variant="outline-danger" className="w-100 mt-2"
-                          onClick={() => doDeleteRoom(room)}>Delete room</Button>
+                          disabled={pending !== null}
+                          onClick={() => doDeleteRoom(room)}>
+                          {pending === `room-${room.id}` ? <Spinner size="sm" /> : 'Delete room'}
+                        </Button>
                       )}
                     </Card.Body>
                   </Card>

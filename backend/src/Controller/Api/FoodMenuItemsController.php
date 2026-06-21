@@ -19,7 +19,9 @@ class FoodMenuItemsController extends AppController
     {
         $menu = $this->fetchTable('FoodMenuItems');
         $query = $this->scopeToProperty(
-            $menu->find()->contain(['InventoryItems'])->orderBy(['FoodMenuItems.name' => 'ASC'])
+            $menu->find()
+                ->contain(['InventoryItems' => ['InventoryCategories']])
+                ->orderBy(['FoodMenuItems.name' => 'ASC'])
         );
 
         if ($this->request->getQuery('available')) {

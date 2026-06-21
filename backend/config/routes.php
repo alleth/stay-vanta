@@ -85,6 +85,8 @@ return function (RouteBuilder $routes): void {
         // Inventory module.
         $builder->get('/inventory-categories', ['controller' => 'InventoryCategories', 'action' => 'index']);
         $builder->post('/inventory-categories', ['controller' => 'InventoryCategories', 'action' => 'add']);
+        $builder->delete('/inventory-categories/{id}', ['controller' => 'InventoryCategories', 'action' => 'delete'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         $builder->get('/inventory-items', ['controller' => 'InventoryItems', 'action' => 'index']);
         $builder->post('/inventory-items', ['controller' => 'InventoryItems', 'action' => 'add']);

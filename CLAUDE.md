@@ -68,6 +68,11 @@ Enforce role checks on the **backend** too — frontend guards are UX only.
   it reads `Authorization: Bearer <token>`, matches `users.api_token`, and exposes the user
   as `$this->currentUser`. List actions that should skip auth in a controller's
   `$publicActions` (e.g. `login`).
+- **API errors are JSON**: `ErrorController::beforeRender` renders `/api` exceptions as
+  `{message, code, url}` (not the HTML error page), so the SPA can surface the real reason.
+  Throw `BadRequestException`/`ForbiddenException`/etc. with a clear message and it reaches the
+  frontend (the React side reads `err.response.data.message`). Without this, prod (debug off)
+  returned HTML and the UI only showed a generic failure.
 - Routes: API is a `prefix('Api', ['path' => '/api'])` scope in `config/routes.php`.
 - **CSRF is disabled for `/api`** (stateless token API) via `Application::csrfMiddleware()`'s
   skip callback. CORS is handled by `App\Middleware\CorsMiddleware` (reflects all origins in
@@ -117,7 +122,7 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/reports/owner-dashboard` (owner-only) — subscription revenue (week/month/YTD from each subscriber's monthly fee) + counts (hotels, active subscriptions, admins)
 - `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items, occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time)
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate your own account**) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; admins may change their own password & reset their receptionists, but not a peer admin's; see `UsersController`)
-- `GET|POST /api/inventory-categories` (create is **owner/admin only**)
+- `GET|POST /api/inventory-categories` (create **owner/admin only**) · `DELETE /api/inventory-categories/{id}` (**owner/admin only**; refused while items still use it)
 - `GET /api/inventory-items` · `POST /api/inventory-items` (**owner/admin only**) · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity) · `DELETE /api/inventory-items/{id}` (**owner/admin only**; cascades the item's ledger rows & unlinks menu items)
 - `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (manual move is **owner/admin only**; receptionists' stock-out happens via Food & Orders, which records the movement internally stamped to them)
 - `GET|POST /api/rooms` (create **owner/admin only**) · `PATCH|PUT /api/rooms/{id}` · `DELETE /api/rooms/{id}` (**owner/admin only**; refused if the room has reservations, removes room-specific rates)

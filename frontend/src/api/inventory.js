@@ -17,6 +17,9 @@ export const listCategories = (propertyId) =>
 export const createCategory = (data, propertyId) =>
   client.post('/inventory-categories', withProp(data, propertyId)).then((r) => r.data.category)
 
+export const deleteCategory = (id) =>
+  client.delete(`/inventory-categories/${id}`).then((r) => r.data)
+
 export const listItems = (propertyId, params = {}) =>
   client.get('/inventory-items', { params: withProp(params, propertyId) }).then((r) => r.data.items)
 

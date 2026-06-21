@@ -61,4 +61,37 @@ class InventoryCategoriesController extends AppController
         $this->set('category', $category);
         $this->viewBuilder()->setOption('serialize', ['category']);
     }
+
+    /**
+     * DELETE /api/inventory-categories/{id}  (owner/admin)
+     *
+     * Refused if any item still uses the category — move/delete those first.
+     * Sub-categories (parent_id) are detached so they don't dangle.
+     */
+    public function delete(int $id): void
+    {
+        $this->request->allowMethod(['delete', 'post']);
+
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may delete categories.');
+        }
+
+        $categories = $this->fetchTable('InventoryCategories');
+        $category = $this->scopeToProperty($categories->find()->where(['InventoryCategories.id' => $id]))
+            ->firstOrFail();
+
+        $items = $this->fetchTable('InventoryItems');
+        $inUse = $items->find()->where(['InventoryItems.inventory_category_id' => $id])->count() > 0;
+        if ($inUse) {
+            throw new BadRequestException('This category still has items. Move or delete them first.');
+        }
+
+        $categories->getConnection()->transactional(function () use ($categories, $category, $id): void {
+            $categories->updateAll(['parent_id' => null], ['parent_id' => $id]);
+            $categories->deleteOrFail($category);
+        });
+
+        $this->set('ok', true);
+        $this->viewBuilder()->setOption('serialize', ['ok']);
+    }
 }
