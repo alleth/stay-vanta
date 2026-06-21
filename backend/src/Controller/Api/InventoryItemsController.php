@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Inventory items. Quantities are read here but only ever changed through
@@ -56,6 +57,11 @@ class InventoryItemsController extends AppController
     {
         $this->request->allowMethod('post');
 
+        // Receptionists operate the catalogue; only owners/admins define it.
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may add inventory items.');
+        }
+
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
             throw new BadRequestException('property_id is required.');
@@ -106,20 +112,39 @@ class InventoryItemsController extends AppController
      * PATCH/PUT /api/inventory-items/{id}
      *
      * Edits descriptive fields only — never the quantity (use a movement).
+     * Owner/admin only: this is how a mis-categorised item or a wrong
+     * consumable/reusable type gets corrected.
      */
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
 
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may edit inventory items.');
+        }
+
         $items = $this->fetchTable('InventoryItems');
         $item = $this->scopeToProperty($items->find()->where(['InventoryItems.id' => $id]))->firstOrFail();
 
+        $newTracking = $this->request->getData('tracking_type');
         $items->patchEntity($item, [
             'name' => $this->request->getData('name'),
             'unit' => $this->request->getData('unit'),
             'reorder_level' => $this->request->getData('reorder_level'),
             'inventory_category_id' => $this->request->getData('inventory_category_id'),
+            'tracking_type' => in_array($newTracking, ['consumable', 'reusable'], true)
+                ? $newTracking
+                : $item->tracking_type,
         ]);
+
+        // Keep total_quantity coherent when the type changes: a reusable needs an
+        // owned total (assume current on-hand are owned & available); a consumable
+        // doesn't track one.
+        if ($item->tracking_type === 'reusable' && $item->total_quantity === null) {
+            $item->set('total_quantity', $item->quantity);
+        } elseif ($item->tracking_type === 'consumable') {
+            $item->set('total_quantity', null);
+        }
 
         if (!$items->save($item)) {
             $this->response = $this->response->withStatus(422);

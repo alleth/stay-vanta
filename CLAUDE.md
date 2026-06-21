@@ -117,15 +117,15 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/reports/owner-dashboard` (owner-only) — subscription revenue (week/month/YTD from each subscriber's monthly fee) + counts (hotels, active subscriptions, admins)
 - `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items, occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time)
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; see `UsersController`)
-- `GET|POST /api/inventory-categories`
-- `GET|POST /api/inventory-items` · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (edit never touches quantity)
-- `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (the accountability action)
+- `GET|POST /api/inventory-categories` (create is **owner/admin only**)
+- `GET /api/inventory-items` · `POST /api/inventory-items` (**owner/admin only**) · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity)
+- `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (manual move is **owner/admin only**; receptionists' stock-out happens via Food & Orders, which records the movement internally stamped to them)
 - `GET|POST /api/rooms` · `PATCH|PUT /api/rooms/{id}`
 - `GET|POST /api/room-rates[?room_id=]` · `PATCH|PUT /api/room-rates/{id}` (fix a mistyped name/rate/target room)
 - `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`)
 - `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
 - `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` (owner/admin)
-- `GET|POST /api/food-orders[?status=]` · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}`
+- `GET|POST /api/food-orders[?status=]` · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
 - `GET /api/invoices[?guest_id=&status=]` · `GET /api/invoices/{id}` · `POST /api/invoices/{id}/settle`
 
 Implemented frontend pages (all five modules): `src/pages/Inventory.jsx`, `src/pages/Staff.jsx`,

@@ -23,6 +23,9 @@ export const listItems = (propertyId, params = {}) =>
 export const createItem = (data, propertyId) =>
   client.post('/inventory-items', withProp(data, propertyId)).then((r) => r.data.item)
 
+export const updateItem = (id, data) =>
+  client.patch(`/inventory-items/${id}`, data).then((r) => r.data.item)
+
 export const listMovements = (propertyId, params = {}) =>
   client.get('/stock-movements', { params: withProp(params, propertyId) }).then((r) => r.data.movements)
 
