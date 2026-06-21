@@ -43,6 +43,8 @@ export default function FrontDesk() {
   const [error, setError] = useState(null)
   const [modal, setModal] = useState(null) // 'reservation' | 'room' | { type:'rate', rate? }
   const [reservationRoomId, setReservationRoomId] = useState(null)
+  const [reservationDate, setReservationDate] = useState(null)
+  const [calDate, setCalDate] = useState(() => new Date().toISOString().slice(0, 10))
 
   const refresh = useCallback(async () => {
     if (!propertyId) return
@@ -74,6 +76,39 @@ export default function FrontDesk() {
   )
   const availableRooms = useMemo(() => rooms.filter((r) => r.status === 'available'), [rooms])
 
+  // At-a-glance counts for the summary cards.
+  const counts = useMemo(() => ({
+    available: rooms.filter((r) => r.status === 'available').length,
+    occupied: rooms.filter((r) => r.status === 'occupied').length,
+    maintenance: rooms.filter((r) => r.status === 'maintenance').length,
+    reservations: activeCount,
+  }), [rooms, activeCount])
+
+  // Date filter: which rooms are free, and which reservations fall on calDate.
+  // A reservation occupies a room for the nights [check_in, check_out), so the
+  // check-out day itself is free again.
+  const occupiedOnDate = useMemo(() => {
+    const occ = new Set()
+    for (const r of reservations) {
+      if (r.status === 'cancelled' || !r.check_in || !r.check_out) continue
+      if (r.check_in <= calDate && calDate < r.check_out) occ.add(r.room_id)
+    }
+    return occ
+  }, [reservations, calDate])
+
+  const availableOnDate = useMemo(
+    () => rooms.filter((r) => r.status !== 'maintenance' && !occupiedOnDate.has(r.id)),
+    [rooms, occupiedOnDate],
+  )
+
+  // Reservations touching the date (inclusive of arrival & departure days).
+  const reservationsOnDate = useMemo(
+    () => reservations.filter((r) =>
+      r.status !== 'cancelled' && r.check_in && r.check_out
+      && r.check_in <= calDate && calDate <= r.check_out),
+    [reservations, calDate],
+  )
+
   async function doTransition(id, transition) {
     setError(null)
     try {
@@ -96,8 +131,9 @@ export default function FrontDesk() {
     changeRoomStatus(room, value)
   }
 
-  function openReservation(roomId = null) {
+  function openReservation(roomId = null, date = null) {
     setReservationRoomId(roomId)
+    setReservationDate(date)
     setModal('reservation')
   }
 
@@ -112,6 +148,14 @@ export default function FrontDesk() {
       {loading ? (
         <div className="text-center py-5"><Spinner /></div>
       ) : (
+        <>
+        <Row className="g-3 mb-3">
+          <SummaryCard label="Available rooms" value={counts.available} variant="success" />
+          <SummaryCard label="Occupied rooms" value={counts.occupied} variant="danger" />
+          <SummaryCard label="Maintenance" value={counts.maintenance} variant="warning" />
+          <SummaryCard label="Reservations" value={counts.reservations} variant="primary" />
+        </Row>
+
         <Tabs defaultActiveKey="reservations" className="mb-3">
           {/* ---- Reservations ---- */}
           <Tab eventKey="reservations" title={`Reservations (${activeCount})`}>
@@ -213,41 +257,109 @@ export default function FrontDesk() {
 
           {/* ---- Rates ---- */}
           <Tab eventKey="rates" title={`Rates (${rates.length})`}>
-            <div className="d-flex justify-content-end mb-2">
-              <Button onClick={() => setModal({ type: 'rate' })}>Add rate</Button>
-            </div>
+            {canManageRooms && (
+              <div className="d-flex justify-content-end mb-2">
+                <Button onClick={() => setModal({ type: 'rate' })}>Add rate</Button>
+              </div>
+            )}
             <Card className="shadow-sm">
               <Table responsive hover className="mb-0 align-middle">
                 <thead>
                   <tr>
                     <th>Name</th><th>Applies to</th><th className="text-end">Nightly rate</th>
-                    <th className="text-end">Actions</th>
+                    {canManageRooms && <th className="text-end">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rates.length === 0 && (
-                    <tr><td colSpan={4} className="text-center text-muted py-4">No rates yet.</td></tr>
+                    <tr><td colSpan={canManageRooms ? 4 : 3} className="text-center text-muted py-4">No rates yet.</td></tr>
                   )}
                   {rates.map((rt) => (
                     <tr key={rt.id}>
                       <td className="fw-semibold">{rt.name}</td>
                       <td>{rt.room ? `Room ${rt.room.room_number}` : 'All rooms'}</td>
                       <td className="text-end">{formatMoney(rt.base_rate)}</td>
-                      <td className="text-end">
-                        <Button size="sm" variant="outline-primary"
-                          onClick={() => setModal({ type: 'rate', rate: rt })}>Edit</Button>
-                      </td>
+                      {canManageRooms && (
+                        <td className="text-end">
+                          <Button size="sm" variant="outline-primary"
+                            onClick={() => setModal({ type: 'rate', rate: rt })}>Edit</Button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </Table>
             </Card>
           </Tab>
+
+          {/* ---- Calendar / availability by date ---- */}
+          <Tab eventKey="calendar" title="Calendar">
+            <Card className="shadow-sm mb-3">
+              <Card.Body className="d-flex align-items-center gap-3 flex-wrap">
+                <Form.Group className="d-flex align-items-center gap-2 mb-0">
+                  <Form.Label className="mb-0 fw-semibold">Date</Form.Label>
+                  <Form.Control type="date" value={calDate} style={{ maxWidth: 190 }}
+                    onChange={(e) => setCalDate(e.target.value)} />
+                </Form.Group>
+                <span className="text-muted small">
+                  {availableOnDate.length} room(s) free · {reservationsOnDate.length} reservation(s) on this date
+                </span>
+              </Card.Body>
+            </Card>
+            <Row className="g-3">
+              <Col lg={5}>
+                <Card className="shadow-sm h-100">
+                  <Card.Header className="fw-semibold">Available rooms</Card.Header>
+                  {availableOnDate.length === 0 ? (
+                    <Card.Body><p className="text-muted mb-0">No rooms free on this date.</p></Card.Body>
+                  ) : (
+                    <ListGroup variant="flush">
+                      {availableOnDate.map((r) => (
+                        <ListGroup.Item key={r.id} className="d-flex justify-content-between align-items-center">
+                          <span>
+                            <span className="fw-semibold">{r.room_number}</span>
+                            <span className="text-muted small ms-2">{r.room_type ?? 'Room'}</span>
+                          </span>
+                          <Button size="sm" variant="outline-primary"
+                            onClick={() => openReservation(r.id, calDate)}>Book</Button>
+                        </ListGroup.Item>
+                      ))}
+                    </ListGroup>
+                  )}
+                </Card>
+              </Col>
+              <Col lg={7}>
+                <Card className="shadow-sm h-100">
+                  <Card.Header className="fw-semibold">Reservations on this date</Card.Header>
+                  <Table responsive hover className="mb-0 align-middle">
+                    <thead>
+                      <tr><th>Guest</th><th>Room</th><th>Dates</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {reservationsOnDate.length === 0 && (
+                        <tr><td colSpan={4} className="text-center text-muted py-4">No reservations on this date.</td></tr>
+                      )}
+                      {reservationsOnDate.map((r) => (
+                        <tr key={r.id}>
+                          <td className="fw-semibold">{r.guest?.full_name ?? '—'}</td>
+                          <td>{r.room?.room_number ?? '—'}</td>
+                          <td className="small">{r.check_in} → {r.check_out}</td>
+                          <td><Badge bg={RES_VARIANT[r.status]}>{r.status.replace('_', ' ')}</Badge></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </Card>
+              </Col>
+            </Row>
+          </Tab>
         </Tabs>
+        </>
       )}
 
       {modal === 'reservation' && (
-        <ReservationModal rooms={rooms} propertyId={propertyId} defaultRoomId={reservationRoomId}
+        <ReservationModal rooms={rooms} propertyId={propertyId}
+          defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
       {modal === 'room' && (
@@ -262,11 +374,24 @@ export default function FrontDesk() {
   )
 }
 
-function ReservationModal({ rooms, propertyId, defaultRoomId, onClose, onSaved }) {
+function SummaryCard({ label, value, variant }) {
+  return (
+    <Col xs={6} lg={3}>
+      <Card className="shadow-sm h-100">
+        <Card.Body>
+          <div className="text-muted small">{label}</div>
+          <div className={`fs-2 fw-bold text-${variant}`}>{value}</div>
+        </Card.Body>
+      </Card>
+    </Col>
+  )
+}
+
+function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, onClose, onSaved }) {
   const firstAvailable = rooms.find((r) => r.status === 'available')
   const [form, setForm] = useState({
     room_id: defaultRoomId ?? firstAvailable?.id ?? '',
-    check_in: '', check_out: '',
+    check_in: defaultCheckIn ?? '', check_out: '',
     source: 'walk_in', discount_type: 'none', promo_rate: '', additional_beds: 0,
     guest_name: '', guest_type: 'local', nationality: '',
     contact_number: '', email: '', address: '',

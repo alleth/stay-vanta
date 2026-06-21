@@ -4,10 +4,12 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Room rates. A rate may target a specific room (room_id) or apply
- * property-wide (room_id null).
+ * property-wide (room_id null). Pricing is owner/admin territory — receptionists
+ * read rates but don't create or edit them.
  */
 class RoomRatesController extends AppController
 {
@@ -36,6 +38,10 @@ class RoomRatesController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
+
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may add rates.');
+        }
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -69,6 +75,10 @@ class RoomRatesController extends AppController
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
+
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may edit rates.');
+        }
 
         $rates = $this->fetchTable('RoomRates');
         $rate = $this->scopeToProperty($rates->find()->where(['RoomRates.id' => $id]))->firstOrFail();

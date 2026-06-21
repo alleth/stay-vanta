@@ -121,7 +121,7 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/inventory-items` · `POST /api/inventory-items` (**owner/admin only**) · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity)
 - `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (manual move is **owner/admin only**; receptionists' stock-out happens via Food & Orders, which records the movement internally stamped to them)
 - `GET|POST /api/rooms` · `PATCH|PUT /api/rooms/{id}`
-- `GET|POST /api/room-rates[?room_id=]` · `PATCH|PUT /api/room-rates/{id}` (fix a mistyped name/rate/target room)
+- `GET /api/room-rates[?room_id=]` · `POST /api/room-rates` (**owner/admin only**) · `PATCH|PUT /api/room-rates/{id}` (**owner/admin only**; fix a mistyped name/rate/target room — receptionists read rates but can't change them)
 - `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`)
 - `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
 - `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` (owner/admin)
@@ -185,7 +185,11 @@ handled it; transitions also flip `rooms.status` (occupied/available) and are gu
 allowed-from-state table. Pricing lives in `ReservationsTable::quote()`: nightly rate =
 `promo_rate` (OTA) ?? resolved room rate; senior/PWD apply `STATUTORY_DISCOUNT` (20%). Booking
 can create a guest inline (`guest_name`) inside the same transaction. `resolveBaseRate()`
-prefers a room-specific `room_rates` row, else the cheapest property-wide one.
+prefers a room-specific `room_rates` row, else the cheapest property-wide one. The
+`FrontDesk.jsx` page also shows at-a-glance summary cards (available/occupied/maintenance
+rooms + active reservations) and a **Calendar** tab: a date filter that derives, client-side
+from the loaded rooms+reservations, which rooms are free on a date and which reservations
+touch it (occupancy is the nights `[check_in, check_out)`, so the check-out day is free again).
 
 ### Staff & roles enforcement
 `UsersController` is the staff module and the canonical example of backend role enforcement:
