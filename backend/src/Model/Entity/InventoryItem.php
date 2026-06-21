@@ -22,6 +22,7 @@ use Cake\ORM\Entity;
  * @property string|null $total_quantity  units owned (reusables only); in-use = total - quantity
  * @property string $reorder_level
  * @property int|null $last_receptionist_id
+ * @property \Cake\I18n\DateTime|null $deleted_at  soft-delete marker (hidden when set)
  */
 class InventoryItem extends Entity
 {

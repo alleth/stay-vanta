@@ -77,7 +77,7 @@ export default function Inventory() {
   const openMove = (item, action) => { setMoveTarget({ item, action }); setModal('move') }
 
   async function doDeleteItem(item) {
-    if (!window.confirm(`Delete "${item.name}"? This removes the item and its stock history.`)) return
+    if (!window.confirm(`Delete "${item.name}"? It will be removed from inventory; its stock history is kept.`)) return
     setPending(`item-${item.id}`)
     setError(null)
     try {

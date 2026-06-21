@@ -20,6 +20,7 @@ class InventoryItemsController extends AppController
         $items = $this->fetchTable('InventoryItems');
         $query = $this->scopeToProperty(
             $items->find()
+                ->where(['InventoryItems.deleted_at IS' => null])
                 ->contain(['InventoryCategories', 'LastReceptionist'])
                 ->orderBy(['InventoryItems.name' => 'ASC'])
         );
@@ -39,7 +40,9 @@ class InventoryItemsController extends AppController
     public function view(int $id): void
     {
         $items = $this->fetchTable('InventoryItems');
-        $item = $this->scopeToProperty($items->find()->where(['InventoryItems.id' => $id]))
+        $item = $this->scopeToProperty(
+            $items->find()->where(['InventoryItems.id' => $id, 'InventoryItems.deleted_at IS' => null])
+        )
             ->contain(['InventoryCategories', 'LastReceptionist'])
             ->firstOrFail();
 
@@ -124,7 +127,9 @@ class InventoryItemsController extends AppController
         }
 
         $items = $this->fetchTable('InventoryItems');
-        $item = $this->scopeToProperty($items->find()->where(['InventoryItems.id' => $id]))->firstOrFail();
+        $item = $this->scopeToProperty(
+            $items->find()->where(['InventoryItems.id' => $id, 'InventoryItems.deleted_at IS' => null])
+        )->firstOrFail();
 
         $newTracking = $this->request->getData('tracking_type');
         $items->patchEntity($item, [
@@ -161,9 +166,9 @@ class InventoryItemsController extends AppController
     /**
      * DELETE /api/inventory-items/{id}  (owner/admin)
      *
-     * For removing an item created with wrong details. Because the item is being
-     * discarded entirely, its (now meaningless) ledger rows go with it and any
-     * linked menu items are unlinked — all in one transaction.
+     * Soft-delete: the item is hidden from inventory and from menu linking, but
+     * the row stays so its stock_movements (the accountability ledger) remain
+     * intact. Any menu items pointing at it are unlinked.
      */
     public function delete(int $id): void
     {
@@ -174,15 +179,17 @@ class InventoryItemsController extends AppController
         }
 
         $items = $this->fetchTable('InventoryItems');
-        $item = $this->scopeToProperty($items->find()->where(['InventoryItems.id' => $id]))->firstOrFail();
+        $item = $this->scopeToProperty(
+            $items->find()->where(['InventoryItems.id' => $id, 'InventoryItems.deleted_at IS' => null])
+        )->firstOrFail();
 
         $items->getConnection()->transactional(function () use ($items, $item, $id): void {
-            $this->fetchTable('StockMovements')->deleteAll(['inventory_item_id' => $id]);
             $this->fetchTable('FoodMenuItems')->updateAll(
                 ['inventory_item_id' => null],
                 ['inventory_item_id' => $id]
             );
-            $items->deleteOrFail($item);
+            $item->set('deleted_at', new \Cake\I18n\DateTime());
+            $items->saveOrFail($item);
         });
 
         $this->set('ok', true);
