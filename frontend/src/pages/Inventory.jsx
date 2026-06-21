@@ -86,16 +86,16 @@ export default function Inventory() {
             Every in/out movement records the acting receptionist.
           </small>
         </div>
-        <div className="d-flex gap-2">
-          {canManage && (
+        {canManage && (
+          <div className="d-flex gap-2">
             <Button variant="outline-secondary" onClick={() => setModal('category')}>
               New category
             </Button>
-          )}
-          <Button onClick={() => { setEditTarget(null); setModal('item') }} disabled={categories.length === 0}>
-            New item
-          </Button>
-        </div>
+            <Button onClick={() => { setEditTarget(null); setModal('item') }} disabled={categories.length === 0}>
+              New item
+            </Button>
+          </div>
+        )}
       </div>
 
       {error && <Alert variant="danger">{error}</Alert>}

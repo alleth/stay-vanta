@@ -118,7 +118,7 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items, occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time)
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; see `UsersController`)
 - `GET|POST /api/inventory-categories` (create is **owner/admin only**)
-- `GET|POST /api/inventory-items` · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity)
+- `GET /api/inventory-items` · `POST /api/inventory-items` (**owner/admin only**) · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity)
 - `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (manual move is **owner/admin only**; receptionists' stock-out happens via Food & Orders, which records the movement internally stamped to them)
 - `GET|POST /api/rooms` · `PATCH|PUT /api/rooms/{id}`
 - `GET|POST /api/room-rates[?room_id=]` · `PATCH|PUT /api/room-rates/{id}` (fix a mistyped name/rate/target room)

@@ -57,6 +57,11 @@ class InventoryItemsController extends AppController
     {
         $this->request->allowMethod('post');
 
+        // Receptionists operate the catalogue; only owners/admins define it.
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may add inventory items.');
+        }
+
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
             throw new BadRequestException('property_id is required.');
