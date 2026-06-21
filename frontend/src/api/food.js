@@ -13,6 +13,9 @@ export const createMenuItem = (data, propertyId) =>
 export const updateMenuItem = (id, data) =>
   client.patch(`/food-menu-items/${id}`, data).then((r) => r.data.menuItem)
 
+export const deleteMenuItem = (id) =>
+  client.delete(`/food-menu-items/${id}`).then((r) => r.data)
+
 // Orders
 export const listOrders = (propertyId, params = {}) =>
   client.get('/food-orders', { params: withProp(params, propertyId) }).then((r) => r.data.orders)

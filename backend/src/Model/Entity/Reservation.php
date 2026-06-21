@@ -20,6 +20,7 @@ use Cake\ORM\Entity;
  * @property \Cake\I18n\Date|null $check_out
  * @property \Cake\I18n\DateTime|null $checked_in_at   when check-in actually happened
  * @property \Cake\I18n\DateTime|null $checked_out_at  when check-out actually happened
+ * @property \Cake\I18n\DateTime|null $cancelled_at    when the booking was cancelled
  * @property string $status         booked | checked_in | checked_out | cancelled
  * @property string $source         walk_in | cocotel | agoda | trip_com | tripadvisor
  * @property string|null $promo_rate
@@ -37,6 +38,7 @@ class Reservation extends Entity
         'check_out' => true,
         'checked_in_at' => true,
         'checked_out_at' => true,
+        'cancelled_at' => true,
         'status' => true,
         'source' => true,
         'promo_rate' => true,

@@ -7,7 +7,7 @@ import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
 import {
-  listMenu, createMenuItem, updateMenuItem,
+  listMenu, createMenuItem, updateMenuItem, deleteMenuItem,
   listOrders, createOrder, serveOrder, cancelOrder,
   listInvoices, settleInvoice,
 } from '../api/food'
@@ -156,9 +156,13 @@ export default function Food() {
                           : <Badge bg="secondary">no</Badge>}
                       </td>
                       {canManageMenu && (
-                        <td className="text-end">
-                          <Button size="sm" variant="outline-primary"
+                        <td className="text-end text-nowrap">
+                          <Button size="sm" variant="outline-primary" className="me-1"
                             onClick={() => setModal({ type: 'menu', item: m })}>Edit</Button>
+                          <Button size="sm" variant="outline-danger"
+                            onClick={() => { if (window.confirm(`Delete "${m.name}"?`)) act(deleteMenuItem, m.id) }}>
+                            Delete
+                          </Button>
                         </td>
                       )}
                     </tr>

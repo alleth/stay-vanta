@@ -136,6 +136,8 @@ class ReservationsController extends AppController
                 $reservation->set('checked_in_at', new \Cake\I18n\DateTime());
             } elseif ($transition === 'check-out') {
                 $reservation->set('checked_out_at', new \Cake\I18n\DateTime());
+            } elseif ($transition === 'cancel') {
+                $reservation->set('cancelled_at', new \Cake\I18n\DateTime());
             }
             $reservations->saveOrFail($reservation);
 

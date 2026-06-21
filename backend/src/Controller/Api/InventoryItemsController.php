@@ -157,4 +157,35 @@ class InventoryItemsController extends AppController
         $this->set('item', $item);
         $this->viewBuilder()->setOption('serialize', ['item']);
     }
+
+    /**
+     * DELETE /api/inventory-items/{id}  (owner/admin)
+     *
+     * For removing an item created with wrong details. Because the item is being
+     * discarded entirely, its (now meaningless) ledger rows go with it and any
+     * linked menu items are unlinked — all in one transaction.
+     */
+    public function delete(int $id): void
+    {
+        $this->request->allowMethod(['delete', 'post']);
+
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may delete inventory items.');
+        }
+
+        $items = $this->fetchTable('InventoryItems');
+        $item = $this->scopeToProperty($items->find()->where(['InventoryItems.id' => $id]))->firstOrFail();
+
+        $items->getConnection()->transactional(function () use ($items, $item, $id): void {
+            $this->fetchTable('StockMovements')->deleteAll(['inventory_item_id' => $id]);
+            $this->fetchTable('FoodMenuItems')->updateAll(
+                ['inventory_item_id' => null],
+                ['inventory_item_id' => $id]
+            );
+            $items->deleteOrFail($item);
+        });
+
+        $this->set('ok', true);
+        $this->viewBuilder()->setOption('serialize', ['ok']);
+    }
 }

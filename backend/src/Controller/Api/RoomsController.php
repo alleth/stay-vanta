@@ -91,6 +91,37 @@ class RoomsController extends AppController
         $this->viewBuilder()->setOption('serialize', ['room']);
     }
 
+    /**
+     * DELETE /api/rooms/{id} — owner/admin only, for removing a room created
+     * with wrong details. Refused if the room has reservation history (that data
+     * must be preserved); any room-specific rates are removed with it.
+     */
+    public function delete(int $id): void
+    {
+        $this->request->allowMethod(['delete', 'post']);
+
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may delete rooms.');
+        }
+
+        $rooms = $this->fetchTable('Rooms');
+        $room = $this->scopeToProperty($rooms->find()->where(['Rooms.id' => $id]))->firstOrFail();
+
+        $reservations = $this->fetchTable('Reservations');
+        $hasHistory = $reservations->find()->where(['Reservations.room_id' => $id])->count() > 0;
+        if ($hasHistory) {
+            throw new BadRequestException('Cannot delete a room that has reservations. Set it to maintenance instead.');
+        }
+
+        $rooms->getConnection()->transactional(function () use ($rooms, $room, $id): void {
+            $this->fetchTable('RoomRates')->deleteAll(['room_id' => $id]);
+            $rooms->deleteOrFail($room);
+        });
+
+        $this->set('ok', true);
+        $this->viewBuilder()->setOption('serialize', ['ok']);
+    }
+
     private function validationFailed(array $errors): void
     {
         $this->response = $this->response->withStatus(422);

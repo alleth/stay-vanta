@@ -92,7 +92,12 @@ class UsersController extends AppController
             $data['name'] = $this->request->getData('name');
         }
         if ($this->request->getData('is_active') !== null) {
-            $data['is_active'] = (bool)$this->request->getData('is_active');
+            $isActive = (bool)$this->request->getData('is_active');
+            // You can't lock yourself out by deactivating your own account.
+            if (!$isActive && $user->id === (int)$this->currentUser->id) {
+                throw new ForbiddenException('You cannot deactivate your own account.');
+            }
+            $data['is_active'] = $isActive;
         }
         $users->patchEntity($user, $data);
 
@@ -109,12 +114,23 @@ class UsersController extends AppController
     /**
      * POST /api/users/{id}/reset-password — set a new password and revoke
      * any active token so the user must sign in again.
+     *
+     * Owners may reset anyone they manage. Admins may change their OWN password
+     * and reset their receptionists' passwords, but not reset a peer admin's.
      */
     public function resetPassword(int $id): void
     {
         $this->request->allowMethod('post');
         $users = $this->fetchTable('Users');
         $user = $this->findManageable($id);
+
+        if (
+            $this->userHasRole('admin')
+            && $user->id !== (int)$this->currentUser->id
+            && $user->role !== 'receptionist'
+        ) {
+            throw new ForbiddenException('Admins may only change their own password or reset receptionists.');
+        }
 
         $password = (string)$this->request->getData('password');
         if (strlen($password) < 8) {

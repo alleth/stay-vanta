@@ -94,6 +94,8 @@ return function (RouteBuilder $routes): void {
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->patch('/inventory-items/{id}', ['controller' => 'InventoryItems', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->delete('/inventory-items/{id}', ['controller' => 'InventoryItems', 'action' => 'delete'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         $builder->get('/stock-movements', ['controller' => 'StockMovements', 'action' => 'index']);
         $builder->post('/stock-movements', ['controller' => 'StockMovements', 'action' => 'add']);
@@ -104,6 +106,8 @@ return function (RouteBuilder $routes): void {
         $builder->patch('/rooms/{id}', ['controller' => 'Rooms', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->put('/rooms/{id}', ['controller' => 'Rooms', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->delete('/rooms/{id}', ['controller' => 'Rooms', 'action' => 'delete'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         $builder->get('/room-rates', ['controller' => 'RoomRates', 'action' => 'index']);
@@ -137,6 +141,8 @@ return function (RouteBuilder $routes): void {
         $builder->patch('/food-menu-items/{id}', ['controller' => 'FoodMenuItems', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->put('/food-menu-items/{id}', ['controller' => 'FoodMenuItems', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->delete('/food-menu-items/{id}', ['controller' => 'FoodMenuItems', 'action' => 'delete'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         $builder->get('/food-orders', ['controller' => 'FoodOrders', 'action' => 'index']);

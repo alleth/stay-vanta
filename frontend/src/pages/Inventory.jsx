@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
 import {
-  listCategories, createCategory, listItems, createItem, updateItem, listMovements, recordMovement,
+  listCategories, createCategory, listItems, createItem, updateItem, deleteItem, listMovements, recordMovement,
 } from '../api/inventory'
 
 const KINDS = ['food_stock', 'hygiene', 'linen', 'utensil', 'other']
@@ -73,6 +73,17 @@ export default function Inventory() {
   const reusable = view === 'reusable'
 
   const openMove = (item, action) => { setMoveTarget({ item, action }); setModal('move') }
+
+  async function doDeleteItem(item) {
+    if (!window.confirm(`Delete "${item.name}"? This removes the item and its stock history.`)) return
+    setError(null)
+    try {
+      await deleteItem(item.id)
+      refresh()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Could not delete the item.')
+    }
+  }
 
   if (!propertyId)
     return <Alert variant="info">Select or create a property to manage inventory.</Alert>
@@ -179,6 +190,10 @@ export default function Inventory() {
                           {canManage && (
                             <Button size="sm" variant="outline-primary" className="me-1"
                               onClick={() => { setEditTarget(it); setModal('item') }}>Edit</Button>
+                          )}
+                          {canManage && (
+                            <Button size="sm" variant="outline-danger" className="me-1"
+                              onClick={() => doDeleteItem(it)}>Delete</Button>
                           )}
                           {canManage && (reusable ? (
                             <ButtonGroup size="sm">

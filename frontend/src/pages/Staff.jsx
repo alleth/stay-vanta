@@ -12,8 +12,12 @@ import {
 const ROLE_VARIANT = { admin: 'primary', receptionist: 'info' }
 
 export default function Staff() {
-  const { role } = useAuth()
+  const { role, user } = useAuth()
   const { propertyId } = useProperty()
+  // Owners reset anyone; admins change their own password and reset their
+  // receptionists, but not a peer admin's.
+  const canSetPassword = (u) =>
+    role === 'owner' || u.id === user?.id || (role === 'admin' && u.role === 'receptionist')
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -87,14 +91,18 @@ export default function Staff() {
                       : <Badge bg="secondary">inactive</Badge>}
                   </td>
                   <td className="text-end">
-                    <Button size="sm" variant="outline-secondary" className="me-2"
-                      onClick={() => setModal({ type: 'reset', user: u })}>
-                      Reset password
-                    </Button>
-                    <Button size="sm" variant={u.is_active ? 'outline-danger' : 'outline-success'}
-                      onClick={() => toggleActive(u)}>
-                      {u.is_active ? 'Deactivate' : 'Reactivate'}
-                    </Button>
+                    {canSetPassword(u) && (
+                      <Button size="sm" variant="outline-secondary" className="me-2"
+                        onClick={() => setModal({ type: 'reset', user: u, self: u.id === user?.id })}>
+                        {u.id === user?.id ? 'Change password' : 'Reset password'}
+                      </Button>
+                    )}
+                    {u.id !== user?.id && (
+                      <Button size="sm" variant={u.is_active ? 'outline-danger' : 'outline-success'}
+                        onClick={() => toggleActive(u)}>
+                        {u.is_active ? 'Deactivate' : 'Reactivate'}
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -114,6 +122,7 @@ export default function Staff() {
       {modal?.type === 'reset' && (
         <ResetPasswordModal
           user={modal.user}
+          self={modal.self}
           onClose={() => setModal(null)}
           onSaved={() => setModal(null)}
         />
@@ -170,7 +179,7 @@ function AddStaffModal({ role, propertyId, onClose, onSaved }) {
   )
 }
 
-function ResetPasswordModal({ user, onClose, onSaved }) {
+function ResetPasswordModal({ user, self, onClose, onSaved }) {
   const [password, setPassword] = useState('')
   const [done, setDone] = useState(false)
   const { run, busy, err } = useSubmit(async () => {
@@ -181,16 +190,18 @@ function ResetPasswordModal({ user, onClose, onSaved }) {
   return (
     <Modal show onHide={onClose} centered>
       <Form onSubmit={run}>
-        <Modal.Header closeButton><Modal.Title>Reset password — {user.name}</Modal.Title></Modal.Header>
+        <Modal.Header closeButton>
+          <Modal.Title>{self ? 'Change my password' : `Reset password — ${user.name}`}</Modal.Title>
+        </Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
           {done ? (
             <Alert variant="success" className="mb-0">
-              Password updated. Any existing session for this user was revoked.
+              Password updated. {self ? 'You may need to sign in again.' : 'Any existing session for this user was revoked.'}
             </Alert>
           ) : (
             <Form.Group>
-              <Form.Label>New temporary password</Form.Label>
+              <Form.Label>New {self ? '' : 'temporary '}password</Form.Label>
               <Form.Control type="text" value={password} onChange={(e) => setPassword(e.target.value)}
                 minLength={8} required autoFocus placeholder="min 8 characters" />
             </Form.Group>

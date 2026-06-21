@@ -91,6 +91,32 @@ class FoodMenuItemsController extends AppController
         $this->viewBuilder()->setOption('serialize', ['menuItem']);
     }
 
+    /**
+     * DELETE /api/food-menu-items/{id}  (owner/admin)
+     *
+     * Refused if the item appears on any past order (that history must stay
+     * intact) — mark it unavailable instead.
+     */
+    public function delete(int $id): void
+    {
+        $this->request->allowMethod(['delete', 'post']);
+        $this->requireManager();
+
+        $menu = $this->fetchTable('FoodMenuItems');
+        $item = $this->scopeToProperty($menu->find()->where(['FoodMenuItems.id' => $id]))->firstOrFail();
+
+        $orderItems = $this->fetchTable('FoodOrderItems');
+        $used = $orderItems->find()->where(['FoodOrderItems.food_menu_item_id' => $id])->count() > 0;
+        if ($used) {
+            throw new BadRequestException('This item has order history. Mark it unavailable instead of deleting.');
+        }
+
+        $menu->deleteOrFail($item);
+
+        $this->set('ok', true);
+        $this->viewBuilder()->setOption('serialize', ['ok']);
+    }
+
     private function requireManager(): void
     {
         if (!$this->userHasRole('owner', 'admin')) {

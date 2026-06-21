@@ -116,15 +116,15 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET|POST /api/properties` (owner-only create; owner index contains each property's admin) · `PATCH|PUT /api/properties/{id}` (owner-only edit, incl. subscription_status & subscription_fee)
 - `GET /api/reports/owner-dashboard` (owner-only) — subscription revenue (week/month/YTD from each subscriber's monthly fee) + counts (hotels, active subscriptions, admins)
 - `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items, occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time)
-- `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; see `UsersController`)
+- `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate your own account**) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; admins may change their own password & reset their receptionists, but not a peer admin's; see `UsersController`)
 - `GET|POST /api/inventory-categories` (create is **owner/admin only**)
-- `GET /api/inventory-items` · `POST /api/inventory-items` (**owner/admin only**) · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity)
+- `GET /api/inventory-items` · `POST /api/inventory-items` (**owner/admin only**) · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity) · `DELETE /api/inventory-items/{id}` (**owner/admin only**; cascades the item's ledger rows & unlinks menu items)
 - `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (manual move is **owner/admin only**; receptionists' stock-out happens via Food & Orders, which records the movement internally stamped to them)
-- `GET|POST /api/rooms` · `PATCH|PUT /api/rooms/{id}`
+- `GET|POST /api/rooms` (create **owner/admin only**) · `PATCH|PUT /api/rooms/{id}` · `DELETE /api/rooms/{id}` (**owner/admin only**; refused if the room has reservations, removes room-specific rates)
 - `GET /api/room-rates[?room_id=]` · `POST /api/room-rates` (**owner/admin only**) · `PATCH|PUT /api/room-rates/{id}` (**owner/admin only**; fix a mistyped name/rate/target room — receptionists read rates but can't change them)
-- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`)
+- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`)
 - `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
-- `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` (owner/admin)
+- `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` · `DELETE /api/food-menu-items/{id}` (owner/admin; delete refused if the item has order history)
 - `GET|POST /api/food-orders[?status=]` · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
 - `GET /api/invoices[?guest_id=&status=]` · `GET /api/invoices/{id}` · `POST /api/invoices/{id}/settle`
 

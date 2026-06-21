@@ -8,10 +8,19 @@ import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
 import { matchGuests } from '../api/guests'
 import {
-  listRooms, createRoom, updateRoom,
+  listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
   listReservations, createReservation, transitionReservation,
 } from '../api/frontdesk'
+
+const todayStr = () => new Date().toISOString().slice(0, 10)
+// Monday of the current week as YYYY-MM-DD.
+function startOfWeek() {
+  const d = new Date()
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return d.toISOString().slice(0, 10)
+}
+const dateOf = (ts) => (ts ? new Date(ts).toISOString().slice(0, 10) : null)
 
 const SOURCES = [
   ['walk_in', 'Walk-in'], ['cocotel', 'Cocotel'], ['agoda', 'Agoda'],
@@ -44,7 +53,9 @@ export default function FrontDesk() {
   const [modal, setModal] = useState(null) // 'reservation' | 'room' | { type:'rate', rate? }
   const [reservationRoomId, setReservationRoomId] = useState(null)
   const [reservationDate, setReservationDate] = useState(null)
-  const [calDate, setCalDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [calDate, setCalDate] = useState(todayStr)
+  const [resFilter, setResFilter] = useState('today') // today | week | all
+  const today = todayStr()
 
   const refresh = useCallback(async () => {
     if (!propertyId) return
@@ -69,20 +80,32 @@ export default function FrontDesk() {
     refresh()
   }, [refresh])
 
-  // Cancelled reservations don't count toward the active total.
-  const activeCount = useMemo(
-    () => reservations.filter((r) => r.status !== 'cancelled').length,
-    [reservations],
-  )
   const availableRooms = useMemo(() => rooms.filter((r) => r.status === 'available'), [rooms])
 
-  // At-a-glance counts for the summary cards.
+  // At-a-glance counts. A `booked` reservation is a pending stay; once checked in
+  // the room is "occupied" (counted there, not as a reservation). The checked-out
+  // and cancelled cards monitor what happened *today*.
   const counts = useMemo(() => ({
     available: rooms.filter((r) => r.status === 'available').length,
     occupied: rooms.filter((r) => r.status === 'occupied').length,
     maintenance: rooms.filter((r) => r.status === 'maintenance').length,
-    reservations: activeCount,
-  }), [rooms, activeCount])
+    reservations: reservations.filter((r) => r.status === 'booked').length,
+    checkedOutToday: reservations.filter((r) => r.status === 'checked_out' && dateOf(r.checked_out_at) === today).length,
+    cancelledToday: reservations.filter((r) => r.status === 'cancelled' && dateOf(r.cancelled_at) === today).length,
+  }), [rooms, reservations, today])
+
+  // Front Desk shows a "fresh start" each day: pending bookings (booked /
+  // checked_in) always show, but completed transactions (checked_out / cancelled)
+  // only show if they happened within the selected window (today / this week / all).
+  const visibleReservations = useMemo(() => {
+    if (resFilter === 'all') return reservations
+    const from = resFilter === 'week' ? startOfWeek() : today
+    return reservations.filter((r) => {
+      if (r.status === 'booked' || r.status === 'checked_in') return true
+      const when = r.status === 'cancelled' ? dateOf(r.cancelled_at) : dateOf(r.checked_out_at)
+      return when !== null && when >= from
+    })
+  }, [reservations, resFilter, today])
 
   // Date filter: which rooms are free, and which reservations fall on calDate.
   // A reservation occupies a room for the nights [check_in, check_out), so the
@@ -124,6 +147,17 @@ export default function FrontDesk() {
     refresh()
   }
 
+  async function doDeleteRoom(room) {
+    if (!window.confirm(`Delete room ${room.room_number}? This can't be undone.`)) return
+    setError(null)
+    try {
+      await deleteRoom(room.id)
+      refresh()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Could not delete the room.')
+    }
+  }
+
   function onRoomStatusPick(room, value) {
     if (value === room.status) return
     // Putting a guest into a room means making a booking, not flipping a flag.
@@ -154,12 +188,23 @@ export default function FrontDesk() {
           <SummaryCard label="Occupied rooms" value={counts.occupied} variant="danger" />
           <SummaryCard label="Maintenance" value={counts.maintenance} variant="warning" />
           <SummaryCard label="Reservations" value={counts.reservations} variant="primary" />
+          <SummaryCard label="Checked out today" value={counts.checkedOutToday} variant="secondary" />
+          <SummaryCard label="Cancelled today" value={counts.cancelledToday} variant="dark" />
         </Row>
 
         <Tabs defaultActiveKey="reservations" className="mb-3">
           {/* ---- Reservations ---- */}
-          <Tab eventKey="reservations" title={`Reservations (${activeCount})`}>
-            <div className="d-flex justify-content-end mb-2">
+          <Tab eventKey="reservations" title={`Reservations (${visibleReservations.length})`}>
+            <div className="d-flex justify-content-between align-items-center mb-2 gap-2 flex-wrap">
+              <Form.Group className="d-flex align-items-center gap-2 mb-0">
+                <Form.Label className="mb-0 small text-muted">Show</Form.Label>
+                <Form.Select size="sm" value={resFilter} style={{ width: 'auto' }}
+                  onChange={(e) => setResFilter(e.target.value)}>
+                  <option value="today">Today&apos;s activity</option>
+                  <option value="week">This week</option>
+                  <option value="all">All</option>
+                </Form.Select>
+              </Form.Group>
               <Button onClick={() => openReservation()} disabled={availableRooms.length === 0}>
                 New reservation
               </Button>
@@ -174,10 +219,10 @@ export default function FrontDesk() {
                   </tr>
                 </thead>
                 <tbody>
-                  {reservations.length === 0 && (
-                    <tr><td colSpan={9} className="text-center text-muted py-4">No reservations.</td></tr>
+                  {visibleReservations.length === 0 && (
+                    <tr><td colSpan={9} className="text-center text-muted py-4">No reservations to show.</td></tr>
                   )}
-                  {reservations.map((r) => (
+                  {visibleReservations.map((r) => (
                     <tr key={r.id} className={r.status === 'cancelled' ? 'text-muted' : undefined}>
                       <td className="fw-semibold">
                         {r.guest?.full_name ?? '—'}{' '}
@@ -248,6 +293,10 @@ export default function FrontDesk() {
                           </option>
                         ))}
                       </Form.Select>
+                      {canManageRooms && (
+                        <Button size="sm" variant="outline-danger" className="w-100 mt-2"
+                          onClick={() => doDeleteRoom(room)}>Delete room</Button>
+                      )}
                     </Card.Body>
                   </Card>
                 </Col>
@@ -320,8 +369,10 @@ export default function FrontDesk() {
                             <span className="fw-semibold">{r.room_number}</span>
                             <span className="text-muted small ms-2">{r.room_type ?? 'Room'}</span>
                           </span>
-                          <Button size="sm" variant="outline-primary"
-                            onClick={() => openReservation(r.id, calDate)}>Book</Button>
+                          {calDate >= today && (
+                            <Button size="sm" variant="outline-primary"
+                              onClick={() => openReservation(r.id, calDate)}>Book</Button>
+                          )}
                         </ListGroup.Item>
                       ))}
                     </ListGroup>
@@ -376,7 +427,7 @@ export default function FrontDesk() {
 
 function SummaryCard({ label, value, variant }) {
   return (
-    <Col xs={6} lg={3}>
+    <Col xs={6} md={4} lg={2}>
       <Card className="shadow-sm h-100">
         <Card.Body>
           <div className="text-muted small">{label}</div>
@@ -455,11 +506,13 @@ function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, on
             </Form.Group></Col>
             <Col md={3}><Form.Group className="mb-3">
               <Form.Label>Check-in</Form.Label>
-              <Form.Control type="date" value={form.check_in} onChange={set('check_in')} required />
+              <Form.Control type="date" value={form.check_in} onChange={set('check_in')}
+                min={todayStr()} required />
             </Form.Group></Col>
             <Col md={3}><Form.Group className="mb-3">
               <Form.Label>Check-out</Form.Label>
-              <Form.Control type="date" value={form.check_out} onChange={set('check_out')} required />
+              <Form.Control type="date" value={form.check_out} onChange={set('check_out')}
+                min={form.check_in || todayStr()} required />
             </Form.Group></Col>
           </Row>
           <Row>

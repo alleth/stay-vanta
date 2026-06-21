@@ -13,6 +13,9 @@ export const createRoom = (data, propertyId) =>
 export const updateRoom = (id, data) =>
   client.patch(`/rooms/${id}`, data).then((r) => r.data.room)
 
+export const deleteRoom = (id) =>
+  client.delete(`/rooms/${id}`).then((r) => r.data)
+
 // Room rates
 export const listRoomRates = (propertyId) =>
   client.get('/room-rates', { params: withProp({}, propertyId) }).then((r) => r.data.roomRates)
