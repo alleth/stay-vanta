@@ -27,6 +27,22 @@ class InvoicesController extends AppController
             $query->where(['Invoices.status' => $status]);
         }
 
+        // Day filter: each day is a fresh start, but an OPEN tab always shows
+        // (an unsettled invoice from a previous day must not disappear).
+        $date = $this->request->getQuery('date');
+        if ($date !== null && $date !== 'all' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $next = date('Y-m-d', strtotime($date . ' +1 day'));
+            $query->where(function (\Cake\Database\Expression\QueryExpression $exp) use ($date, $next) {
+                return $exp->or([
+                    'Invoices.status' => 'open',
+                    $exp->and([
+                        'Invoices.created >=' => $date . ' 00:00:00',
+                        'Invoices.created <' => $next . ' 00:00:00',
+                    ]),
+                ]);
+            });
+        }
+
         $this->set('invoices', $query->all());
         $this->viewBuilder()->setOption('serialize', ['invoices']);
     }

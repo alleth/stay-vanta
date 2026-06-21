@@ -24,16 +24,42 @@ class FoodOrdersController extends AppController
             $orders->find()
                 ->contain(['Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems']])
                 ->orderBy(['FoodOrders.created' => 'DESC'])
-                ->limit(200)
         );
 
         $status = $this->request->getQuery('status');
-        if ($status !== null) {
+        if ($status !== null && $status !== 'all') {
             $query->where(['FoodOrders.status' => $status]);
         }
 
-        $this->set('orders', $query->all());
-        $this->viewBuilder()->setOption('serialize', ['orders']);
+        // Day filter (default handled client-side): each day is a fresh start.
+        $this->applyDateFilter($query, 'FoodOrders.created', $this->request->getQuery('date'));
+
+        // Pagination — orders can grow large.
+        $total = $query->count();
+        $limit = min(100, max(5, (int)($this->request->getQuery('limit') ?? 20)));
+        $page = max(1, (int)($this->request->getQuery('page') ?? 1));
+        $query->limit($limit)->offset(($page - 1) * $limit);
+
+        $this->set([
+            'orders' => $query->all(),
+            'total' => $total,
+            'page' => $page,
+            'limit' => $limit,
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['orders', 'total', 'page', 'limit']);
+    }
+
+    /**
+     * Restrict a query to a single calendar day on $column unless $date is empty
+     * or 'all'. $date must be YYYY-MM-DD.
+     */
+    private function applyDateFilter(\Cake\ORM\Query\SelectQuery $query, string $column, ?string $date): void
+    {
+        if ($date === null || $date === 'all' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return;
+        }
+        $next = date('Y-m-d', strtotime($date . ' +1 day'));
+        $query->where([$column . ' >=' => $date . ' 00:00:00', $column . ' <' => $next . ' 00:00:00']);
     }
 
     /**

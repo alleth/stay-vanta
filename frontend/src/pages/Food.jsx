@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Row, Col, Alert, Spinner, InputGroup,
+  Pagination, ListGroup,
 } from 'react-bootstrap'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
@@ -9,13 +10,17 @@ import { formatMoney } from '../utils/format'
 import {
   listMenu, createMenuItem, updateMenuItem, deleteMenuItem,
   listOrders, createOrder, serveOrder, cancelOrder,
-  listInvoices, settleInvoice,
+  listInvoices, getInvoice, settleInvoice,
 } from '../api/food'
 import { listItems } from '../api/inventory'
 import { listGuests } from '../api/guests'
 
 const PAY_VARIANT = { paid: 'success', charge_to_room: 'warning', unpaid: 'secondary' }
 const ORDER_VARIANT = { open: 'primary', served: 'success', cancelled: 'dark' }
+const ORDERS_PER_PAGE = 20
+
+const todayStr = () => new Date().toISOString().slice(0, 10)
+const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : '—')
 
 export default function Food() {
   const { role } = useAuth()
@@ -23,25 +28,39 @@ export default function Food() {
   const canManageMenu = role === 'owner' || role === 'admin'
 
   const [menu, setMenu] = useState([])
-  const [orders, setOrders] = useState([])
-  const [invoices, setInvoices] = useState([])
   const [inventory, setInventory] = useState([])
   const [guests, setGuests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pending, setPending] = useState(null) // key of the in-flight inline action
-  const [modal, setModal] = useState(null) // 'order' | 'menu' | { type:'menu', item }
+  const [modal, setModal] = useState(null) // 'order' | 'menu' | {type:'menu',item} | {type:'invoice',id}
 
-  const refresh = useCallback(async () => {
+  // Orders — server-paginated and filtered (a fresh start each day).
+  const [orders, setOrders] = useState([])
+  const [ordersTotal, setOrdersTotal] = useState(0)
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [orderPage, setOrderPage] = useState(1)
+  const [orderStatus, setOrderStatus] = useState('all')
+  const [orderDate, setOrderDate] = useState(todayStr)
+  const [orderAll, setOrderAll] = useState(false)
+
+  // Invoices — date-filtered (open tabs always show).
+  const [invoices, setInvoices] = useState([])
+  const [invoicesLoading, setInvoicesLoading] = useState(false)
+  const [invoiceDate, setInvoiceDate] = useState(todayStr)
+  const [invoiceAll, setInvoiceAll] = useState(false)
+
+  // Menu — client-side search + linked-stock filter.
+  const [menuSearch, setMenuSearch] = useState('')
+  const [menuStock, setMenuStock] = useState('all')
+
+  const loadBase = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [m, o, inv, items, g] = await Promise.all([
-        listMenu(propertyId), listOrders(propertyId), listInvoices(propertyId),
-        listItems(propertyId), listGuests(propertyId),
+      const [m, items, g] = await Promise.all([
+        listMenu(propertyId), listItems(propertyId), listGuests(propertyId),
       ])
       setMenu(m)
-      setOrders(o)
-      setInvoices(inv)
       setInventory(items)
       setGuests(g)
       setError(null)
@@ -52,20 +71,48 @@ export default function Food() {
     }
   }, [propertyId])
 
-  useEffect(() => {
-    // State updates run after the awaited fetch; safe data effect.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh()
-  }, [refresh])
+  const loadOrders = useCallback(async () => {
+    if (!propertyId) return
+    setOrdersLoading(true)
+    try {
+      const params = { page: orderPage, limit: ORDERS_PER_PAGE, date: orderAll ? 'all' : orderDate }
+      if (orderStatus !== 'all') params.status = orderStatus
+      const data = await listOrders(propertyId, params)
+      setOrders(data.orders ?? [])
+      setOrdersTotal(data.total ?? (data.orders?.length ?? 0))
+    } catch {
+      setError('Could not load orders.')
+    } finally {
+      setOrdersLoading(false)
+    }
+  }, [propertyId, orderPage, orderStatus, orderDate, orderAll])
 
-  // `key` identifies the in-flight button so we can show a spinner on it and
-  // disable the others while the request is running.
+  const loadInvoices = useCallback(async () => {
+    if (!propertyId) return
+    setInvoicesLoading(true)
+    try {
+      setInvoices(await listInvoices(propertyId, { date: invoiceAll ? 'all' : invoiceDate }))
+    } catch {
+      setError('Could not load invoices.')
+    } finally {
+      setInvoicesLoading(false)
+    }
+  }, [propertyId, invoiceDate, invoiceAll])
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadBase() }, [loadBase])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadOrders() }, [loadOrders])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadInvoices() }, [loadInvoices])
+
+  // `key` identifies the in-flight button (spinner + disable the rest).
   async function act(key, fn, ...args) {
     setPending(key)
     setError(null)
     try {
       await fn(...args)
-      await refresh()
+      await Promise.all([loadOrders(), loadInvoices(), loadBase()])
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Action failed.')
     } finally {
@@ -73,17 +120,35 @@ export default function Food() {
     }
   }
 
-  // Group the menu by its linked stock's category (prepared items that aren't
-  // linked to stock fall under "Unlinked / prepared").
+  // Distinct linked-stock items for the menu filter.
+  const stockOptions = useMemo(() => {
+    const map = new Map()
+    for (const m of menu) if (m.inventory_item) map.set(m.inventory_item.id, m.inventory_item.name)
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [menu])
+
+  const filteredMenu = useMemo(() => {
+    const q = menuSearch.trim().toLowerCase()
+    return menu.filter((m) => {
+      if (q && !m.name.toLowerCase().includes(q)) return false
+      if (menuStock === 'unlinked') return !m.inventory_item_id
+      if (menuStock !== 'all') return String(m.inventory_item_id) === menuStock
+      return true
+    })
+  }, [menu, menuSearch, menuStock])
+
+  // Group the (filtered) menu by its linked stock's category.
   const menuGroups = useMemo(() => {
     const groups = new Map()
-    for (const m of menu) {
+    for (const m of filteredMenu) {
       const cat = m.inventory_item?.inventory_category?.name ?? 'Unlinked / prepared'
       if (!groups.has(cat)) groups.set(cat, [])
       groups.get(cat).push(m)
     }
     return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  }, [menu])
+  }, [filteredMenu])
+
+  const totalPages = Math.max(1, Math.ceil(ordersTotal / ORDERS_PER_PAGE))
 
   if (!propertyId)
     return <Alert variant="info">Select or create a property to use Food &amp; Orders.</Alert>
@@ -98,25 +163,50 @@ export default function Food() {
       ) : (
         <Tabs defaultActiveKey="orders" className="mb-3">
           {/* ---- Orders ---- */}
-          <Tab eventKey="orders" title={`Orders (${orders.length})`}>
-            <div className="d-flex justify-content-end mb-2">
-              <Button onClick={() => setModal('order')} disabled={menu.length === 0}>New order</Button>
-            </div>
+          <Tab eventKey="orders" title={`Orders (${ordersTotal})`}>
+            <Card className="shadow-sm mb-2">
+              <Card.Body className="d-flex flex-wrap align-items-end gap-3">
+                <Form.Group>
+                  <Form.Label className="small text-muted mb-1">Status</Form.Label>
+                  <Form.Select size="sm" value={orderStatus} style={{ width: 'auto' }}
+                    onChange={(e) => { setOrderStatus(e.target.value); setOrderPage(1) }}>
+                    <option value="all">All statuses</option>
+                    <option value="open">Open</option>
+                    <option value="served">Served</option>
+                    <option value="cancelled">Cancelled</option>
+                  </Form.Select>
+                </Form.Group>
+                <Form.Group>
+                  <Form.Label className="small text-muted mb-1">Date</Form.Label>
+                  <Form.Control type="date" size="sm" value={orderDate} disabled={orderAll} style={{ width: 'auto' }}
+                    onChange={(e) => { setOrderDate(e.target.value); setOrderPage(1) }} />
+                </Form.Group>
+                <Form.Check type="checkbox" label="All dates" className="mb-1" checked={orderAll}
+                  onChange={(e) => { setOrderAll(e.target.checked); setOrderPage(1) }} />
+                <div className="ms-auto">
+                  <Button onClick={() => setModal('order')} disabled={menu.length === 0}>New order</Button>
+                </div>
+              </Card.Body>
+            </Card>
             <Card className="shadow-sm">
               <Table responsive hover className="mb-0 align-middle">
                 <thead>
                   <tr>
-                    <th>#</th><th>Items</th><th>Guest</th><th className="text-end">Total</th>
+                    <th>#</th><th>Date</th><th>Items</th><th>Guest</th><th className="text-end">Total</th>
                     <th>Payment</th><th>Status</th><th>Receptionist</th><th className="text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.length === 0 && (
-                    <tr><td colSpan={8} className="text-center text-muted py-4">No orders yet.</td></tr>
+                  {ordersLoading && (
+                    <tr><td colSpan={9} className="text-center py-4"><Spinner size="sm" /></td></tr>
                   )}
-                  {orders.map((o) => (
+                  {!ordersLoading && orders.length === 0 && (
+                    <tr><td colSpan={9} className="text-center text-muted py-4">No orders to show.</td></tr>
+                  )}
+                  {!ordersLoading && orders.map((o) => (
                     <tr key={o.id}>
                       <td>{o.id}</td>
+                      <td className="small text-muted text-nowrap">{fmtDateTime(o.created)}</td>
                       <td className="small">
                         {o.food_order_items?.map((it) =>
                           `${it.quantity}× ${it.food_menu_item?.name ?? 'item'}`).join(', ')}
@@ -147,16 +237,46 @@ export default function Food() {
                   ))}
                 </tbody>
               </Table>
+              {totalPages > 1 && (
+                <Card.Footer className="d-flex justify-content-between align-items-center">
+                  <span className="small text-muted">
+                    Page {orderPage} of {totalPages} · {ordersTotal} order(s)
+                  </span>
+                  <Pagination size="sm" className="mb-0">
+                    <Pagination.Prev disabled={orderPage <= 1 || ordersLoading}
+                      onClick={() => setOrderPage((p) => Math.max(1, p - 1))} />
+                    <Pagination.Next disabled={orderPage >= totalPages || ordersLoading}
+                      onClick={() => setOrderPage((p) => Math.min(totalPages, p + 1))} />
+                  </Pagination>
+                </Card.Footer>
+              )}
             </Card>
           </Tab>
 
           {/* ---- Menu ---- */}
           <Tab eventKey="menu" title={`Menu (${menu.length})`}>
-            {canManageMenu && (
-              <div className="d-flex justify-content-end mb-2">
-                <Button onClick={() => setModal('menu')}>Add menu item</Button>
-              </div>
-            )}
+            <Card className="shadow-sm mb-2">
+              <Card.Body className="d-flex flex-wrap align-items-end gap-3">
+                <Form.Group>
+                  <Form.Label className="small text-muted mb-1">Search</Form.Label>
+                  <Form.Control size="sm" value={menuSearch} placeholder="Item name" style={{ width: 200 }}
+                    onChange={(e) => setMenuSearch(e.target.value)} />
+                </Form.Group>
+                <Form.Group>
+                  <Form.Label className="small text-muted mb-1">Linked stock</Form.Label>
+                  <Form.Select size="sm" value={menuStock} style={{ width: 'auto' }}
+                    onChange={(e) => setMenuStock(e.target.value)}>
+                    <option value="all">All</option>
+                    <option value="unlinked">Unlinked / prepared</option>
+                    {stockOptions.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
+                  </Form.Select>
+                </Form.Group>
+                <span className="text-muted small">{filteredMenu.length} shown</span>
+                {canManageMenu && (
+                  <div className="ms-auto"><Button onClick={() => setModal('menu')}>Add menu item</Button></div>
+                )}
+              </Card.Body>
+            </Card>
             <Card className="shadow-sm">
               <Table responsive hover className="mb-0 align-middle">
                 <thead>
@@ -166,7 +286,7 @@ export default function Food() {
                   </tr>
                 </thead>
                 <tbody>
-                  {menu.length === 0 && (
+                  {filteredMenu.length === 0 && (
                     <tr><td colSpan={canManageMenu ? 5 : 4} className="text-center text-muted py-4">No menu items.</td></tr>
                   )}
                   {menuGroups.map(([category, items]) => (
@@ -209,21 +329,42 @@ export default function Food() {
 
           {/* ---- Invoices ---- */}
           <Tab eventKey="invoices" title={`Invoices (${invoices.length})`}>
+            <Card className="shadow-sm mb-2">
+              <Card.Body className="d-flex flex-wrap align-items-end gap-3">
+                <Form.Group>
+                  <Form.Label className="small text-muted mb-1">Date</Form.Label>
+                  <Form.Control type="date" size="sm" value={invoiceDate} disabled={invoiceAll} style={{ width: 'auto' }}
+                    onChange={(e) => setInvoiceDate(e.target.value)} />
+                </Form.Group>
+                <Form.Check type="checkbox" label="All dates" className="mb-1" checked={invoiceAll}
+                  onChange={(e) => setInvoiceAll(e.target.checked)} />
+                <span className="text-muted small">Open tabs always show.</span>
+              </Card.Body>
+            </Card>
             <Card className="shadow-sm">
               <Table responsive hover className="mb-0 align-middle">
                 <thead>
-                  <tr><th>Guest</th><th className="text-end">Total</th><th>Status</th><th className="text-end">Actions</th></tr>
+                  <tr>
+                    <th>Guest</th><th>Opened</th><th className="text-end">Total</th><th>Status</th>
+                    <th className="text-end">Actions</th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {invoices.length === 0 && (
-                    <tr><td colSpan={4} className="text-center text-muted py-4">No invoices.</td></tr>
+                  {invoicesLoading && (
+                    <tr><td colSpan={5} className="text-center py-4"><Spinner size="sm" /></td></tr>
                   )}
-                  {invoices.map((inv) => (
+                  {!invoicesLoading && invoices.length === 0 && (
+                    <tr><td colSpan={5} className="text-center text-muted py-4">No invoices to show.</td></tr>
+                  )}
+                  {!invoicesLoading && invoices.map((inv) => (
                     <tr key={inv.id}>
                       <td className="fw-semibold">{inv.guest?.full_name ?? '—'}</td>
+                      <td className="small text-muted text-nowrap">{fmtDateTime(inv.created)}</td>
                       <td className="text-end">{formatMoney(inv.total)}</td>
                       <td><Badge bg={inv.status === 'open' ? 'warning' : 'success'}>{inv.status}</Badge></td>
-                      <td className="text-end">
+                      <td className="text-end text-nowrap">
+                        <Button size="sm" variant="outline-secondary" className="me-1"
+                          onClick={() => setModal({ type: 'invoice', id: inv.id })}>View</Button>
                         {inv.status === 'open' && (
                           <Button size="sm" variant="outline-success"
                             disabled={pending !== null}
@@ -243,13 +384,69 @@ export default function Food() {
 
       {modal === 'order' && (
         <OrderModal menu={menu.filter((m) => m.is_available)} guests={guests} propertyId={propertyId}
-          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
+          onClose={() => setModal(null)} onSaved={() => { setModal(null); loadOrders(); loadInvoices() }} />
       )}
       {(modal === 'menu' || modal?.type === 'menu') && (
         <MenuModal item={modal?.item} inventory={inventory} propertyId={propertyId}
-          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
+          onClose={() => setModal(null)} onSaved={() => { setModal(null); loadBase() }} />
+      )}
+      {modal?.type === 'invoice' && (
+        <InvoiceModal id={modal.id} onClose={() => setModal(null)} />
       )}
     </div>
+  )
+}
+
+function InvoiceModal({ id, onClose }) {
+  const [invoice, setInvoice] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    getInvoice(id).then(setInvoice).catch(() => setError('Could not load the invoice.'))
+  }, [id])
+
+  return (
+    <Modal show onHide={onClose} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Invoice #{id}{invoice?.guest ? ` — ${invoice.guest.full_name}` : ''}</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        {error && <Alert variant="danger">{error}</Alert>}
+        {!invoice && !error && <div className="text-center py-3"><Spinner /></div>}
+        {invoice && (
+          <>
+            <div className="d-flex justify-content-between mb-2">
+              <Badge bg={invoice.status === 'open' ? 'warning' : 'success'}>{invoice.status}</Badge>
+              <span className="small text-muted">
+                Opened {fmtDateTime(invoice.created)}
+                {invoice.settled_at && ` · Settled ${fmtDateTime(invoice.settled_at)}`}
+              </span>
+            </div>
+            {invoice.invoice_lines?.length ? (
+              <ListGroup variant="flush">
+                {invoice.invoice_lines.map((l) => (
+                  <ListGroup.Item key={l.id} className="d-flex justify-content-between px-0">
+                    <span>
+                      {l.description}
+                      {l.source_type && <span className="text-muted small ms-2">{l.source_type.replace('_', ' ')}</span>}
+                    </span>
+                    <span>{formatMoney(l.amount)}</span>
+                  </ListGroup.Item>
+                ))}
+              </ListGroup>
+            ) : (
+              <p className="text-muted mb-0">No line items.</p>
+            )}
+            <div className="d-flex justify-content-between fw-bold border-top pt-2 mt-2">
+              <span>Total</span><span>{formatMoney(invoice.total)}</span>
+            </div>
+          </>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
+      </Modal.Footer>
+    </Modal>
   )
 }
 

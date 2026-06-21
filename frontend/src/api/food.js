@@ -16,9 +16,9 @@ export const updateMenuItem = (id, data) =>
 export const deleteMenuItem = (id) =>
   client.delete(`/food-menu-items/${id}`).then((r) => r.data)
 
-// Orders
+// Orders — returns { orders, total, page, limit } for pagination.
 export const listOrders = (propertyId, params = {}) =>
-  client.get('/food-orders', { params: withProp(params, propertyId) }).then((r) => r.data.orders)
+  client.get('/food-orders', { params: withProp(params, propertyId) }).then((r) => r.data)
 
 export const createOrder = (data, propertyId) =>
   client.post('/food-orders', withProp(data, propertyId)).then((r) => r.data.order)

@@ -130,8 +130,8 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`)
 - `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
 - `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` · `DELETE /api/food-menu-items/{id}` (owner/admin; **soft-delete** — sets `deleted_at`, hides it from the menu/new orders, keeps the row so order history stays intact)
-- `GET|POST /api/food-orders[?status=]` · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
-- `GET /api/invoices[?guest_id=&status=]` · `GET /api/invoices/{id}` · `POST /api/invoices/{id}/settle`
+- `GET|POST /api/food-orders[?status=&date=YYYY-MM-DD|all&page=&limit=]` (index is **paginated** → returns `{orders,total,page,limit}`; `date` defaults client-side to today for a fresh-start view, `limit` clamped 5–100) · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
+- `GET /api/invoices[?guest_id=&status=&date=YYYY-MM-DD|all]` (`date` hides other days, but **open tabs always show**) · `GET /api/invoices/{id}` (with line items, for the detail modal) · `POST /api/invoices/{id}/settle`
 
 Implemented frontend pages (all five modules): `src/pages/Inventory.jsx`, `src/pages/Staff.jsx`,
 `src/pages/FrontDesk.jsx` (Reservations / Rooms / Rates), `src/pages/Guests.jsx`
