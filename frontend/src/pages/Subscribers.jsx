@@ -38,6 +38,8 @@ export default function Subscribers() {
   }
 
   useEffect(() => {
+    // load() only updates state after awaiting the network; safe data effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
   }, [])
 

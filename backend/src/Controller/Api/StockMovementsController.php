@@ -37,11 +37,15 @@ class StockMovementsController extends AppController
 
     /**
      * POST /api/stock-movements
-     * { inventory_item_id, direction: in|out, quantity, reason?, note? }
+     * { inventory_item_id, direction: in|out, quantity, reason?, note?, affects_total? }
      *
      * The acting user (the authenticated receptionist) is recorded on both the
      * movement and the item — this is the core accountability stamp. Owners and
      * admins may also move stock; whoever is authenticated is recorded.
+     *
+     * For reusable items, `affects_total` distinguishes acquiring/retiring units
+     * (owned total moves too) from merely issuing/returning them (only the
+     * available count moves). Ignored for consumables.
      */
     public function add(): void
     {
@@ -67,7 +71,8 @@ class StockMovementsController extends AppController
                 [
                     'reason' => $this->request->getData('reason'),
                     'note' => $this->request->getData('note'),
-                ]
+                ],
+                (bool)$this->request->getData('affects_total')
             );
         } catch (RuntimeException $e) {
             throw new BadRequestException($e->getMessage());

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Rooms.
@@ -35,6 +36,11 @@ class RoomsController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
+
+        // Only owners/admins may add rooms; receptionists manage existing ones.
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may add rooms.');
+        }
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {

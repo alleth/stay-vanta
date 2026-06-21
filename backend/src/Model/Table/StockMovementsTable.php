@@ -69,6 +69,9 @@ class StockMovementsTable extends Table
      * @param float $quantity Positive amount to move.
      * @param int $receptionistId The acting receptionist (accountability).
      * @param array $extra Optional reason/reference_type/reference_id/note.
+     * @param bool $affectsTotal When true the owned total (total_quantity) moves
+     *   with the available quantity — i.e. acquiring/retiring reusable units, as
+     *   opposed to merely issuing/returning them. Ignored for consumables.
      * @throws \RuntimeException When an 'out' would drive stock negative.
      */
     public function record(
@@ -76,14 +79,28 @@ class StockMovementsTable extends Table
         string $direction,
         float $quantity,
         int $receptionistId,
-        array $extra = []
+        array $extra = [],
+        bool $affectsTotal = false,
     ): StockMovement {
         return $this->getConnection()->transactional(
-            function () use ($item, $direction, $quantity, $receptionistId, $extra): StockMovement {
+            function () use ($item, $direction, $quantity, $receptionistId, $extra, $affectsTotal): StockMovement {
                 $delta = $direction === 'out' ? -$quantity : $quantity;
                 $newQty = (float)$item->quantity + $delta;
                 if ($newQty < 0) {
                     throw new RuntimeException('Insufficient stock for this movement.');
+                }
+
+                // Reusable accounting: acquiring/retiring moves the owned total
+                // too; a plain return ('in') must not exceed the units owned.
+                $isReusable = $item->tracking_type === 'reusable';
+                if ($isReusable && $affectsTotal) {
+                    $newTotal = (float)$item->total_quantity + $delta;
+                    if ($newTotal < 0) {
+                        throw new RuntimeException('Cannot reduce owned stock below zero.');
+                    }
+                    $item->set('total_quantity', $newTotal);
+                } elseif ($isReusable && $newQty > (float)$item->total_quantity) {
+                    throw new RuntimeException('Cannot return more than the total owned.');
                 }
 
                 $movement = $this->newEntity([
@@ -105,7 +122,7 @@ class StockMovementsTable extends Table
                 $items->saveOrFail($item);
 
                 return $movement;
-            }
+            },
         );
     }
 }
