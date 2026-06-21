@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Row, Col, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ButtonGroup, ToggleButton,
 } from 'react-bootstrap'
+import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
 import {
-  listCategories, createCategory, listItems, createItem, listMovements, recordMovement,
+  listCategories, createCategory, listItems, createItem, updateItem, listMovements, recordMovement,
 } from '../api/inventory'
 
 const KINDS = ['food_stock', 'hygiene', 'linen', 'utensil', 'other']
@@ -26,7 +27,11 @@ const REUSABLE_ACTIONS = {
 const trackingOf = (it) => (it.tracking_type === 'reusable' ? 'reusable' : 'consumable')
 
 export default function Inventory() {
+  const { role } = useAuth()
   const { propertyId } = useProperty()
+  // Receptionists operate the catalogue read-only: no category creation, no
+  // manual stock moves, no edits. Stock leaves via Food & Orders instead.
+  const canManage = role === 'owner' || role === 'admin'
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [movements, setMovements] = useState([])
@@ -36,6 +41,7 @@ export default function Inventory() {
 
   const [modal, setModal] = useState(null) // 'category' | 'item' | 'move'
   const [moveTarget, setMoveTarget] = useState(null)
+  const [editTarget, setEditTarget] = useState(null) // item being edited (null = new)
 
   const refresh = useCallback(async () => {
     if (!propertyId) return
@@ -81,10 +87,12 @@ export default function Inventory() {
           </small>
         </div>
         <div className="d-flex gap-2">
-          <Button variant="outline-secondary" onClick={() => setModal('category')}>
-            New category
-          </Button>
-          <Button onClick={() => setModal('item')} disabled={categories.length === 0}>
+          {canManage && (
+            <Button variant="outline-secondary" onClick={() => setModal('category')}>
+              New category
+            </Button>
+          )}
+          <Button onClick={() => { setEditTarget(null); setModal('item') }} disabled={categories.length === 0}>
             New item
           </Button>
         </div>
@@ -167,8 +175,12 @@ export default function Inventory() {
                         <td className="text-muted small">
                           {it.last_receptionist?.name ?? '—'}
                         </td>
-                        <td className="text-end">
-                          {reusable ? (
+                        <td className="text-end text-nowrap">
+                          {canManage && (
+                            <Button size="sm" variant="outline-primary" className="me-1"
+                              onClick={() => { setEditTarget(it); setModal('item') }}>Edit</Button>
+                          )}
+                          {canManage && (reusable ? (
                             <ButtonGroup size="sm">
                               {Object.entries(REUSABLE_ACTIONS).map(([key, a]) => (
                                 <Button key={key} variant={a.variant} onClick={() => openMove(it, key)}>
@@ -181,7 +193,7 @@ export default function Inventory() {
                               <Button variant="outline-success" onClick={() => openMove(it, 'in')}>In</Button>
                               <Button variant="outline-danger" onClick={() => openMove(it, 'out')}>Out</Button>
                             </ButtonGroup>
-                          )}
+                          ))}
                         </td>
                       </tr>
                     )
@@ -231,9 +243,10 @@ export default function Inventory() {
         <ItemModal
           propertyId={propertyId}
           categories={categories}
+          item={editTarget}
           defaultTracking={view}
-          onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); refresh() }}
+          onClose={() => { setModal(null); setEditTarget(null) }}
+          onSaved={() => { setModal(null); setEditTarget(null); refresh() }}
         />
       )}
       {modal === 'move' && moveTarget && (
@@ -281,22 +294,33 @@ function CategoryModal({ propertyId, onClose, onSaved }) {
   )
 }
 
-function ItemModal({ propertyId, categories, defaultTracking, onClose, onSaved }) {
+function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onSaved }) {
+  const editing = Boolean(item)
   const [form, setForm] = useState({
-    inventory_category_id: categories[0]?.id ?? '',
-    name: '', tracking_type: defaultTracking ?? 'consumable',
-    unit: 'pcs', reorder_level: 0, quantity: 0,
+    inventory_category_id: item?.inventory_category_id ?? categories[0]?.id ?? '',
+    name: item?.name ?? '',
+    tracking_type: item?.tracking_type ?? defaultTracking ?? 'consumable',
+    unit: item?.unit ?? 'pcs',
+    reorder_level: item?.reorder_level ?? 0,
+    quantity: 0,
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const reusable = form.tracking_type === 'reusable'
+  const typeChanged = editing && form.tracking_type !== item.tracking_type
   const { run, busy, err } = useSubmit(async () => {
-    await createItem(form, propertyId)
+    if (editing) {
+      const patch = { ...form }
+      delete patch.quantity // never edit quantity directly
+      await updateItem(item.id, patch)
+    } else {
+      await createItem(form, propertyId)
+    }
     onSaved()
   })
   return (
     <Modal show onHide={onClose} centered>
       <Form onSubmit={run}>
-        <Modal.Header closeButton><Modal.Title>New item</Modal.Title></Modal.Header>
+        <Modal.Header closeButton><Modal.Title>{editing ? 'Edit item' : 'New item'}</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
           <Form.Group className="mb-3">
@@ -305,6 +329,13 @@ function ItemModal({ propertyId, categories, defaultTracking, onClose, onSaved }
               <option value="consumable">Consumable (depletes when used)</option>
               <option value="reusable">Reusable (issued out & returned)</option>
             </Form.Select>
+            {typeChanged && (
+              <Form.Text className="text-warning">
+                {reusable
+                  ? 'Switching to reusable: current on-hand becomes the owned total.'
+                  : 'Switching to consumable: the owned-total tracking is dropped.'}
+              </Form.Text>
+            )}
           </Form.Group>
           <Form.Group className="mb-3">
             <Form.Label>Category</Form.Label>
@@ -325,15 +356,17 @@ function ItemModal({ propertyId, categories, defaultTracking, onClose, onSaved }
               <Form.Label>Reorder level</Form.Label>
               <Form.Control type="number" min={0} value={form.reorder_level} onChange={set('reorder_level')} />
             </Form.Group></Col>
-            <Col><Form.Group className="mb-3">
-              <Form.Label>{reusable ? 'Units owned' : 'Opening qty'}</Form.Label>
-              <Form.Control type="number" min={0} value={form.quantity} onChange={set('quantity')} />
-            </Form.Group></Col>
+            {!editing && (
+              <Col><Form.Group className="mb-3">
+                <Form.Label>{reusable ? 'Units owned' : 'Opening qty'}</Form.Label>
+                <Form.Control type="number" min={0} value={form.quantity} onChange={set('quantity')} />
+              </Form.Group></Col>
+            )}
           </Row>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : 'Create'}</Button>
+          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
         </Modal.Footer>
       </Form>
     </Modal>

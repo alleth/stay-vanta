@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ForbiddenException;
 use RuntimeException;
 
 /**
@@ -39,9 +40,11 @@ class StockMovementsController extends AppController
      * POST /api/stock-movements
      * { inventory_item_id, direction: in|out, quantity, reason?, note?, affects_total? }
      *
-     * The acting user (the authenticated receptionist) is recorded on both the
-     * movement and the item — this is the core accountability stamp. Owners and
-     * admins may also move stock; whoever is authenticated is recorded.
+     * The acting user is recorded on both the movement and the item — the core
+     * accountability stamp. This manual endpoint is **owner/admin only**:
+     * receptionists don't move stock by hand; a consumable goes "out" when it is
+     * ordered through Food & Orders (FoodOrdersTable::place records that movement
+     * stamped to the acting receptionist).
      *
      * For reusable items, `affects_total` distinguishes acquiring/retiring units
      * (owned total moves too) from merely issuing/returning them (only the
@@ -50,6 +53,10 @@ class StockMovementsController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
+
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may move stock manually.');
+        }
 
         $itemId = (int)$this->request->getData('inventory_item_id');
         $direction = (string)$this->request->getData('direction');

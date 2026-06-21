@@ -113,7 +113,8 @@ export default function Food() {
                           <Button size="sm" variant="outline-success" className="me-1"
                             onClick={() => act(serveOrder, o.id)}>Serve</Button>
                         )}
-                        {o.status !== 'cancelled' && (
+                        {o.status !== 'cancelled'
+                          && !(role === 'receptionist' && o.status === 'served' && o.payment_status === 'paid') && (
                           <Button size="sm" variant="outline-danger"
                             onClick={() => act(cancelOrder, o.id)}>Cancel</Button>
                         )}

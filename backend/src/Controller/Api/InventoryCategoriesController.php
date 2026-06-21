@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Inventory categories (Food Stocks, Hygiene Kit, Linens, Utensils, ...).
@@ -30,6 +31,11 @@ class InventoryCategoriesController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
+
+        // Receptionists operate the catalogue; only owners/admins define it.
+        if (!$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may add categories.');
+        }
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {

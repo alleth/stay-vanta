@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ForbiddenException;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -111,6 +112,16 @@ class FoodOrdersController extends AppController
         $this->request->allowMethod('post');
         $orders = $this->fetchTable('FoodOrders');
         $order = $this->scopeToProperty($orders->find()->where(['FoodOrders.id' => $id]))->firstOrFail();
+
+        // A receptionist can't reverse a settled transaction: an order that has
+        // been both served and paid is closed business. Owners/admins still may.
+        if (
+            $this->userHasRole('receptionist')
+            && $order->status === 'served'
+            && $order->payment_status === 'paid'
+        ) {
+            throw new ForbiddenException('A paid, served order can only be cancelled by an admin.');
+        }
 
         try {
             $orders->cancelOrder($order, (int)$this->currentUser->id);
