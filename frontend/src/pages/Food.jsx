@@ -193,7 +193,7 @@ export default function Food() {
                                 onClick={() => setModal({ type: 'menu', item: m })}>Edit</Button>
                               <Button size="sm" variant="outline-danger"
                                 disabled={pending !== null}
-                                onClick={() => { if (window.confirm(`Delete "${m.name}"?`)) act(`del-menu-${m.id}`, deleteMenuItem, m.id) }}>
+                                onClick={() => { if (window.confirm(`Remove "${m.name}" from the menu? Past orders keep their record.`)) act(`del-menu-${m.id}`, deleteMenuItem, m.id) }}>
                                 {pending === `del-menu-${m.id}` ? <Spinner size="sm" /> : 'Delete'}
                               </Button>
                             </td>

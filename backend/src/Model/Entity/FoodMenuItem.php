@@ -15,6 +15,7 @@ use Cake\ORM\Entity;
  * @property string $name
  * @property string $price
  * @property bool $is_available
+ * @property \Cake\I18n\DateTime|null $deleted_at  soft-delete marker (hidden when set)
  */
 class FoodMenuItem extends Entity
 {

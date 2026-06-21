@@ -20,6 +20,7 @@ class FoodMenuItemsController extends AppController
         $menu = $this->fetchTable('FoodMenuItems');
         $query = $this->scopeToProperty(
             $menu->find()
+                ->where(['FoodMenuItems.deleted_at IS' => null])
                 ->contain(['InventoryItems' => ['InventoryCategories']])
                 ->orderBy(['FoodMenuItems.name' => 'ASC'])
         );
@@ -74,7 +75,9 @@ class FoodMenuItemsController extends AppController
         $this->requireManager();
 
         $menu = $this->fetchTable('FoodMenuItems');
-        $item = $this->scopeToProperty($menu->find()->where(['FoodMenuItems.id' => $id]))->firstOrFail();
+        $item = $this->scopeToProperty(
+            $menu->find()->where(['FoodMenuItems.id' => $id, 'FoodMenuItems.deleted_at IS' => null])
+        )->firstOrFail();
 
         $menu->patchEntity($item, [
             'name' => $this->request->getData('name'),
@@ -96,8 +99,8 @@ class FoodMenuItemsController extends AppController
     /**
      * DELETE /api/food-menu-items/{id}  (owner/admin)
      *
-     * Refused if the item appears on any past order (that history must stay
-     * intact) — mark it unavailable instead.
+     * Soft-delete: the item is hidden from the menu and from new orders, but the
+     * row remains so past orders keep their reference (order history is intact).
      */
     public function delete(int $id): void
     {
@@ -105,15 +108,13 @@ class FoodMenuItemsController extends AppController
         $this->requireManager();
 
         $menu = $this->fetchTable('FoodMenuItems');
-        $item = $this->scopeToProperty($menu->find()->where(['FoodMenuItems.id' => $id]))->firstOrFail();
+        $item = $this->scopeToProperty(
+            $menu->find()->where(['FoodMenuItems.id' => $id, 'FoodMenuItems.deleted_at IS' => null])
+        )->firstOrFail();
 
-        $orderItems = $this->fetchTable('FoodOrderItems');
-        $used = $orderItems->find()->where(['FoodOrderItems.food_menu_item_id' => $id])->count() > 0;
-        if ($used) {
-            throw new BadRequestException('This item has order history. Mark it unavailable instead of deleting.');
-        }
-
-        $menu->deleteOrFail($item);
+        $item->set('deleted_at', new \Cake\I18n\DateTime());
+        $item->set('is_available', false);
+        $menu->saveOrFail($item);
 
         $this->set('ok', true);
         $this->viewBuilder()->setOption('serialize', ['ok']);
