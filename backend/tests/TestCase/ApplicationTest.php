@@ -17,6 +17,7 @@ declare(strict_types=1);
 namespace App\Test\TestCase;
 
 use App\Application;
+use App\Middleware\CorsMiddleware;
 use App\Middleware\HostHeaderMiddleware;
 use Cake\Core\Configure;
 use Cake\Error\Middleware\ErrorHandlerMiddleware;
@@ -77,12 +78,17 @@ class ApplicationTest extends TestCase
 
         $middleware = $app->middleware($middleware);
 
-        $this->assertInstanceOf(ErrorHandlerMiddleware::class, $middleware->current());
+        // CorsMiddleware is the outermost layer on purpose (see Application::middleware):
+        // it must decorate every response — including error/host-rejection responses
+        // from the layers below — with CORS headers.
+        $this->assertInstanceOf(CorsMiddleware::class, $middleware->current());
         $middleware->seek(1);
-        $this->assertInstanceOf(HostHeaderMiddleware::class, $middleware->current());
+        $this->assertInstanceOf(ErrorHandlerMiddleware::class, $middleware->current());
         $middleware->seek(2);
-        $this->assertInstanceOf(AssetMiddleware::class, $middleware->current());
+        $this->assertInstanceOf(HostHeaderMiddleware::class, $middleware->current());
         $middleware->seek(3);
+        $this->assertInstanceOf(AssetMiddleware::class, $middleware->current());
+        $middleware->seek(4);
         $this->assertInstanceOf(RoutingMiddleware::class, $middleware->current());
     }
 }
