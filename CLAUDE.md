@@ -95,6 +95,12 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `src/components/ProtectedRoute.jsx` wraps authed routes; pass `roles={[...]}` to restrict.
 - All five domain module pages in `src/pages/` are implemented (see below); no page is a
   placeholder.
+- **Public routes** `/privacy` and `/terms` (`PrivacyPolicy.jsx`, `TermsOfService.jsx`) render
+  outside `ProtectedRoute`/`Layout` (no auth, no nav) — they're linkable from the login page.
+- **Loading states use Tailwind skeletons, not spinners**, for initial data loads:
+  `src/components/Skeleton.jsx` exports `Skeleton`, `SkeletonTable`, `SkeletonTableRows`,
+  `SkeletonCards`. Reuse these instead of a `<Spinner/>` for page/table/card loads (inline
+  action buttons keep their small spinner).
 
 ### Configuration
 - Production config is **env-driven in `config/app.php`** (committed): `Datasources.default` reads
