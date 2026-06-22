@@ -59,8 +59,12 @@ export default function Layout() {
       <footer className="py-3 text-center small" style={{ color: 'var(--sv-muted)' }}>
         <span className="me-2">&copy; {new Date().getFullYear()} StayVanta</span>
         ·
-        <NavLink to="/privacy" className="ms-2 text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+        <NavLink to="/privacy" className="mx-2 text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
           Privacy Policy
+        </NavLink>
+        ·
+        <NavLink to="/terms" className="ms-2 text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+          Terms of Service
         </NavLink>
       </footer>
     </div>

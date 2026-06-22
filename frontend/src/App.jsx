@@ -10,6 +10,7 @@ import Food from './pages/Food'
 import Subscribers from './pages/Subscribers'
 import Staff from './pages/Staff'
 import PrivacyPolicy from './pages/PrivacyPolicy'
+import TermsOfService from './pages/TermsOfService'
 
 // Roles allowed in the operational (hotel-floor) tabs.
 const OPS = ['admin', 'receptionist']
@@ -19,6 +20,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<TermsOfService />} />
 
       <Route
         element={

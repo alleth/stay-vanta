@@ -172,7 +172,7 @@ export default function PrivacyPolicy() {
       </Card>
 
       <p className="text-center text-muted small mt-4 mb-0">
-        &copy; {new Date().getFullYear()} StayVanta. All rights reserved.
+        &copy; {new Date().getFullYear()} StayVanta · <Link to="/terms" className="text-decoration-none">Terms of Service</Link>
       </p>
     </Container>
   )

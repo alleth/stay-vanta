@@ -60,9 +60,13 @@ export default function Login() {
               {busy ? <Spinner size="sm" /> : 'Sign in'}
             </Button>
           </Form>
-          <p className="text-center small mt-4 mb-0">
+          <p className="text-center small mt-4 mb-0" style={{ color: 'var(--sv-muted)' }}>
             <Link to="/privacy" className="text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
               Privacy Policy
+            </Link>
+            <span className="mx-2">·</span>
+            <Link to="/terms" className="text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+              Terms of Service
             </Link>
           </p>
         </Card.Body>
