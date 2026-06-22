@@ -14,6 +14,7 @@ import {
 } from '../api/food'
 import { listItems } from '../api/inventory'
 import { listGuests } from '../api/guests'
+import { listReservations } from '../api/frontdesk'
 import { SkeletonTable, SkeletonTableRows, Skeleton } from '../components/Skeleton'
 
 const PAY_VARIANT = { paid: 'success', charge_to_room: 'warning', unpaid: 'secondary' }
@@ -31,6 +32,7 @@ export default function Food() {
   const [menu, setMenu] = useState([])
   const [inventory, setInventory] = useState([])
   const [guests, setGuests] = useState([])
+  const [roomByGuest, setRoomByGuest] = useState({}) // guest_id → [room numbers] (checked-in)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pending, setPending] = useState(null) // key of the in-flight inline action
@@ -58,12 +60,19 @@ export default function Food() {
   const loadBase = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [m, items, g] = await Promise.all([
+      const [m, items, g, res] = await Promise.all([
         listMenu(propertyId), listItems(propertyId), listGuests(propertyId),
+        listReservations(propertyId, { status: 'checked_in' }),
       ])
       setMenu(m)
       setInventory(items)
       setGuests(g)
+      // Map each in-house guest to the room(s) they're currently checked into.
+      const rooms = {}
+      for (const r of res) {
+        if (r.guest_id && r.room) (rooms[r.guest_id] ??= []).push(r.room.room_number)
+      }
+      setRoomByGuest(rooms)
       setError(null)
     } catch {
       setError('Could not load food data.')
@@ -380,7 +389,8 @@ export default function Food() {
       )}
 
       {modal === 'order' && (
-        <OrderModal menu={menu.filter((m) => m.is_available)} guests={guests} propertyId={propertyId}
+        <OrderModal menu={menu.filter((m) => m.is_available)} guests={guests} roomByGuest={roomByGuest}
+          propertyId={propertyId}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); loadOrders(); loadInvoices() }} />
       )}
       {(modal === 'menu' || modal?.type === 'menu') && (
@@ -454,26 +464,32 @@ function InvoiceModal({ id, onClose }) {
   )
 }
 
-function OrderModal({ menu, guests, propertyId, onClose, onSaved }) {
+function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved }) {
   const [cart, setCart] = useState({}) // { menuId: qty }
   const [payment, setPayment] = useState('paid')
   const [guestId, setGuestId] = useState('')
+  const [search, setSearch] = useState('')
 
   const setQty = (id, qty) => setCart((c) => ({ ...c, [id]: Math.max(0, qty) }))
+
+  const filteredMenu = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return q ? menu.filter((m) => m.name.toLowerCase().includes(q)) : menu
+  }, [menu, search])
 
   const lines = useMemo(
     () => menu.filter((m) => (cart[m.id] ?? 0) > 0).map((m) => ({ menu: m, qty: cart[m.id] })),
     [menu, cart],
   )
   const total = lines.reduce((sum, l) => sum + Number(l.menu.price) * l.qty, 0)
+  const count = lines.reduce((sum, l) => sum + l.qty, 0)
 
   const { run, busy, err } = useSubmit(async () => {
     const payload = {
       items: lines.map((l) => ({ food_menu_item_id: l.menu.id, quantity: l.qty })),
       payment_status: payment,
     }
-    if (payment === 'charge_to_room') payload.guest_id = Number(guestId)
-    else if (guestId) payload.guest_id = Number(guestId)
+    if (guestId) payload.guest_id = Number(guestId)
     await createOrder(payload, propertyId)
     onSaved()
   })
@@ -481,64 +497,184 @@ function OrderModal({ menu, guests, propertyId, onClose, onSaved }) {
   const needGuest = payment === 'charge_to_room'
 
   return (
-    <Modal show onHide={onClose} centered size="lg">
+    <Modal show onHide={onClose} centered size="xl">
       <Form onSubmit={run}>
         <Modal.Header closeButton><Modal.Title>New order</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <p className="text-muted small">Set quantities, then choose how it's paid.</p>
-          <div style={{ maxHeight: 260, overflowY: 'auto' }} className="border rounded mb-3">
-            <Table size="sm" className="mb-0 align-middle">
-              <tbody>
-                {menu.map((m) => (
-                  <tr key={m.id}>
-                    <td className="fw-semibold">{m.name}</td>
-                    <td className="text-muted">{formatMoney(m.price)}</td>
-                    <td style={{ width: 130 }}>
-                      <InputGroup size="sm">
-                        <Button variant="outline-secondary"
-                          onClick={() => setQty(m.id, (cart[m.id] ?? 0) - 1)}>−</Button>
-                        <Form.Control className="text-center" value={cart[m.id] ?? 0}
-                          onChange={(e) => setQty(m.id, parseInt(e.target.value, 10) || 0)} />
-                        <Button variant="outline-secondary"
-                          onClick={() => setQty(m.id, (cart[m.id] ?? 0) + 1)}>+</Button>
+          <Row className="g-3">
+            {/* ---- Menu (searchable) ---- */}
+            <Col md={7}>
+              <Form.Control size="sm" className="mb-2" value={search} placeholder="Search the menu…"
+                onChange={(e) => setSearch(e.target.value)} />
+              <div style={{ height: 380, overflowY: 'auto' }} className="border rounded">
+                {filteredMenu.length === 0 && (
+                  <div className="text-muted small text-center py-4">No menu items match.</div>
+                )}
+                {filteredMenu.map((m) => {
+                  const qty = cart[m.id] ?? 0
+                  return (
+                    <div key={m.id} className="d-flex align-items-center gap-2 px-2 py-1 border-bottom">
+                      <div className="flex-grow-1">
+                        <div className="fw-semibold small">{m.name}</div>
+                        <div className="text-muted small">{formatMoney(m.price)}</div>
+                      </div>
+                      {qty > 0 ? (
+                        <InputGroup size="sm" style={{ width: 116 }}>
+                          <Button variant="outline-secondary" onClick={() => setQty(m.id, qty - 1)}>−</Button>
+                          <Form.Control className="text-center" value={qty}
+                            onChange={(e) => setQty(m.id, parseInt(e.target.value, 10) || 0)} />
+                          <Button variant="outline-secondary" onClick={() => setQty(m.id, qty + 1)}>+</Button>
+                        </InputGroup>
+                      ) : (
+                        <Button size="sm" variant="outline-primary" onClick={() => setQty(m.id, 1)}>Add</Button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </Col>
+
+            {/* ---- Order (cart) side pane ---- */}
+            <Col md={5}>
+              <div className="d-flex flex-column h-100">
+                <div className="fw-semibold mb-2">
+                  Order {count > 0 && <Badge bg="primary" className="ms-1">{count}</Badge>}
+                </div>
+                <div style={{ minHeight: 150, maxHeight: 230, overflowY: 'auto' }} className="border rounded mb-2">
+                  {lines.length === 0 ? (
+                    <div className="text-muted small text-center py-4">No items yet — add from the menu.</div>
+                  ) : lines.map((l) => (
+                    <div key={l.menu.id} className="d-flex align-items-center gap-2 px-2 py-1 border-bottom">
+                      <div className="flex-grow-1">
+                        <div className="small fw-semibold">{l.menu.name}</div>
+                        <div className="text-muted small">
+                          {l.qty} × {formatMoney(l.menu.price)} = {formatMoney(Number(l.menu.price) * l.qty)}
+                        </div>
+                      </div>
+                      <InputGroup size="sm" style={{ width: 104 }}>
+                        <Button variant="outline-secondary" onClick={() => setQty(l.menu.id, l.qty - 1)}>−</Button>
+                        <Form.Control className="text-center" value={l.qty}
+                          onChange={(e) => setQty(l.menu.id, parseInt(e.target.value, 10) || 0)} />
+                        <Button variant="outline-secondary" onClick={() => setQty(l.menu.id, l.qty + 1)}>+</Button>
                       </InputGroup>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
-          <Row className="align-items-end">
-            <Col md={4}><Form.Group>
-              <Form.Label>Payment</Form.Label>
-              <Form.Select value={payment} onChange={(e) => setPayment(e.target.value)}>
-                <option value="paid">Paid now</option>
-                <option value="charge_to_room">Charge to room</option>
-                <option value="unpaid">Unpaid (pay later)</option>
-              </Form.Select>
-            </Form.Group></Col>
-            <Col md={5}><Form.Group>
-              <Form.Label>Guest {needGuest && <span className="text-danger">*</span>}</Form.Label>
-              <Form.Select value={guestId} onChange={(e) => setGuestId(e.target.value)} required={needGuest}>
-                <option value="">{needGuest ? 'Select a guest…' : 'None'}</option>
-                {guests.map((g) => <option key={g.id} value={g.id}>{g.full_name}</option>)}
-              </Form.Select>
-            </Form.Group></Col>
-            <Col md={3} className="text-end">
-              <div className="text-muted small">Total</div>
-              <div className="fs-4 fw-bold">{formatMoney(total)}</div>
+                      <Button variant="link" className="text-danger p-0 px-1" title="Remove"
+                        onClick={() => setQty(l.menu.id, 0)}>×</Button>
+                    </div>
+                  ))}
+                </div>
+                <div className="d-flex justify-content-between fw-bold border-top pt-2 mb-3">
+                  <span>Total</span><span className="fs-5">{formatMoney(total)}</span>
+                </div>
+                <Form.Group className="mb-2">
+                  <Form.Label className="small mb-1">Payment</Form.Label>
+                  <Form.Select size="sm" value={payment} onChange={(e) => setPayment(e.target.value)}>
+                    <option value="paid">Paid now</option>
+                    <option value="charge_to_room">Charge to room</option>
+                    <option value="unpaid">Unpaid (pay later)</option>
+                  </Form.Select>
+                </Form.Group>
+                <Form.Group>
+                  <Form.Label className="small mb-1">
+                    Guest {needGuest ? <span className="text-danger">*</span> : <span className="text-muted">(optional)</span>}
+                  </Form.Label>
+                  <GuestPicker guests={guests} roomByGuest={roomByGuest} value={guestId}
+                    onChange={setGuestId} required={needGuest} propertyId={propertyId} />
+                </Form.Group>
+              </div>
             </Col>
           </Row>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
           <Button type="submit" disabled={busy || lines.length === 0}>
-            {busy ? <Spinner size="sm" /> : 'Place order'}
+            {busy ? <Spinner size="sm" /> : `Place order${count ? ` (${count})` : ''}`}
           </Button>
         </Modal.Footer>
       </Form>
     </Modal>
+  )
+}
+
+// Searchable guest combobox: filters by name OR room number, tags each guest with
+// their current room ("Rm 101") or "Walk-in", and pins the last 3 picked guests on top.
+function GuestPicker({ guests, roomByGuest, value, onChange, required, propertyId }) {
+  const recentKey = `sv:recentGuests:${propertyId}`
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [recent, setRecent] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(recentKey) || '[]') } catch { return [] }
+  })
+
+  const rooms = (g) => roomByGuest[g.id] ?? []
+  const label = (g) => (rooms(g).length ? `Rm ${rooms(g).join(', ')}` : 'Walk-in')
+  const selected = guests.find((g) => String(g.id) === String(value)) || null
+
+  const options = useMemo(() => {
+    const query = q.trim().toLowerCase()
+    if (query) {
+      return guests.filter((g) =>
+        g.full_name.toLowerCase().includes(query) ||
+        rooms(g).some((r) => String(r).toLowerCase().includes(query)),
+      ).slice(0, 50)
+    }
+    const recentIds = recent.map(String)
+    const recentSet = new Set(recentIds)
+    const pinned = recentIds.map((id) => guests.find((g) => String(g.id) === id)).filter(Boolean)
+    const rest = guests.filter((g) => !recentSet.has(String(g.id)))
+    return [...pinned, ...rest].slice(0, 50)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, guests, roomByGuest, recent])
+
+  const pick = (g) => {
+    onChange(String(g.id))
+    const next = [g.id, ...recent.filter((id) => id !== g.id)].slice(0, 3)
+    setRecent(next)
+    try { localStorage.setItem(recentKey, JSON.stringify(next)) } catch { /* ignore */ }
+    setQ('')
+    setOpen(false)
+  }
+
+  return (
+    <div className="position-relative">
+      <InputGroup size="sm">
+        <Form.Control
+          placeholder="Search name or room #…"
+          value={open ? q : (selected ? selected.full_name : '')}
+          onChange={(e) => { setQ(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 120)}
+          required={required && !selected} />
+        {selected && (
+          <Button variant="outline-secondary" title="Clear"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { onChange(''); setQ('') }}>×</Button>
+        )}
+      </InputGroup>
+      {selected && !open && (
+        <div className="mt-1">
+          <Badge bg={rooms(selected).length ? 'info' : 'secondary'}>{label(selected)}</Badge>
+        </div>
+      )}
+      {open && (
+        <div className="position-absolute w-100 bg-white border rounded shadow-sm mt-1"
+          style={{ zIndex: 5, maxHeight: 220, overflowY: 'auto' }}
+          onMouseDown={(e) => e.preventDefault()}>
+          {options.length === 0 && <div className="text-muted small px-3 py-2">No guests found.</div>}
+          {options.map((g, i) => (
+            <button type="button" key={g.id}
+              className="d-flex w-100 align-items-center gap-2 border-0 bg-transparent text-start px-3 py-2"
+              onClick={() => pick(g)}>
+              <span className="flex-grow-1 small">
+                {g.full_name}
+                {!q.trim() && i < recent.length && <span className="text-muted ms-2">· recent</span>}
+              </span>
+              <Badge bg={rooms(g).length ? 'info' : 'secondary'}>{label(g)}</Badge>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
