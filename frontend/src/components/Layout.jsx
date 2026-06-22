@@ -55,6 +55,14 @@ export default function Layout() {
       <Container className="py-4 py-lg-5 flex-grow-1" style={{ maxWidth: 1200 }}>
         <Outlet />
       </Container>
+
+      <footer className="py-3 text-center small" style={{ color: 'var(--sv-muted)' }}>
+        <span className="me-2">&copy; {new Date().getFullYear()} StayVanta</span>
+        ·
+        <NavLink to="/privacy" className="ms-2 text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+          Privacy Policy
+        </NavLink>
+      </footer>
     </div>
   )
 }

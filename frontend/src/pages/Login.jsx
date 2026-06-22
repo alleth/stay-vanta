@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Card, Form, Button, Alert, Spinner } from 'react-bootstrap'
 import { useAuth } from '../context/AuthContext'
 
@@ -60,6 +60,11 @@ export default function Login() {
               {busy ? <Spinner size="sm" /> : 'Sign in'}
             </Button>
           </Form>
+          <p className="text-center small mt-4 mb-0">
+            <Link to="/privacy" className="text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+              Privacy Policy
+            </Link>
+          </p>
         </Card.Body>
       </Card>
     </div>
