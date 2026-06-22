@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Row, Col, Card, Spinner, Alert } from 'react-bootstrap'
+import { Row, Col, Card, Alert } from 'react-bootstrap'
 import { useAuth } from '../context/AuthContext'
 import { ownerDashboard, adminDashboard } from '../api/reports'
 import { formatMoney } from '../utils/format'
+import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
 
 function Tiles({ tiles, cols = 3, money = false }) {
   return (
@@ -31,9 +32,10 @@ function Tiles({ tiles, cols = 3, money = false }) {
 
 function Loading() {
   return (
-    <div className="text-center py-5" style={{ color: 'var(--sv-muted)' }}>
-      <Spinner size="sm" className="me-2" /> Loading dashboard…
-    </div>
+    <>
+      <SkeletonCards count={4} />
+      <SkeletonTable rows={4} />
+    </>
   )
 }
 

@@ -8,6 +8,7 @@ import { useSubmit } from '../hooks/useSubmit'
 import {
   listStaff, createStaff, updateStaff, resetStaffPassword,
 } from '../api/staff'
+import { SkeletonTable } from '../components/Skeleton'
 
 const ROLE_VARIANT = { admin: 'primary', receptionist: 'info' }
 
@@ -75,7 +76,7 @@ export default function Staff() {
       {error && <Alert variant="danger">{error}</Alert>}
 
       {loading ? (
-        <div className="text-center py-5"><Spinner /></div>
+        <SkeletonTable rows={5} />
       ) : (
         <Card className="shadow-sm">
           <Table responsive hover className="mb-0 align-middle">

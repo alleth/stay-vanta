@@ -6,6 +6,7 @@ import {
   createSubscriberAdmin,
   updateProperty,
 } from '../api/reports'
+import { SkeletonTable } from '../components/Skeleton'
 import { formatMoney } from '../utils/format'
 
 const BLANK = {
@@ -88,13 +89,7 @@ export default function Subscribers() {
   }
 
   if (error) return <Alert variant="danger">{error}</Alert>
-  if (!rows) {
-    return (
-      <div className="text-center py-5" style={{ color: 'var(--sv-muted)' }}>
-        <Spinner size="sm" className="me-2" /> Loading subscribers…
-      </div>
-    )
-  }
+  if (!rows) return <SkeletonTable rows={5} />
 
   return (
     <div>

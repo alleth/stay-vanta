@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
 import { matchGuests } from '../api/guests'
+import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
@@ -199,7 +200,10 @@ export default function FrontDesk() {
       {error && <Alert variant="danger" onClose={() => setError(null)} dismissible>{error}</Alert>}
 
       {loading ? (
-        <div className="text-center py-5"><Spinner /></div>
+        <>
+          <SkeletonCards count={6} />
+          <SkeletonTable rows={5} />
+        </>
       ) : (
         <>
         <Row className="g-3 mb-3">

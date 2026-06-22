@@ -14,6 +14,7 @@ import {
 } from '../api/food'
 import { listItems } from '../api/inventory'
 import { listGuests } from '../api/guests'
+import { SkeletonTable, SkeletonTableRows, Skeleton } from '../components/Skeleton'
 
 const PAY_VARIANT = { paid: 'success', charge_to_room: 'warning', unpaid: 'secondary' }
 const ORDER_VARIANT = { open: 'primary', served: 'success', cancelled: 'dark' }
@@ -159,7 +160,7 @@ export default function Food() {
       {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
 
       {loading ? (
-        <div className="text-center py-5"><Spinner /></div>
+        <SkeletonTable rows={6} />
       ) : (
         <Tabs defaultActiveKey="orders" className="mb-3">
           {/* ---- Orders ---- */}
@@ -197,9 +198,7 @@ export default function Food() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ordersLoading && (
-                    <tr><td colSpan={9} className="text-center py-4"><Spinner size="sm" /></td></tr>
-                  )}
+                  {ordersLoading && <SkeletonTableRows rows={5} cols={9} />}
                   {!ordersLoading && orders.length === 0 && (
                     <tr><td colSpan={9} className="text-center text-muted py-4">No orders to show.</td></tr>
                   )}
@@ -350,9 +349,7 @@ export default function Food() {
                   </tr>
                 </thead>
                 <tbody>
-                  {invoicesLoading && (
-                    <tr><td colSpan={5} className="text-center py-4"><Spinner size="sm" /></td></tr>
-                  )}
+                  {invoicesLoading && <SkeletonTableRows rows={4} cols={5} />}
                   {!invoicesLoading && invoices.length === 0 && (
                     <tr><td colSpan={5} className="text-center text-muted py-4">No invoices to show.</td></tr>
                   )}
@@ -412,7 +409,14 @@ function InvoiceModal({ id, onClose }) {
       </Modal.Header>
       <Modal.Body>
         {error && <Alert variant="danger">{error}</Alert>}
-        {!invoice && !error && <div className="text-center py-3"><Spinner /></div>}
+        {!invoice && !error && (
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-1/2" />
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-5 w-2/3" />
+          </div>
+        )}
         {invoice && (
           <>
             <div className="d-flex justify-content-between mb-2">

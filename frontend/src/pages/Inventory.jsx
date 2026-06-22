@@ -5,6 +5,7 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
+import { SkeletonTable } from '../components/Skeleton'
 import {
   listCategories, createCategory, deleteCategory,
   listItems, createItem, updateItem, deleteItem, listMovements, recordMovement,
@@ -132,9 +133,7 @@ export default function Inventory() {
       </ButtonGroup>
 
       {loading ? (
-        <div className="text-center py-5">
-          <Spinner />
-        </div>
+        <SkeletonTable rows={6} />
       ) : (
         <Row className="g-3">
           <Col lg={8}>

@@ -4,6 +4,7 @@ import {
 } from 'react-bootstrap'
 import { useProperty } from '../context/PropertyContext'
 import { listGuests, guestStats, getGuest, createGuest, updateGuest, matchGuests } from '../api/guests'
+import { SkeletonTable, Skeleton } from '../components/Skeleton'
 
 const TYPE_VARIANT = { local: 'info', foreign: 'warning' }
 
@@ -81,7 +82,7 @@ export default function Guests() {
         </Card.Header>
 
         {loading ? (
-          <div className="text-center py-5"><Spinner /></div>
+          <SkeletonTable rows={6} />
         ) : (
           <Table responsive hover className="mb-0 align-middle">
             <thead>
@@ -271,7 +272,13 @@ function HistoryModal({ id, onClose }) {
       </Modal.Header>
       <Modal.Body>
         {error && <Alert variant="danger">{error}</Alert>}
-        {!guest && !error && <div className="text-center py-3"><Spinner /></div>}
+        {!guest && !error && (
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-3/4" />
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-5 w-2/3" />
+          </div>
+        )}
         {guest && guest.reservations.length === 0 && (
           <p className="text-muted mb-0">No reservations on record.</p>
         )}
