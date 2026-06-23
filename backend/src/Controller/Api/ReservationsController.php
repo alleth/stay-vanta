@@ -168,6 +168,31 @@ class ReservationsController extends AppController
                     $invoices->addLine($invoice, $description, (float)$quote['total'], 'reservation', (int)$reservation->id);
                 }
             }
+
+            // Early check-in: the receptionist confirmed an early arrival, so
+            // bill the configured fee to the guest's invoice.
+            if ($transition === 'check-in'
+                && $this->request->getData('early_check_in')
+                && $reservation->guest_id
+            ) {
+                $extraCharges = $this->fetchTable('ExtraCharges');
+                $charge = $extraCharges->earlyCheckInFor((int)$reservation->property_id);
+                $fee = $charge->is_active ? (float)$charge->amount : 0.0;
+                if ($fee > 0) {
+                    $invoices = $this->fetchTable('Invoices');
+                    $invoice = $invoices->openInvoiceFor(
+                        (int)$reservation->property_id,
+                        (int)$reservation->guest_id,
+                        (int)$reservation->id
+                    );
+                    $invoices->addLine($invoice, 'Early check-in', $fee, 'early_check_in', (int)$reservation->id);
+                }
+            }
+
+            // Cancelling reverses any early check-in fee already posted.
+            if ($transition === 'cancel') {
+                $this->fetchTable('Invoices')->removeLinesFor('early_check_in', (int)$reservation->id);
+            }
         });
 
         $this->respondWithReservation($reservation, 200);
@@ -180,6 +205,8 @@ class ReservationsController extends AppController
     {
         $guestId = $this->request->getData('guest_id');
         if ($guestId) {
+            $this->completeGuest((int)$guestId, $propertyId);
+
             return (int)$guestId;
         }
 
@@ -201,6 +228,35 @@ class ReservationsController extends AppController
         $guests->saveOrFail($guest);
 
         return (int)$guest->id;
+    }
+
+    /**
+     * Fill in any *empty* detail fields on an existing guest from the booking
+     * form. Re-booking a returning guest can thus complete a sparse record
+     * (add a missing contact number, email, etc.) without ever overwriting
+     * information already on file.
+     */
+    private function completeGuest(int $guestId, int $propertyId): void
+    {
+        $guests = $this->fetchTable('Guests');
+        $guest = $guests->find()
+            ->where(['Guests.id' => $guestId, 'Guests.property_id' => $propertyId])
+            ->first();
+        if ($guest === null) {
+            return;
+        }
+
+        $changed = false;
+        foreach (['nationality', 'address', 'contact_number', 'email'] as $field) {
+            $incoming = trim((string)$this->request->getData($field));
+            if ($incoming !== '' && trim((string)$guest->get($field)) === '') {
+                $guest->set($field, $incoming);
+                $changed = true;
+            }
+        }
+        if ($changed) {
+            $guests->saveOrFail($guest);
+        }
     }
 
     /**

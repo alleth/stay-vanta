@@ -34,5 +34,19 @@ export const createReservation = (data, propertyId) =>
   client.post('/reservations', withProp(data, propertyId)).then((r) => r.data.reservation)
 
 // transition: 'check-in' | 'check-out' | 'cancel'
-export const transitionReservation = (id, transition) =>
-  client.post(`/reservations/${id}/${transition}`).then((r) => r.data.reservation)
+// `data` carries flags like { early_check_in: true } for the check-in transition.
+export const transitionReservation = (id, transition, data = {}) =>
+  client.post(`/reservations/${id}/${transition}`, data).then((r) => r.data.reservation)
+
+// Extra charges (admin-configurable surcharges, e.g. early check-in).
+export const listExtraCharges = (propertyId) =>
+  client.get('/extra-charges', { params: withProp({}, propertyId) }).then((r) => r.data.extraCharges)
+
+export const createExtraCharge = (data, propertyId) =>
+  client.post('/extra-charges', withProp(data, propertyId)).then((r) => r.data.extraCharge)
+
+export const updateExtraCharge = (id, data) =>
+  client.patch(`/extra-charges/${id}`, data).then((r) => r.data.extraCharge)
+
+export const deleteExtraCharge = (id) =>
+  client.delete(`/extra-charges/${id}`).then((r) => r.data)

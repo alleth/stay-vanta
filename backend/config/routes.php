@@ -119,6 +119,16 @@ return function (RouteBuilder $routes): void {
         $builder->put('/room-rates/{id}', ['controller' => 'RoomRates', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
+        // Extra charges (admin-configurable surcharges, e.g. early check-in).
+        $builder->get('/extra-charges', ['controller' => 'ExtraCharges', 'action' => 'index']);
+        $builder->post('/extra-charges', ['controller' => 'ExtraCharges', 'action' => 'add']);
+        $builder->patch('/extra-charges/{id}', ['controller' => 'ExtraCharges', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->put('/extra-charges/{id}', ['controller' => 'ExtraCharges', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->delete('/extra-charges/{id}', ['controller' => 'ExtraCharges', 'action' => 'delete'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+
         $builder->get('/reservations', ['controller' => 'Reservations', 'action' => 'index']);
         $builder->post('/reservations', ['controller' => 'Reservations', 'action' => 'add']);
         $builder->post('/reservations/{id}/{transition}', ['controller' => 'Reservations', 'action' => 'transition'])

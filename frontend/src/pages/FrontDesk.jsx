@@ -6,13 +6,17 @@ import { useProperty } from '../context/PropertyContext'
 import { useAuth } from '../context/AuthContext'
 import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
-import { matchGuests } from '../api/guests'
+import { matchGuests, listGuests } from '../api/guests'
 import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
   listReservations, createReservation, transitionReservation,
+  listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
+
+// Standard check-in is from noon; arriving earlier in the day is an early check-in.
+const isEarlyCheckInNow = () => new Date().getHours() < 12
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
 // Monday of the current week as YYYY-MM-DD.
@@ -49,25 +53,29 @@ export default function FrontDesk() {
   const [rooms, setRooms] = useState([])
   const [rates, setRates] = useState([])
   const [reservations, setReservations] = useState([])
+  const [extraCharges, setExtraCharges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [modal, setModal] = useState(null) // 'reservation' | 'room' | { type:'rate', rate? }
+  const [modal, setModal] = useState(null) // 'reservation' | 'room' | { type:'rate'|'charge', ... }
   const [reservationRoomId, setReservationRoomId] = useState(null)
   const [reservationDate, setReservationDate] = useState(null)
   const [calDate, setCalDate] = useState(todayStr)
   const [resFilter, setResFilter] = useState('today') // today | week | all
   const [pending, setPending] = useState(null) // key of the in-flight inline action
+  const [earlyConfirm, setEarlyConfirm] = useState(null) // reservation pending an early check-in
   const today = todayStr()
 
   const refresh = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [rm, rt, rs] = await Promise.all([
+      const [rm, rt, rs, ec] = await Promise.all([
         listRooms(propertyId), listRoomRates(propertyId), listReservations(propertyId),
+        listExtraCharges(propertyId),
       ])
       setRooms(rm)
       setRates(rt)
       setReservations(rs)
+      setExtraCharges(ec)
       setError(null)
     } catch {
       setError('Could not load front desk data.')
@@ -75,6 +83,13 @@ export default function FrontDesk() {
       setLoading(false)
     }
   }, [propertyId])
+
+  // The active early check-in fee (0 if none) — shown in the warning and billed
+  // automatically by the backend when an early check-in is confirmed.
+  const earlyFee = useMemo(() => {
+    const c = extraCharges.find((x) => x.code === 'early_check_in' && x.is_active)
+    return c ? Number(c.amount) : 0
+  }, [extraCharges])
 
   useEffect(() => {
     // State updates occur after the awaited fetch; safe data effect.
@@ -134,19 +149,43 @@ export default function FrontDesk() {
     [reservations, calDate],
   )
 
-  async function doTransition(id, transition) {
-    // Checking out finalizes the stay (and posts the room charge) — confirm first.
+  async function runTransition(id, transition, data = {}) {
+    setPending(`${transition}-${id}`)
+    setError(null)
+    try {
+      await transitionReservation(id, transition, data)
+      await refresh()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Action failed.')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  // Button entry point. Check-in before noon routes through the early check-in
+  // warning; check-out confirms first (it posts the room charge).
+  function onTransition(r, transition) {
+    if (transition === 'check-in') {
+      if (isEarlyCheckInNow()) { setEarlyConfirm(r); return }
+      runTransition(r.id, 'check-in')
+      return
+    }
     if (transition === 'check-out'
       && !window.confirm('Check out this guest? This finalizes the stay and posts the room charge to their invoice.')) {
       return
     }
-    setPending(`${transition}-${id}`)
+    runTransition(r.id, transition)
+  }
+
+  async function doDeleteCharge(charge) {
+    if (!window.confirm(`Delete the "${charge.name}" charge?`)) return
+    setPending(`charge-${charge.id}`)
     setError(null)
     try {
-      await transitionReservation(id, transition)
+      await deleteExtraCharge(charge.id)
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Action failed.')
+      setError(ex?.response?.data?.message ?? 'Could not delete the charge.')
     } finally {
       setPending(null)
     }
@@ -273,21 +312,21 @@ export default function FrontDesk() {
                         {r.status === 'booked' && (
                           <Button size="sm" variant="outline-primary" className="me-1"
                             disabled={pending !== null}
-                            onClick={() => doTransition(r.id, 'check-in')}>
+                            onClick={() => onTransition(r, 'check-in')}>
                             {pending === `check-in-${r.id}` ? <Spinner size="sm" /> : 'Check in'}
                           </Button>
                         )}
                         {r.status === 'checked_in' && (
                           <Button size="sm" variant="outline-success" className="me-1"
                             disabled={pending !== null}
-                            onClick={() => doTransition(r.id, 'check-out')}>
+                            onClick={() => onTransition(r, 'check-out')}>
                             {pending === `check-out-${r.id}` ? <Spinner size="sm" /> : 'Check out'}
                           </Button>
                         )}
                         {(r.status === 'booked' || r.status === 'checked_in') && (
                           <Button size="sm" variant="outline-danger"
                             disabled={pending !== null}
-                            onClick={() => doTransition(r.id, 'cancel')}>
+                            onClick={() => onTransition(r, 'cancel')}>
                             {pending === `cancel-${r.id}` ? <Spinner size="sm" /> : 'Cancel'}
                           </Button>
                         )}
@@ -439,6 +478,56 @@ export default function FrontDesk() {
               </Col>
             </Row>
           </Tab>
+
+          {/* ---- Extra Charges (admin/owner only) ---- */}
+          {canManageRooms && (
+            <Tab eventKey="charges" title="Extra Charges">
+              <div className="d-flex justify-content-end mb-2">
+                <Button onClick={() => setModal({ type: 'charge' })}>Add charge</Button>
+              </div>
+              <Card className="shadow-sm">
+                <Table responsive hover className="mb-0 align-middle">
+                  <thead>
+                    <tr>
+                      <th>Charge</th><th className="text-end">Amount</th><th>Status</th>
+                      <th className="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {extraCharges.length === 0 && (
+                      <tr><td colSpan={4} className="text-center text-muted py-4">No extra charges yet.</td></tr>
+                    )}
+                    {extraCharges.map((c) => (
+                      <tr key={c.id}>
+                        <td className="fw-semibold">
+                          {c.name}
+                          {c.code && <Badge bg="info" className="ms-2 fw-normal">built-in</Badge>}
+                        </td>
+                        <td className="text-end">{formatMoney(c.amount)}</td>
+                        <td><Badge bg={c.is_active ? 'success' : 'secondary'}>{c.is_active ? 'active' : 'inactive'}</Badge></td>
+                        <td className="text-end text-nowrap">
+                          <Button size="sm" variant="outline-primary" className="me-1"
+                            disabled={pending !== null}
+                            onClick={() => setModal({ type: 'charge', charge: c })}>Edit</Button>
+                          {!c.code && (
+                            <Button size="sm" variant="outline-danger"
+                              disabled={pending !== null}
+                              onClick={() => doDeleteCharge(c)}>
+                              {pending === `charge-${c.id}` ? <Spinner size="sm" /> : 'Delete'}
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </Card>
+              <p className="text-muted small mt-2 mb-0">
+                The <strong>Early check-in</strong> fee is billed automatically to the guest&apos;s invoice
+                when a receptionist checks them in before noon. Set it to 0 to disable.
+              </p>
+            </Tab>
+          )}
         </Tabs>
         </>
       )}
@@ -455,6 +544,47 @@ export default function FrontDesk() {
       {modal?.type === 'rate' && (
         <RateModal rooms={rooms} propertyId={propertyId} rate={modal.rate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
+      )}
+      {modal?.type === 'charge' && (
+        <ChargeModal charge={modal.charge} propertyId={propertyId}
+          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
+      )}
+
+      {earlyConfirm && (
+        <Modal show onHide={() => setEarlyConfirm(null)} centered>
+          <Modal.Header closeButton><Modal.Title>Early check-in</Modal.Title></Modal.Header>
+          <Modal.Body>
+            <p>
+              It&apos;s before noon, so checking in{' '}
+              <strong>{earlyConfirm.guest?.full_name ?? 'this guest'}</strong> now counts as an{' '}
+              <strong>early check-in</strong>.
+            </p>
+            {earlyFee > 0 ? (
+              earlyConfirm.guest_id ? (
+                <Alert variant="warning" className="mb-0">
+                  An early check-in fee of <strong>{formatMoney(earlyFee)}</strong> will be added
+                  to the guest&apos;s bill.
+                </Alert>
+              ) : (
+                <Alert variant="secondary" className="mb-0">
+                  This reservation has no guest on file, so the {formatMoney(earlyFee)} fee can&apos;t
+                  be billed — the guest will simply be checked in early.
+                </Alert>
+              )
+            ) : (
+              <Alert variant="secondary" className="mb-0">
+                No early check-in fee is set, so nothing will be charged.
+              </Alert>
+            )}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setEarlyConfirm(null)}>Cancel</Button>
+            <Button variant="primary"
+              onClick={() => { const r = earlyConfirm; setEarlyConfirm(null); runTransition(r.id, 'check-in', { early_check_in: true }) }}>
+              Proceed with early check-in
+            </Button>
+          </Modal.Footer>
+        </Modal>
       )}
     </div>
   )
@@ -487,6 +617,41 @@ function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, on
   const [duplicates, setDuplicates] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  // Guest name autocomplete over previously-registered guests.
+  const [suggestions, setSuggestions] = useState([])
+  const [showSug, setShowSug] = useState(false)
+
+  useEffect(() => {
+    if (!showSug || guestId) return undefined
+    const q = form.guest_name.trim()
+    let active = true
+    const t = setTimeout(async () => {
+      if (q.length < 2) { if (active) setSuggestions([]); return }
+      try {
+        const list = await listGuests(propertyId, { q })
+        if (active) setSuggestions(list.slice(0, 8))
+      } catch { /* ignore search errors */ }
+    }, 250)
+    return () => { active = false; clearTimeout(t) }
+  }, [form.guest_name, showSug, guestId, propertyId])
+
+  // Reuse an existing guest: pin its id and pre-fill the detail fields. Any
+  // field the user then fills that was empty on file completes the record on save.
+  function pickGuest(g) {
+    setGuestId(g.id)
+    setDuplicates(null)
+    setShowSug(false)
+    setSuggestions([])
+    setForm((f) => ({
+      ...f,
+      guest_name: g.full_name,
+      guest_type: g.guest_type ?? f.guest_type,
+      nationality: g.nationality ?? '',
+      contact_number: g.contact_number ?? '',
+      email: g.email ?? '',
+      address: g.address ?? '',
+    }))
+  }
 
   function buildPayload(extra = {}) {
     const payload = { ...form, ...extra }
@@ -513,12 +678,6 @@ function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, on
       setErr(ex?.response?.data?.message ?? 'Save failed. Check the fields and try again.')
       setBusy(false)
     }
-  }
-
-  function reuseGuest(guest) {
-    setGuestId(guest.id)
-    setDuplicates(null)
-    setForm((f) => ({ ...f, guest_name: guest.full_name }))
   }
 
   return (
@@ -595,7 +754,7 @@ function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, on
                         {[d.contact_number, d.email].filter(Boolean).join(' · ')}
                       </span>
                     </span>
-                    <Button size="sm" variant="outline-success" onClick={() => reuseGuest(d)}>Use this guest</Button>
+                    <Button size="sm" variant="outline-success" onClick={() => pickGuest(d)}>Use this guest</Button>
                   </ListGroup.Item>
                 ))}
               </ListGroup>
@@ -608,9 +767,34 @@ function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, on
           <Row>
             <Col md={5}><Form.Group className="mb-3">
               <Form.Label>Guest name</Form.Label>
-              <Form.Control value={form.guest_name}
-                onChange={(e) => { setGuestId(null); set('guest_name')(e) }}
-                placeholder="Optional" />
+              <div className="position-relative">
+                <Form.Control value={form.guest_name} autoComplete="off"
+                  onChange={(e) => { setGuestId(null); setShowSug(true); set('guest_name')(e) }}
+                  onFocus={() => setShowSug(true)}
+                  onBlur={() => setTimeout(() => setShowSug(false), 150)}
+                  placeholder="Search a returning guest, or type a new name" />
+                {showSug && !guestId && suggestions.length > 0 && (
+                  <div className="position-absolute w-100 bg-white border rounded shadow-sm mt-1"
+                    style={{ zIndex: 5, maxHeight: 220, overflowY: 'auto' }}
+                    onMouseDown={(e) => e.preventDefault()}>
+                    {suggestions.map((g) => (
+                      <button type="button" key={g.id}
+                        className="d-flex flex-column w-100 border-0 bg-transparent text-start px-3 py-2"
+                        onClick={() => pickGuest(g)}>
+                        <span className="fw-semibold small">{g.full_name}</span>
+                        <span className="text-muted small">
+                          {[g.contact_number, g.email].filter(Boolean).join(' · ') || 'No contact on file'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {guestId && (
+                <Form.Text className="text-muted">
+                  Filling any blank field below completes this guest&apos;s record.
+                </Form.Text>
+              )}
             </Form.Group></Col>
             <Col md={3}><Form.Group className="mb-3">
               <Form.Label>Guest type</Form.Label>
@@ -714,6 +898,61 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
               {rooms.map((r) => <option key={r.id} value={r.id}>Room {r.room_number}</option>)}
             </Form.Select>
           </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  )
+}
+
+function ChargeModal({ charge, propertyId, onClose, onSaved }) {
+  const editing = Boolean(charge)
+  const builtIn = Boolean(charge?.code) // early check-in: name & code are fixed
+  const [form, setForm] = useState({
+    name: charge?.name ?? '',
+    amount: charge?.amount ?? '',
+    is_active: charge?.is_active ?? true,
+  })
+  const { run, busy, err } = useSubmit(async () => {
+    const payload = { name: form.name, amount: form.amount === '' ? 0 : form.amount, is_active: form.is_active }
+    if (editing) await updateExtraCharge(charge.id, payload)
+    else await createExtraCharge(payload, propertyId)
+    onSaved()
+  })
+
+  return (
+    <Modal show onHide={onClose} centered>
+      <Form onSubmit={run}>
+        <Modal.Header closeButton>
+          <Modal.Title>{editing ? `Edit ${builtIn ? 'fee' : 'charge'}` : 'Add charge'}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {err && <Alert variant="danger">{err}</Alert>}
+          <Form.Group className="mb-3">
+            <Form.Label>Name</Form.Label>
+            <Form.Control value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required autoFocus={!builtIn} disabled={builtIn}
+              placeholder="e.g. Late check-out, Extra towel" />
+            {builtIn && <Form.Text className="text-muted">This is a built-in charge; its name is fixed.</Form.Text>}
+          </Form.Group>
+          <Row>
+            <Col><Form.Group className="mb-3">
+              <Form.Label>Amount</Form.Label>
+              <Form.Control type="number" min={0} step="0.01" value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })} required autoFocus={builtIn} />
+            </Form.Group></Col>
+            <Col><Form.Group className="mb-3">
+              <Form.Label>Status</Form.Label>
+              <Form.Select value={form.is_active ? '1' : '0'}
+                onChange={(e) => setForm({ ...form, is_active: e.target.value === '1' })}>
+                <option value="1">Active</option>
+                <option value="0">Inactive</option>
+              </Form.Select>
+            </Form.Group></Col>
+          </Row>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>

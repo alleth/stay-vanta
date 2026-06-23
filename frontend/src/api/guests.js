@@ -3,8 +3,8 @@ import client from './client'
 const withProp = (params, propertyId) =>
   propertyId ? { ...params, property_id: propertyId } : params
 
-export const listGuests = (propertyId) =>
-  client.get('/guests', { params: withProp({}, propertyId) }).then((r) => r.data.guests)
+export const listGuests = (propertyId, params = {}) =>
+  client.get('/guests', { params: withProp(params, propertyId) }).then((r) => r.data.guests)
 
 export const guestStats = (propertyId) =>
   client.get('/guests/stats', { params: withProp({}, propertyId) }).then((r) => r.data.stats)
