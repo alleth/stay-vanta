@@ -25,7 +25,9 @@ different origins in production (CORS), same origin in dev (Vite proxy).
 - Create a migration: `php bin/cake.php bake migration CreateThings`
 - Seed a user: `php bin/cake.php create_user --name N --email E --password P --role owner|admin|receptionist [--property-id N]`
 - Tests: `vendor/bin/phpunit` — single file: `vendor/bin/phpunit tests/TestCase/Path/ThingTest.php`
-- Static analysis / style: `composer stan` (PHPStan), `composer cs-check` / `composer cs-fix` (phpcs, CakePHP standard)
+- Style: `composer cs-check` / `composer cs-fix` (phpcs / phpcbf, CakePHP standard). A
+  `phpstan.neon` exists but PHPStan is only a `suggest` (not installed / no `composer stan`
+  script) — run it only after adding `phpstan/phpstan` to `require-dev`.
 
 ### Frontend (`cd frontend`)
 - Dev server: `npm run dev` (http://localhost:5173, proxies `/api` → backend)
