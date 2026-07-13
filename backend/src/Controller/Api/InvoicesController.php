@@ -17,7 +17,7 @@ class InvoicesController extends AppController
     {
         $invoices = $this->fetchTable('Invoices');
         $query = $this->scopeToProperty(
-            $invoices->find()->contain(['Guests'])->orderBy(['Invoices.created' => 'DESC'])
+            $invoices->find()->contain(['Guests', 'InvoiceLines'])->orderBy(['Invoices.created' => 'DESC'])
         );
 
         if (($guestId = $this->request->getQuery('guest_id')) !== null) {

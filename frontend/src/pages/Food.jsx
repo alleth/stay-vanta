@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Row, Col, Alert, Spinner, InputGroup,
-  Pagination, ListGroup,
+  Pagination,
 } from 'react-bootstrap'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
@@ -353,21 +353,37 @@ export default function Food() {
               <Table responsive hover className="mb-0 align-middle">
                 <thead>
                   <tr>
-                    <th>Guest</th><th>Opened</th><th className="text-end">Total</th><th>Status</th>
+                    <th>#</th><th>Guest</th><th>Opened</th><th>Charges</th>
+                    <th className="text-end">Total</th><th>Status</th>
                     <th className="text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {invoicesLoading && <SkeletonTableRows rows={4} cols={5} />}
+                  {invoicesLoading && <SkeletonTableRows rows={4} cols={7} />}
                   {!invoicesLoading && invoices.length === 0 && (
-                    <tr><td colSpan={5} className="text-center text-muted py-4">No invoices to show.</td></tr>
+                    <tr><td colSpan={7} className="text-center text-muted py-4">No invoices to show.</td></tr>
                   )}
                   {!invoicesLoading && invoices.map((inv) => (
                     <tr key={inv.id}>
+                      <td className="text-[color:var(--sv-muted)]">{String(inv.id).padStart(4, '0')}</td>
                       <td className="fw-semibold">{inv.guest?.full_name ?? '—'}</td>
                       <td className="small text-muted text-nowrap">{fmtDateTime(inv.created)}</td>
-                      <td className="text-end">{formatMoney(inv.total)}</td>
-                      <td><Badge bg={inv.status === 'open' ? 'warning' : 'success'}>{inv.status}</Badge></td>
+                      <td className="max-w-[260px]">
+                        <span className="block truncate text-xs text-[color:var(--sv-muted)]">
+                          {inv.invoice_lines?.length
+                            ? `${inv.invoice_lines.length} line(s) · ${inv.invoice_lines.map((l) => l.description).join(', ')}`
+                            : 'No charges yet'}
+                        </span>
+                      </td>
+                      <td className="text-end fw-semibold">{formatMoney(inv.total)}</td>
+                      <td>
+                        <Badge bg={inv.status === 'open' ? 'warning' : 'success'}>{inv.status}</Badge>
+                        {inv.settled_at && (
+                          <div className="text-[11px] text-[color:var(--sv-muted)] mt-0.5 whitespace-nowrap">
+                            {fmtDateTime(inv.settled_at)}
+                          </div>
+                        )}
+                      </td>
                       <td className="text-end text-nowrap">
                         <Button size="sm" variant="outline-secondary" className="me-1"
                           onClick={() => setModal({ type: 'invoice', id: inv.id })}>View</Button>
@@ -404,6 +420,14 @@ export default function Food() {
   )
 }
 
+// Charge groups shown on the invoice, in display order.
+const LINE_GROUPS = {
+  reservation: 'Room & stay',
+  early_check_in: 'Extra charges',
+  food_order: 'Food & orders',
+  other: 'Other charges',
+}
+
 function InvoiceModal({ id, onClose }) {
   const [invoice, setInvoice] = useState(null)
   const [error, setError] = useState(null)
@@ -412,15 +436,30 @@ function InvoiceModal({ id, onClose }) {
     getInvoice(id).then(setInvoice).catch(() => setError('Could not load the invoice.'))
   }, [id])
 
+  // Group lines by source_type so the invoice reads like a folio.
+  const groups = useMemo(() => {
+    const lines = invoice?.invoice_lines ?? []
+    const known = ['reservation', 'early_check_in', 'food_order']
+    return Object.entries(LINE_GROUPS)
+      .map(([key, label]) => {
+        const rows = key === 'other'
+          ? lines.filter((l) => !known.includes(l.source_type))
+          : lines.filter((l) => l.source_type === key)
+        return { key, label, rows, subtotal: rows.reduce((s, l) => s + Number(l.amount), 0) }
+      })
+      .filter((g) => g.rows.length > 0)
+  }, [invoice])
+
+  const settled = invoice?.status === 'settled'
+
   return (
-    <Modal show onHide={onClose} centered>
-      <Modal.Header closeButton>
-        <Modal.Title>Invoice #{id}{invoice?.guest ? ` — ${invoice.guest.full_name}` : ''}</Modal.Title>
-      </Modal.Header>
-      <Modal.Body>
+    <Modal show onHide={onClose} centered size="lg">
+      <Modal.Header closeButton className="border-0 pb-0" />
+      <Modal.Body className="pt-0 px-4 pb-4">
         {error && <Alert variant="danger">{error}</Alert>}
         {!invoice && !error && (
-          <div className="space-y-2">
+          <div className="space-y-3">
+            <Skeleton className="h-8 w-1/3" />
             <Skeleton className="h-5 w-1/2" />
             <Skeleton className="h-5 w-full" />
             <Skeleton className="h-5 w-full" />
@@ -428,36 +467,89 @@ function InvoiceModal({ id, onClose }) {
           </div>
         )}
         {invoice && (
-          <>
-            <div className="d-flex justify-content-between mb-2">
-              <Badge bg={invoice.status === 'open' ? 'warning' : 'success'}>{invoice.status}</Badge>
-              <span className="small text-muted">
-                Opened {fmtDateTime(invoice.created)}
-                {invoice.settled_at && ` · Settled ${fmtDateTime(invoice.settled_at)}`}
+          <div>
+            {/* ---- Heading: number + status ---- */}
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--sv-muted)]">
+                  Invoice
+                </div>
+                <div className="text-2xl font-bold tracking-tight">
+                  #{String(invoice.id).padStart(4, '0')}
+                </div>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                settled
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'bg-[color:var(--sv-accent-soft)] text-[color:var(--sv-accent)]'
+              }`}>
+                {settled ? 'Settled' : 'Open tab'}
               </span>
             </div>
-            {invoice.invoice_lines?.length ? (
-              <ListGroup variant="flush">
-                {invoice.invoice_lines.map((l) => (
-                  <ListGroup.Item key={l.id} className="d-flex justify-content-between px-0">
-                    <span>
-                      {l.description}
-                      {l.source_type && <span className="text-muted small ms-2">{l.source_type.replace('_', ' ')}</span>}
-                    </span>
-                    <span>{formatMoney(l.amount)}</span>
-                  </ListGroup.Item>
-                ))}
-              </ListGroup>
-            ) : (
-              <p className="text-muted mb-0">No line items.</p>
-            )}
-            <div className="d-flex justify-content-between fw-bold border-top pt-2 mt-2">
-              <span>Total</span><span>{formatMoney(invoice.total)}</span>
+
+            {/* ---- Meta: billed to + dates ---- */}
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3 rounded-xl border border-[color:var(--sv-border)] bg-[color:var(--sv-subtle)] p-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--sv-muted)]">Billed to</div>
+                <div className="mt-0.5 text-sm font-semibold">{invoice.guest?.full_name ?? 'Walk-in guest'}</div>
+                {(invoice.guest?.contact_number || invoice.guest?.email) && (
+                  <div className="text-xs text-[color:var(--sv-muted)]">
+                    {[invoice.guest.contact_number, invoice.guest.email].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--sv-muted)]">Opened</div>
+                <div className="mt-0.5 text-sm">{fmtDateTime(invoice.created)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--sv-muted)]">Settled</div>
+                <div className="mt-0.5 text-sm">{invoice.settled_at ? fmtDateTime(invoice.settled_at) : '—'}</div>
+              </div>
             </div>
-          </>
+
+            {/* ---- Charges, grouped ---- */}
+            {groups.length === 0 && (
+              <p className="mt-4 mb-0 text-sm text-[color:var(--sv-muted)]">No charges on this invoice yet.</p>
+            )}
+            {groups.map((g) => (
+              <div key={g.key} className="mt-4">
+                <div className="flex items-baseline justify-between border-b border-[color:var(--sv-border)] pb-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--sv-muted)]">
+                    {g.label}
+                  </span>
+                  <span className="text-xs text-[color:var(--sv-muted)]">{g.rows.length} item(s)</span>
+                </div>
+                {g.rows.map((l) => (
+                  <div key={l.id} className="flex items-center justify-between gap-3 border-b border-dashed border-[color:var(--sv-border)] py-2">
+                    <div className="min-w-0">
+                      <div className="text-sm">{l.description}</div>
+                      <div className="text-[11px] text-[color:var(--sv-muted)]">{fmtDateTime(l.created)}</div>
+                    </div>
+                    <div className="shrink-0 text-sm tabular-nums">{formatMoney(l.amount)}</div>
+                  </div>
+                ))}
+                <div className="flex justify-between pt-1.5 text-xs text-[color:var(--sv-muted)]">
+                  <span>Subtotal — {g.label}</span>
+                  <span className="tabular-nums">{formatMoney(g.subtotal)}</span>
+                </div>
+              </div>
+            ))}
+
+            {/* ---- Grand total ---- */}
+            <div className="mt-4 flex items-center justify-between rounded-xl bg-[color:var(--sv-ink)] px-4 py-3 text-white">
+              <span className="text-sm font-medium opacity-80">Total due</span>
+              <span className="text-xl font-bold tabular-nums">{formatMoney(invoice.total)}</span>
+            </div>
+            {settled && (
+              <p className="mt-2 mb-0 text-center text-xs text-[color:var(--sv-muted)]">
+                Paid in full · settled {fmtDateTime(invoice.settled_at)}
+              </p>
+            )}
+          </div>
         )}
       </Modal.Body>
-      <Modal.Footer>
+      <Modal.Footer className="border-0 pt-0">
         <Button variant="secondary" onClick={onClose}>Close</Button>
       </Modal.Footer>
     </Modal>

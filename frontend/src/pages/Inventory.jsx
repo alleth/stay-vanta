@@ -28,6 +28,11 @@ const REUSABLE_ACTIONS = {
 
 const trackingOf = (it) => (it.tracking_type === 'reusable' ? 'reusable' : 'consumable')
 
+const fmtDate = (s) =>
+  s ? new Date(s).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+const fmtDateTime = (s) =>
+  s ? new Date(s).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
+
 export default function Inventory() {
   const { role } = useAuth()
   const { propertyId } = useProperty()
@@ -155,6 +160,7 @@ export default function Inventory() {
                     ) : (
                       <th className="text-end">On hand</th>
                     )}
+                    <th>Date added</th>
                     <th>Last receptionist</th>
                     <th></th>
                   </tr>
@@ -162,7 +168,7 @@ export default function Inventory() {
                 <tbody>
                   {shown.length === 0 && (
                     <tr>
-                      <td colSpan={reusable ? 7 : 5} className="text-center text-muted py-4">
+                      <td colSpan={reusable ? 8 : 6} className="text-center text-muted py-4">
                         No {reusable ? 'reusable' : 'consumable'} items yet.
                       </td>
                     </tr>
@@ -190,6 +196,9 @@ export default function Inventory() {
                             {low && <Badge bg="warning" text="dark">low</Badge>}
                           </td>
                         )}
+                        <td className="text-nowrap text-xs text-[color:var(--sv-muted)]">
+                          {fmtDate(it.created)}
+                        </td>
                         <td className="text-muted small">
                           {it.last_receptionist?.name ?? '—'}
                         </td>
@@ -238,15 +247,27 @@ export default function Inventory() {
                 ) : (
                   <ul className="list-group list-group-flush">
                     {movements.map((m) => (
-                      <li key={m.id} className="list-group-item">
-                        <div className="d-flex justify-content-between">
-                          <span className="fw-semibold">{m.inventory_item?.name}</span>
-                          <Badge bg={m.direction === 'in' ? 'success' : 'danger'}>
-                            {m.direction === 'in' ? '+' : '−'}{Number(m.quantity)}
-                          </Badge>
-                        </div>
-                        <div className="small text-muted">
-                          {m.receptionist?.name} · {m.reason ?? 'movement'}
+                      <li key={m.id} className="list-group-item py-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold truncate">{m.inventory_item?.name}</div>
+                            {m.note && (
+                              <div className="mt-0.5 inline-block rounded-md bg-[color:var(--sv-accent-soft)] px-2 py-0.5 text-xs text-[color:var(--sv-accent)]">
+                                {m.note}
+                              </div>
+                            )}
+                            <div className="mt-0.5 text-xs text-[color:var(--sv-muted)]">
+                              {m.receptionist?.name} · {m.reason ?? 'movement'}
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-end">
+                            <Badge bg={m.direction === 'in' ? 'success' : 'danger'}>
+                              {m.direction === 'in' ? '+' : '−'}{Number(m.quantity)}
+                            </Badge>
+                            <div className="mt-1 text-[11px] leading-tight text-[color:var(--sv-muted)] whitespace-nowrap">
+                              {fmtDateTime(m.created)}
+                            </div>
+                          </div>
                         </div>
                       </li>
                     ))}
@@ -468,9 +489,12 @@ function MoveModal({ propertyId, target, onClose, onSaved }) {
   const a = (reusable ? REUSABLE_ACTIONS : CONSUMABLE_ACTIONS)[action]
   const [quantity, setQuantity] = useState(1)
   const [reason, setReason] = useState('')
+  const [note, setNote] = useState('')
   const available = Number(item.quantity)
   const total = Number(item.total_quantity ?? 0)
   const inUse = Math.max(0, total - available)
+  // Adding stock (restock / acquire) can carry details of what exactly came in.
+  const isAddingStock = action === 'in' || action === 'acquire'
   const { run, busy, err } = useSubmit(async () => {
     await recordMovement(
       {
@@ -479,6 +503,7 @@ function MoveModal({ propertyId, target, onClose, onSaved }) {
         quantity: Number(quantity),
         affects_total: a.affects_total,
         reason: reason || a.reason,
+        note: note.trim() || undefined,
       },
       propertyId,
     )
@@ -505,6 +530,16 @@ function MoveModal({ propertyId, target, onClose, onSaved }) {
               onChange={(e) => setQuantity(e.target.value)} required autoFocus
             />
           </Form.Group>
+          {isAddingStock && (
+            <Form.Group className="mb-3">
+              <Form.Label>Details of what was added <span className="text-muted">(optional)</span></Form.Label>
+              <Form.Control
+                value={note} onChange={(e) => setNote(e.target.value)}
+                placeholder="e.g. hotdog, chorizo — 2 packs each"
+              />
+              <Form.Text muted>Shown in Recent movements so anyone can see what came in.</Form.Text>
+            </Form.Group>
+          )}
           <Form.Group>
             <Form.Label>
               {reusable && (action === 'issue' || action === 'return') ? 'Room / note (optional)' : 'Reason (optional)'}
