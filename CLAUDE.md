@@ -135,15 +135,16 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (manual move is **owner/admin only**; accepts an optional `note` — the Inventory stock-in modal uses it to record what exactly was restocked; receptionists' stock-out happens via Food & Orders, which records the movement internally stamped to them)
 - `GET|POST /api/rooms` (create **owner/admin only**) · `PATCH|PUT /api/rooms/{id}` · `DELETE /api/rooms/{id}` (**owner/admin only**; refused if the room has reservations, removes room-specific rates)
 - `GET /api/room-rates[?room_id=]` · `POST /api/room-rates` (**owner/admin only**) · `PATCH|PUT /api/room-rates/{id}` (**owner/admin only**; fix a mistyped name/rate/target room — receptionists read rates but can't change them)
+- `GET /api/promo-rates[?source=]` (any authed — the booking form reads them) · `POST /api/promo-rates` · `PATCH|PUT /api/promo-rates/{id}` · `DELETE /api/promo-rates/{id}` (writes **owner/admin only**; a row = OTA `source` + nightly `rate`, optionally room-specific via `room_id`)
 - `GET /api/extra-charges` (any authed; index **auto-seeds** the built-in `early_check_in` row per property) · `POST /api/extra-charges` (**owner/admin only**; custom charge, `code` null) · `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; set amount/active, built-in row's name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the built-in early check-in row)
-- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting)
-- `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
+- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting; `promo_rate` is **never client-supplied** — booking resolves it server-side from `promo_rates` for OTA sources)
+- `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` (total/local/foreign count **today's registrations only** — the cards reset daily; in_house is current) · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
 - `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` · `DELETE /api/food-menu-items/{id}` (owner/admin; **soft-delete** — sets `deleted_at`, hides it from the menu/new orders, keeps the row so order history stays intact)
 - `GET|POST /api/food-orders[?status=&date=YYYY-MM-DD|all&page=&limit=]` (index is **paginated** → returns `{orders,total,page,limit}`; `date` defaults client-side to today for a fresh-start view, `limit` clamped 5–100) · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
 - `GET /api/invoices[?guest_id=&status=&date=YYYY-MM-DD|all]` (`date` hides other days, but **open tabs always show**; index includes `InvoiceLines` for the list's charges summary) · `GET /api/invoices/{id}` (with line items, for the folio-style detail modal) · `POST /api/invoices/{id}/settle`
 
 Implemented frontend pages (all five modules): `src/pages/Inventory.jsx`, `src/pages/Staff.jsx`,
-`src/pages/FrontDesk.jsx` (Reservations / Rooms / Rates / Calendar / **Extra Charges** [admin-only]), `src/pages/Guests.jsx`
+`src/pages/FrontDesk.jsx` (Reservations / Rooms / Rates / **Promo Rates** / Calendar / **Extra Charges** [admin-only]), `src/pages/Guests.jsx`
 (count cards + registry + stay history), and `src/pages/Food.jsx` (Orders / Menu / Invoices).
 `src/pages/Subscribers.jsx` (owner-only) manages subscribing hotels/resorts + their admins + fee.
 
@@ -197,7 +198,13 @@ own `property_id`; an owner's chosen property defaults to the first and persists
 on every lifecycle transition (check-in/out/cancel), so a booking always shows who last
 handled it; transitions also flip `rooms.status` (occupied/available) and are guarded by an
 allowed-from-state table. Pricing lives in `ReservationsTable::quote()`: nightly rate =
-`promo_rate` (OTA) ?? resolved room rate; senior/PWD apply `STATUTORY_DISCOUNT` (20%). Booking
+`promo_rate` (OTA) ?? resolved room rate; senior/PWD apply `STATUTORY_DISCOUNT` (20%).
+**Promo rates are admin-configured, not typed by receptionists**: the `promo_rates` table
+(managed on the Front Desk **Promo Rates** tab, writes owner/admin-only) holds a nightly
+price per OTA source, optionally per room; `PromoRatesTable::rateFor()` resolves it
+(room-specific wins over property-wide) and `ReservationsController::add` stamps it onto
+`reservations.promo_rate` server-side, ignoring any client value. The booking form's Promo
+rate field is disabled and auto-fills from the selected Source for display only. Booking
 can create a guest inline (`guest_name`) inside the same transaction; the booking form's guest
 field is a **search-as-you-type combobox** over existing guests — picking one reuses it
 (`guest_id`) and pre-fills the detail fields, and any blank field the user then fills
@@ -239,7 +246,8 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   sources (`reservations.source`: cocotel/agoda/trip_com/tripadvisor), senior/PWD discounts,
   additional beds.
 - **Guests** *(implemented)* — registry + counts (`GuestsController::stats` → total / local / foreign /
-  in_house, where in_house = distinct guests with a `checked_in` reservation). Guests are also
+  in_house, where total/local/foreign count only guests **registered today** (daily fresh-start
+  cards) and in_house = distinct guests with a `checked_in` reservation). Guests are also
   created inline by the Front Desk booking flow.
 - **Food & Orders** *(implemented)* — admin-managed menu (`food_menu_items`, each optionally
   linked to a Food Stock `inventory_item_id` so orders decrement stock); receptionist takes

@@ -119,6 +119,16 @@ return function (RouteBuilder $routes): void {
         $builder->put('/room-rates/{id}', ['controller' => 'RoomRates', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
+        // Promo rates (admin-configured OTA nightly prices per booking source).
+        $builder->get('/promo-rates', ['controller' => 'PromoRates', 'action' => 'index']);
+        $builder->post('/promo-rates', ['controller' => 'PromoRates', 'action' => 'add']);
+        $builder->patch('/promo-rates/{id}', ['controller' => 'PromoRates', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->put('/promo-rates/{id}', ['controller' => 'PromoRates', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->delete('/promo-rates/{id}', ['controller' => 'PromoRates', 'action' => 'delete'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+
         // Extra charges (admin-configurable surcharges, e.g. early check-in).
         $builder->get('/extra-charges', ['controller' => 'ExtraCharges', 'action' => 'index']);
         $builder->post('/extra-charges', ['controller' => 'ExtraCharges', 'action' => 'add']);

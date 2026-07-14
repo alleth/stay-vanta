@@ -11,6 +11,7 @@ import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
+  listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
   listReservations, createReservation, transitionReservation,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
@@ -31,6 +32,18 @@ const SOURCES = [
   ['walk_in', 'Walk-in'], ['cocotel', 'Cocotel'], ['agoda', 'Agoda'],
   ['trip_com', 'Trip.com'], ['tripadvisor', 'TripAdvisor'],
 ]
+// OTA sources a promo rate can target (walk-ins pay the base rate).
+const OTA_SOURCES = SOURCES.filter(([v]) => v !== 'walk_in')
+const sourceLabel = (v) => SOURCES.find(([s]) => s === v)?.[1] ?? v
+
+// The promo rate that applies to a source + room: the admin's room-specific
+// row wins over a property-wide one; null when none is configured.
+function resolvePromoRate(promoRates, source, roomId) {
+  const forSource = promoRates.filter((p) => p.source === source)
+  const specific = roomId ? forSource.find((p) => p.room_id === Number(roomId)) : null
+  const found = specific ?? forSource.find((p) => p.room_id === null)
+  return found ? Number(found.rate) : null
+}
 const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning' }
 const RES_VARIANT = { booked: 'secondary', checked_in: 'primary', checked_out: 'success', cancelled: 'dark' }
 
@@ -52,6 +65,7 @@ export default function FrontDesk() {
   const canManageRooms = role === 'owner' || role === 'admin'
   const [rooms, setRooms] = useState([])
   const [rates, setRates] = useState([])
+  const [promoRates, setPromoRates] = useState([])
   const [reservations, setReservations] = useState([])
   const [extraCharges, setExtraCharges] = useState([])
   const [loading, setLoading] = useState(true)
@@ -68,12 +82,13 @@ export default function FrontDesk() {
   const refresh = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [rm, rt, rs, ec] = await Promise.all([
-        listRooms(propertyId), listRoomRates(propertyId), listReservations(propertyId),
-        listExtraCharges(propertyId),
+      const [rm, rt, pr, rs, ec] = await Promise.all([
+        listRooms(propertyId), listRoomRates(propertyId), listPromoRates(propertyId),
+        listReservations(propertyId), listExtraCharges(propertyId),
       ])
       setRooms(rm)
       setRates(rt)
+      setPromoRates(pr)
       setReservations(rs)
       setExtraCharges(ec)
       setError(null)
@@ -186,6 +201,20 @@ export default function FrontDesk() {
       await refresh()
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Could not delete the charge.')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function doDeletePromoRate(pr) {
+    if (!window.confirm(`Delete the ${sourceLabel(pr.source)} promo rate?`)) return
+    setPending(`promo-${pr.id}`)
+    setError(null)
+    try {
+      await deletePromoRate(pr.id)
+      await refresh()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Could not delete the promo rate.')
     } finally {
       setPending(null)
     }
@@ -415,6 +444,54 @@ export default function FrontDesk() {
             </Card>
           </Tab>
 
+          {/* ---- Promo Rates (OTA nightly prices; auto-fill the booking form) ---- */}
+          <Tab eventKey="promo-rates" title={`Promo Rates (${promoRates.length})`}>
+            {canManageRooms && (
+              <div className="d-flex justify-content-end mb-2">
+                <Button onClick={() => setModal({ type: 'promo' })}>Add promo rate</Button>
+              </div>
+            )}
+            <Card className="shadow-sm">
+              <Table responsive hover className="mb-0 align-middle">
+                <thead>
+                  <tr>
+                    <th>Source</th><th>Applies to</th><th className="text-end">Nightly promo rate</th>
+                    {canManageRooms && <th className="text-end">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {promoRates.length === 0 && (
+                    <tr><td colSpan={canManageRooms ? 4 : 3} className="text-center text-muted py-4">No promo rates yet.</td></tr>
+                  )}
+                  {promoRates.map((pr) => (
+                    <tr key={pr.id}>
+                      <td className="fw-semibold">{sourceLabel(pr.source)}</td>
+                      <td>{pr.room ? `Room ${pr.room.room_number}` : 'All rooms'}</td>
+                      <td className="text-end">{formatMoney(pr.rate)}</td>
+                      {canManageRooms && (
+                        <td className="text-end text-nowrap">
+                          <Button size="sm" variant="outline-primary" className="me-1"
+                            disabled={pending !== null}
+                            onClick={() => setModal({ type: 'promo', promoRate: pr })}>Edit</Button>
+                          <Button size="sm" variant="outline-danger"
+                            disabled={pending !== null}
+                            onClick={() => doDeletePromoRate(pr)}>
+                            {pending === `promo-${pr.id}` ? <Spinner size="sm" /> : 'Delete'}
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </Card>
+            <p className="text-muted small mt-2 mb-0">
+              When a reservation&apos;s <strong>Source</strong> is an OTA, its promo rate fills in
+              automatically from this list (a room-specific rate wins over an &quot;All rooms&quot; one).
+              Receptionists can&apos;t type promo prices by hand.
+            </p>
+          </Tab>
+
           {/* ---- Calendar / availability by date ---- */}
           <Tab eventKey="calendar" title="Calendar">
             <Card className="shadow-sm mb-3">
@@ -533,7 +610,7 @@ export default function FrontDesk() {
       )}
 
       {modal === 'reservation' && (
-        <ReservationModal rooms={rooms} propertyId={propertyId}
+        <ReservationModal rooms={rooms} promoRates={promoRates} propertyId={propertyId}
           defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
@@ -543,6 +620,10 @@ export default function FrontDesk() {
       )}
       {modal?.type === 'rate' && (
         <RateModal rooms={rooms} propertyId={propertyId} rate={modal.rate}
+          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
+      )}
+      {modal?.type === 'promo' && (
+        <PromoRateModal rooms={rooms} propertyId={propertyId} promoRate={modal.promoRate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
       {modal?.type === 'charge' && (
@@ -603,16 +684,21 @@ function SummaryCard({ label, value, variant }) {
   )
 }
 
-function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, onClose, onSaved }) {
+function ReservationModal({ rooms, promoRates, propertyId, defaultRoomId, defaultCheckIn, onClose, onSaved }) {
   const firstAvailable = rooms.find((r) => r.status === 'available')
   const [form, setForm] = useState({
     room_id: defaultRoomId ?? firstAvailable?.id ?? '',
     check_in: defaultCheckIn ?? '', check_out: '',
-    source: 'walk_in', discount_type: 'none', promo_rate: '', additional_beds: 0,
+    source: 'walk_in', discount_type: 'none', additional_beds: 0,
     guest_name: '', guest_type: 'local', nationality: '',
     contact_number: '', email: '', address: '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+  // The promo rate is read-only here: it's the admin's configured OTA price
+  // for the picked source (the backend resolves the same value on booking).
+  const promoRate = form.source === 'walk_in'
+    ? null
+    : resolvePromoRate(promoRates, form.source, form.room_id)
   const [guestId, setGuestId] = useState(null) // set when reusing an existing guest
   const [duplicates, setDuplicates] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -655,7 +741,6 @@ function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, on
 
   function buildPayload(extra = {}) {
     const payload = { ...form, ...extra }
-    if (payload.promo_rate === '') delete payload.promo_rate
     if (guestId) { payload.guest_id = guestId; delete payload.guest_name }
     return payload
   }
@@ -726,8 +811,14 @@ function ReservationModal({ rooms, propertyId, defaultRoomId, defaultCheckIn, on
             </Form.Group></Col>
             <Col md={2}><Form.Group className="mb-3">
               <Form.Label>Promo rate</Form.Label>
-              <Form.Control type="number" min={0} step="0.01" value={form.promo_rate}
-                onChange={set('promo_rate')} placeholder="OTA" />
+              <Form.Control value={promoRate !== null ? formatMoney(promoRate) : ''}
+                disabled readOnly
+                placeholder={form.source === 'walk_in' ? '—' : 'Not set'} />
+              {form.source !== 'walk_in' && promoRate === null && (
+                <Form.Text className="text-muted">
+                  No {sourceLabel(form.source)} promo rate is set — the base room rate applies.
+                </Form.Text>
+              )}
             </Form.Group></Col>
             <Col md={2}><Form.Group className="mb-3">
               <Form.Label>Extra beds</Form.Label>
@@ -890,6 +981,55 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
           <Form.Group className="mb-3">
             <Form.Label>Nightly rate</Form.Label>
             <Form.Control type="number" min={0} step="0.01" value={form.base_rate} onChange={set('base_rate')} required />
+          </Form.Group>
+          <Form.Group>
+            <Form.Label>Applies to</Form.Label>
+            <Form.Select value={form.room_id} onChange={set('room_id')}>
+              <option value="">All rooms (property-wide)</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>Room {r.room_number}</option>)}
+            </Form.Select>
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  )
+}
+
+function PromoRateModal({ rooms, propertyId, promoRate, onClose, onSaved }) {
+  const editing = Boolean(promoRate)
+  const [form, setForm] = useState({
+    source: promoRate?.source ?? OTA_SOURCES[0][0],
+    rate: promoRate?.rate ?? '',
+    room_id: promoRate?.room_id ?? '',
+  })
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+  const { run, busy, err } = useSubmit(async () => {
+    const payload = { source: form.source, rate: form.rate, room_id: form.room_id || null }
+    if (editing) await updatePromoRate(promoRate.id, payload)
+    else await createPromoRate(payload, propertyId)
+    onSaved()
+  })
+  return (
+    <Modal show onHide={onClose} centered>
+      <Form onSubmit={run}>
+        <Modal.Header closeButton>
+          <Modal.Title>{editing ? 'Edit promo rate' : 'Add promo rate'}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {err && <Alert variant="danger">{err}</Alert>}
+          <Form.Group className="mb-3">
+            <Form.Label>Booking source</Form.Label>
+            <Form.Select value={form.source} onChange={set('source')} autoFocus>
+              {OTA_SOURCES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+            </Form.Select>
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Nightly promo rate</Form.Label>
+            <Form.Control type="number" min={0} step="0.01" value={form.rate} onChange={set('rate')} required />
           </Form.Group>
           <Form.Group>
             <Form.Label>Applies to</Form.Label>

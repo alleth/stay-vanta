@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Model\Entity\Reservation;
+use App\Model\Table\PromoRatesTable;
 use Cake\Http\Exception\BadRequestException;
 
 /**
@@ -53,8 +54,11 @@ class ReservationsController extends AppController
     /**
      * POST /api/reservations
      *
-     * { room_id, check_in, check_out, source?, discount_type?, promo_rate?,
+     * { room_id, check_in, check_out, source?, discount_type?,
      *   additional_beds?, guest_id? | guest_name?+nationality?+guest_type? }
+     *
+     * The promo rate is resolved server-side from the promo_rates the admin
+     * configured for the booking source — it is not accepted from the client.
      */
     public function add(): void
     {
@@ -72,18 +76,29 @@ class ReservationsController extends AppController
         $ok = $reservations->getConnection()->transactional(
             function () use ($reservations, $propertyId, &$reservation): bool {
                 $guestId = $this->resolveGuestId($propertyId);
+                $source = $this->request->getData('source') ?? 'walk_in';
+                $roomId = $this->request->getData('room_id');
+
+                // The promo rate is never client-supplied: it's the admin's
+                // configured OTA price for the chosen source (room-specific
+                // preferred), or null (base rate applies) when none is set.
+                $promoRate = null;
+                if (in_array($source, PromoRatesTable::SOURCES, true)) {
+                    $promoRate = $this->fetchTable('PromoRates')
+                        ->rateFor($propertyId, $source, $roomId ? (int)$roomId : null);
+                }
 
                 $reservation = $reservations->newEntity([
                     'property_id' => $propertyId,
-                    'room_id' => $this->request->getData('room_id'),
+                    'room_id' => $roomId,
                     'guest_id' => $guestId,
                     'receptionist_id' => (int)$this->currentUser->id,
                     'check_in' => $this->request->getData('check_in'),
                     'check_out' => $this->request->getData('check_out'),
                     'status' => 'booked',
-                    'source' => $this->request->getData('source') ?? 'walk_in',
+                    'source' => $source,
                     'discount_type' => $this->request->getData('discount_type') ?? 'none',
-                    'promo_rate' => $this->request->getData('promo_rate'),
+                    'promo_rate' => $promoRate,
                     'additional_beds' => (int)($this->request->getData('additional_beds') ?? 0),
                 ]);
 

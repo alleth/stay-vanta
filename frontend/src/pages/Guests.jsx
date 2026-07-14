@@ -60,10 +60,11 @@ export default function Guests() {
 
       {error && <Alert variant="danger">{error}</Alert>}
 
+      {/* total/local/foreign are today's registrations — they reset to 0 each day. */}
       <Row className="g-3 mb-4">
-        <StatCard label="Total guests" value={stats.total} variant="dark" />
-        <StatCard label="Local" value={stats.local} variant="info" />
-        <StatCard label="Foreign" value={stats.foreign} variant="warning" />
+        <StatCard label="Total guests today" value={stats.total} variant="dark" />
+        <StatCard label="Local today" value={stats.local} variant="info" />
+        <StatCard label="Foreign today" value={stats.foreign} variant="warning" />
         <StatCard label="Currently in-house" value={stats.inHouse} variant="success" />
       </Row>
 

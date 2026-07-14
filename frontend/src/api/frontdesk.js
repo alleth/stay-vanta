@@ -26,6 +26,19 @@ export const createRoomRate = (data, propertyId) =>
 export const updateRoomRate = (id, data) =>
   client.patch(`/room-rates/${id}`, data).then((r) => r.data.roomRate)
 
+// Promo rates (admin-configured OTA nightly prices per booking source)
+export const listPromoRates = (propertyId) =>
+  client.get('/promo-rates', { params: withProp({}, propertyId) }).then((r) => r.data.promoRates)
+
+export const createPromoRate = (data, propertyId) =>
+  client.post('/promo-rates', withProp(data, propertyId)).then((r) => r.data.promoRate)
+
+export const updatePromoRate = (id, data) =>
+  client.patch(`/promo-rates/${id}`, data).then((r) => r.data.promoRate)
+
+export const deletePromoRate = (id) =>
+  client.delete(`/promo-rates/${id}`).then((r) => r.data)
+
 // Reservations
 export const listReservations = (propertyId, params = {}) =>
   client.get('/reservations', { params: withProp(params, propertyId) }).then((r) => r.data.reservations)

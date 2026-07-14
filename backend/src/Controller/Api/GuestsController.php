@@ -37,11 +37,16 @@ class GuestsController extends AppController
     /**
      * GET /api/guests/stats — counts for the guests dashboard.
      * { total, local, foreign, in_house }
+     *
+     * total/local/foreign are *today's* registrations (they reset to 0 each
+     * day for a fresh-start view); in_house is whoever is checked in right now.
      */
     public function stats(): void
     {
         $guests = $this->fetchTable('Guests');
-        $base = fn () => $this->scopeToProperty($guests->find());
+        $startOfToday = date('Y-m-d 00:00:00');
+        $base = fn () => $this->scopeToProperty($guests->find())
+            ->where(['Guests.created >=' => $startOfToday]);
 
         $total = $base()->count();
         $local = $base()->where(['Guests.guest_type' => 'local'])->count();
