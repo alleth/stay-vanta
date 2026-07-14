@@ -36,14 +36,26 @@ const SOURCES = [
 const OTA_SOURCES = SOURCES.filter(([v]) => v !== 'walk_in')
 const sourceLabel = (v) => SOURCES.find(([s]) => s === v)?.[1] ?? v
 
-// The promo rate that applies to a source + room: the admin's room-specific
-// row wins over a property-wide one; null when none is configured.
-function resolvePromoRate(promoRates, source, roomId) {
+// The promo multiplier that applies to a source + room: the admin's
+// room-specific row wins over a property-wide one; null when none is
+// configured. The promo nightly price is the room's base rate × this.
+function resolvePromoMultiplier(promoRates, source, roomId) {
   const forSource = promoRates.filter((p) => p.source === source)
   const specific = roomId ? forSource.find((p) => p.room_id === Number(roomId)) : null
   const found = specific ?? forSource.find((p) => p.room_id === null)
-  return found ? Number(found.rate) : null
+  return found ? Number(found.multiplier) : null
 }
+
+// The room's original nightly rate, mirroring the backend's resolveBaseRate:
+// a room-specific rate wins, else the cheapest property-wide one, else 0.
+function resolveBaseRate(rates, roomId) {
+  const cheapest = (list) =>
+    list.length ? Math.min(...list.map((rt) => Number(rt.base_rate))) : null
+  const specific = cheapest(rates.filter((rt) => rt.room_id === Number(roomId)))
+  return specific ?? cheapest(rates.filter((rt) => rt.room_id === null)) ?? 0
+}
+
+const roomLabel = (r) => `Room ${r.room_number} — ${r.room_type ?? 'Room'}`
 const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning' }
 const RES_VARIANT = { booked: 'secondary', checked_in: 'primary', checked_out: 'success', cancelled: 'dark' }
 
@@ -418,17 +430,19 @@ export default function FrontDesk() {
               <Table responsive hover className="mb-0 align-middle">
                 <thead>
                   <tr>
-                    <th>Name</th><th>Applies to</th><th className="text-end">Nightly rate</th>
+                    <th>Name</th><th>Amenities &amp; bed</th><th>Applies to</th>
+                    <th className="text-end">Nightly rate</th>
                     {canManageRooms && <th className="text-end">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rates.length === 0 && (
-                    <tr><td colSpan={canManageRooms ? 4 : 3} className="text-center text-muted py-4">No rates yet.</td></tr>
+                    <tr><td colSpan={canManageRooms ? 5 : 4} className="text-center text-muted py-4">No rates yet.</td></tr>
                   )}
                   {rates.map((rt) => (
                     <tr key={rt.id}>
                       <td className="fw-semibold">{rt.name}</td>
+                      <td className="small text-muted" style={{ maxWidth: 320 }}>{rt.description || '—'}</td>
                       <td>{rt.room ? `Room ${rt.room.room_number}` : 'All rooms'}</td>
                       <td className="text-end">{formatMoney(rt.base_rate)}</td>
                       {canManageRooms && (
@@ -455,7 +469,7 @@ export default function FrontDesk() {
               <Table responsive hover className="mb-0 align-middle">
                 <thead>
                   <tr>
-                    <th>Source</th><th>Applies to</th><th className="text-end">Nightly promo rate</th>
+                    <th>Source</th><th>Applies to</th><th className="text-end">Rate multiplier</th>
                     {canManageRooms && <th className="text-end">Actions</th>}
                   </tr>
                 </thead>
@@ -466,8 +480,8 @@ export default function FrontDesk() {
                   {promoRates.map((pr) => (
                     <tr key={pr.id}>
                       <td className="fw-semibold">{sourceLabel(pr.source)}</td>
-                      <td>{pr.room ? `Room ${pr.room.room_number}` : 'All rooms'}</td>
-                      <td className="text-end">{formatMoney(pr.rate)}</td>
+                      <td>{pr.room ? roomLabel(pr.room) : 'All rooms'}</td>
+                      <td className="text-end">×{Number(pr.multiplier)}</td>
                       {canManageRooms && (
                         <td className="text-end text-nowrap">
                           <Button size="sm" variant="outline-primary" className="me-1"
@@ -486,9 +500,11 @@ export default function FrontDesk() {
               </Table>
             </Card>
             <p className="text-muted small mt-2 mb-0">
-              When a reservation&apos;s <strong>Source</strong> is an OTA, its promo rate fills in
-              automatically from this list (a room-specific rate wins over an &quot;All rooms&quot; one).
-              Receptionists can&apos;t type promo prices by hand.
+              A promo rate is a <strong>multiple of the room&apos;s original rate</strong> — e.g. ×2
+              doubles the nightly price for that OTA. When a reservation&apos;s <strong>Source</strong> is
+              an OTA, the booking form computes original rate × multiplier automatically (a
+              room-specific multiplier wins over an &quot;All rooms&quot; one). Receptionists can&apos;t
+              type promo prices by hand.
             </p>
           </Tab>
 
@@ -610,7 +626,7 @@ export default function FrontDesk() {
       )}
 
       {modal === 'reservation' && (
-        <ReservationModal rooms={rooms} promoRates={promoRates} propertyId={propertyId}
+        <ReservationModal rooms={rooms} rates={rates} promoRates={promoRates} propertyId={propertyId}
           defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
@@ -684,7 +700,7 @@ function SummaryCard({ label, value, variant }) {
   )
 }
 
-function ReservationModal({ rooms, promoRates, propertyId, defaultRoomId, defaultCheckIn, onClose, onSaved }) {
+function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId, defaultCheckIn, onClose, onSaved }) {
   const firstAvailable = rooms.find((r) => r.status === 'available')
   const [form, setForm] = useState({
     room_id: defaultRoomId ?? firstAvailable?.id ?? '',
@@ -694,11 +710,13 @@ function ReservationModal({ rooms, promoRates, propertyId, defaultRoomId, defaul
     contact_number: '', email: '', address: '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
-  // The promo rate is read-only here: it's the admin's configured OTA price
-  // for the picked source (the backend resolves the same value on booking).
-  const promoRate = form.source === 'walk_in'
+  // The promo rate is read-only here: the room's original rate × the admin's
+  // multiplier for the picked source (the backend computes the same on booking).
+  const baseRate = resolveBaseRate(rates, form.room_id)
+  const multiplier = form.source === 'walk_in'
     ? null
-    : resolvePromoRate(promoRates, form.source, form.room_id)
+    : resolvePromoMultiplier(promoRates, form.source, form.room_id)
+  const promoRate = multiplier !== null && baseRate > 0 ? multiplier * baseRate : null
   const [guestId, setGuestId] = useState(null) // set when reusing an existing guest
   const [duplicates, setDuplicates] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -814,9 +832,19 @@ function ReservationModal({ rooms, promoRates, propertyId, defaultRoomId, defaul
               <Form.Control value={promoRate !== null ? formatMoney(promoRate) : ''}
                 disabled readOnly
                 placeholder={form.source === 'walk_in' ? '—' : 'Not set'} />
-              {form.source !== 'walk_in' && promoRate === null && (
+              {promoRate !== null && (
                 <Form.Text className="text-muted">
-                  No {sourceLabel(form.source)} promo rate is set — the base room rate applies.
+                  ×{multiplier} of {formatMoney(baseRate)} original rate
+                </Form.Text>
+              )}
+              {form.source !== 'walk_in' && multiplier === null && (
+                <Form.Text className="text-muted">
+                  No {sourceLabel(form.source)} multiplier is set — the original room rate applies.
+                </Form.Text>
+              )}
+              {form.source !== 'walk_in' && multiplier !== null && baseRate <= 0 && (
+                <Form.Text className="text-muted">
+                  This room has no rate yet — add one on the Rates tab first.
                 </Form.Text>
               )}
             </Form.Group></Col>
@@ -958,12 +986,16 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
   const editing = Boolean(rate)
   const [form, setForm] = useState({
     name: rate?.name ?? '',
+    description: rate?.description ?? '',
     base_rate: rate?.base_rate ?? '',
     room_id: rate?.room_id ?? '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const { run, busy, err } = useSubmit(async () => {
-    const payload = { name: form.name, base_rate: form.base_rate, room_id: form.room_id || null }
+    const payload = {
+      name: form.name, description: form.description,
+      base_rate: form.base_rate, room_id: form.room_id || null,
+    }
     if (editing) await updateRoomRate(rate.id, payload)
     else await createRoomRate(payload, propertyId)
     onSaved()
@@ -977,6 +1009,12 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
           <Form.Group className="mb-3">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus placeholder="e.g. Deluxe Standard" />
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Amenities &amp; bed type</Form.Label>
+            <Form.Control as="textarea" rows={2} maxLength={255}
+              value={form.description} onChange={set('description')}
+              placeholder="What the guest gets — e.g. Queen bed, A/C, hot shower, free breakfast for 2" />
           </Form.Group>
           <Form.Group className="mb-3">
             <Form.Label>Nightly rate</Form.Label>
@@ -1003,12 +1041,12 @@ function PromoRateModal({ rooms, propertyId, promoRate, onClose, onSaved }) {
   const editing = Boolean(promoRate)
   const [form, setForm] = useState({
     source: promoRate?.source ?? OTA_SOURCES[0][0],
-    rate: promoRate?.rate ?? '',
+    multiplier: promoRate?.multiplier ?? '',
     room_id: promoRate?.room_id ?? '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const { run, busy, err } = useSubmit(async () => {
-    const payload = { source: form.source, rate: form.rate, room_id: form.room_id || null }
+    const payload = { source: form.source, multiplier: form.multiplier, room_id: form.room_id || null }
     if (editing) await updatePromoRate(promoRate.id, payload)
     else await createPromoRate(payload, propertyId)
     onSaved()
@@ -1028,14 +1066,18 @@ function PromoRateModal({ rooms, propertyId, promoRate, onClose, onSaved }) {
             </Form.Select>
           </Form.Group>
           <Form.Group className="mb-3">
-            <Form.Label>Nightly promo rate</Form.Label>
-            <Form.Control type="number" min={0} step="0.01" value={form.rate} onChange={set('rate')} required />
+            <Form.Label>Rate multiplier</Form.Label>
+            <Form.Control type="number" min={1} step="0.1" value={form.multiplier}
+              onChange={set('multiplier')} required placeholder="e.g. 2 = ×2 the room's original rate" />
+            <Form.Text className="text-muted">
+              The promo price is the room&apos;s original rate × this — e.g. ×2 makes a ₱1,500 room ₱3,000.
+            </Form.Text>
           </Form.Group>
           <Form.Group>
             <Form.Label>Applies to</Form.Label>
             <Form.Select value={form.room_id} onChange={set('room_id')}>
               <option value="">All rooms (property-wide)</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>Room {r.room_number}</option>)}
+              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
             </Form.Select>
           </Form.Group>
         </Modal.Body>

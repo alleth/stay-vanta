@@ -7,8 +7,9 @@ use Cake\ORM\Table;
 use Cake\Validation\Validator;
 
 /**
- * PromoRates model — OTA nightly prices per property + booking source,
- * optionally per room (room_id null = property-wide).
+ * PromoRates model — OTA rate multipliers per property + booking source,
+ * optionally per room (room_id null = property-wide). The promo nightly price
+ * is the room's original (base) rate × the multiplier.
  *
  * @method \App\Model\Entity\PromoRate newEmptyEntity()
  * @method \App\Model\Entity\PromoRate get(mixed $primaryKey, array $options = [])
@@ -42,19 +43,19 @@ class PromoRatesTable extends Table
             ->inList('source', self::SOURCES, 'Pick an OTA booking source.');
 
         $validator
-            ->numeric('rate')
-            ->greaterThanOrEqual('rate', 0)
-            ->requirePresence('rate', 'create');
+            ->numeric('multiplier')
+            ->greaterThan('multiplier', 0, 'The multiplier must be greater than zero.')
+            ->requirePresence('multiplier', 'create');
 
         return $validator;
     }
 
     /**
-     * The nightly promo rate for a booking source, preferring a room-specific
+     * The rate multiplier for a booking source, preferring a room-specific
      * row over a property-wide one. Null when the admin hasn't configured one
      * (the reservation then falls back to the base room rate).
      */
-    public function rateFor(int $propertyId, string $source, ?int $roomId): ?float
+    public function multiplierFor(int $propertyId, string $source, ?int $roomId): ?float
     {
         $query = $this->find()
             ->where(['PromoRates.property_id' => $propertyId, 'PromoRates.source' => $source]);
@@ -72,6 +73,6 @@ class PromoRatesTable extends Table
 
         $rate = $query->orderBy(['PromoRates.room_id' => 'DESC'])->first();
 
-        return $rate ? (float)$rate->rate : null;
+        return $rate ? (float)$rate->multiplier : null;
     }
 }

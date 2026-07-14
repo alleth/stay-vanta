@@ -53,6 +53,7 @@ class RoomRatesController extends AppController
             'property_id' => $propertyId,
             'room_id' => $this->request->getData('room_id'),
             'name' => $this->request->getData('name'),
+            'description' => $this->request->getData('description'),
             'base_rate' => $this->request->getData('base_rate'),
         ]);
 
@@ -86,6 +87,7 @@ class RoomRatesController extends AppController
         // room_id may be intentionally set to null ("all rooms"); read it raw.
         $rates->patchEntity($rate, [
             'name' => $this->request->getData('name'),
+            'description' => $this->request->getData('description'),
             'base_rate' => $this->request->getData('base_rate'),
             'room_id' => $this->request->getData('room_id') ?: null,
         ], ['accessibleFields' => ['property_id' => false]]);

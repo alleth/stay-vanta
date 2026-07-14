@@ -12,6 +12,7 @@ use Cake\ORM\Entity;
  * @property int $property_id
  * @property int|null $room_id
  * @property string $name
+ * @property string|null $description
  * @property string $base_rate
  */
 class RoomRate extends Entity
@@ -20,6 +21,7 @@ class RoomRate extends Entity
         'property_id' => true,
         'room_id' => true,
         'name' => true,
+        'description' => true,
         'base_rate' => true,
     ];
 }

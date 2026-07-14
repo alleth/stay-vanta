@@ -12,7 +12,7 @@ use Cake\ORM\Entity;
  * @property int $property_id
  * @property int|null $room_id
  * @property string $source
- * @property string $rate
+ * @property string $multiplier
  */
 class PromoRate extends Entity
 {
@@ -20,6 +20,6 @@ class PromoRate extends Entity
         'property_id' => true,
         'room_id' => true,
         'source' => true,
-        'rate' => true,
+        'multiplier' => true,
     ];
 }

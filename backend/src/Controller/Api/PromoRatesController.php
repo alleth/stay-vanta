@@ -7,10 +7,11 @@ use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 
 /**
- * Promo rates — the OTA nightly prices the admin negotiates per booking source
- * (Cocotel, Agoda, Trip.com, TripAdvisor), optionally per room. The New
- * Reservation form auto-fills its promo rate from these; receptionists read
- * them but only owners/admins create, edit, or delete them.
+ * Promo rates — per-OTA rate multipliers the admin configures per booking
+ * source (Cocotel, Agoda, Trip.com, TripAdvisor), optionally per room. The
+ * promo nightly price is the room's original rate × the multiplier; the New
+ * Reservation form auto-fills from these. Receptionists read them but only
+ * owners/admins create, edit, or delete them.
  */
 class PromoRatesController extends AppController
 {
@@ -55,7 +56,7 @@ class PromoRatesController extends AppController
             'property_id' => $propertyId,
             'room_id' => $this->request->getData('room_id') ?: null,
             'source' => $this->request->getData('source'),
-            'rate' => $this->request->getData('rate'),
+            'multiplier' => $this->request->getData('multiplier'),
         ]);
 
         if (!$promoRates->save($rate)) {
@@ -72,7 +73,7 @@ class PromoRatesController extends AppController
     }
 
     /**
-     * PATCH/PUT /api/promo-rates/{id} — fix the source, target room, or price.
+     * PATCH/PUT /api/promo-rates/{id} — fix the source, target room, or multiplier.
      */
     public function edit(int $id): void
     {
@@ -88,7 +89,7 @@ class PromoRatesController extends AppController
         // room_id may be intentionally set to null ("all rooms"); read it raw.
         $promoRates->patchEntity($rate, [
             'source' => $this->request->getData('source'),
-            'rate' => $this->request->getData('rate'),
+            'multiplier' => $this->request->getData('multiplier'),
             'room_id' => $this->request->getData('room_id') ?: null,
         ], ['accessibleFields' => ['property_id' => false]]);
 

@@ -39,6 +39,12 @@ class RoomRatesTable extends Table
             ->requirePresence('name', 'create')
             ->notEmptyString('name');
 
+        // What the guest gets: amenities & bed type shown on the Rates tab.
+        $validator
+            ->scalar('description')
+            ->maxLength('description', 255)
+            ->allowEmptyString('description');
+
         $validator
             ->numeric('base_rate')
             ->greaterThanOrEqual('base_rate', 0)

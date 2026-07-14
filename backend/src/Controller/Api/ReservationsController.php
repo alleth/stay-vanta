@@ -42,7 +42,7 @@ class ReservationsController extends AppController
 
         // Attach a price quote to each reservation.
         $rows = $query->all()->map(function (Reservation $r) use ($reservations) {
-            $r->set('quote', $reservations->quote($r, $this->resolveBaseRate($r)));
+            $r->set('quote', $reservations->quote($r, $this->resolveBaseRate((int)$r->property_id, $r->room_id)));
 
             return $r;
         });
@@ -79,13 +79,18 @@ class ReservationsController extends AppController
                 $source = $this->request->getData('source') ?? 'walk_in';
                 $roomId = $this->request->getData('room_id');
 
-                // The promo rate is never client-supplied: it's the admin's
-                // configured OTA price for the chosen source (room-specific
-                // preferred), or null (base rate applies) when none is set.
+                // The promo rate is never client-supplied: it's the room's
+                // original (base) rate × the admin's multiplier for the chosen
+                // source (room-specific preferred), or null (base rate applies)
+                // when no multiplier — or no base rate — is configured.
                 $promoRate = null;
                 if (in_array($source, PromoRatesTable::SOURCES, true)) {
-                    $promoRate = $this->fetchTable('PromoRates')
-                        ->rateFor($propertyId, $source, $roomId ? (int)$roomId : null);
+                    $multiplier = $this->fetchTable('PromoRates')
+                        ->multiplierFor($propertyId, $source, $roomId ? (int)$roomId : null);
+                    if ($multiplier !== null) {
+                        $base = $this->resolveBaseRate($propertyId, $roomId ? (int)$roomId : null);
+                        $promoRate = $base > 0 ? round($base * $multiplier, 2) : null;
+                    }
                 }
 
                 $reservation = $reservations->newEntity([
@@ -167,7 +172,10 @@ class ReservationsController extends AppController
             // becomes collectable revenue (room revenue is otherwise computed
             // only at read-time and never persisted).
             if ($transition === 'check-out' && $reservation->guest_id) {
-                $quote = $reservations->quote($reservation, $this->resolveBaseRate($reservation));
+                $quote = $reservations->quote(
+                    $reservation,
+                    $this->resolveBaseRate((int)$reservation->property_id, $reservation->room_id),
+                );
                 if ($quote['total'] > 0) {
                     $invoices = $this->fetchTable('Invoices');
                     $invoice = $invoices->openInvoiceFor(
@@ -275,17 +283,17 @@ class ReservationsController extends AppController
     }
 
     /**
-     * Resolve the nightly base rate for a reservation: a room-specific rate if
+     * Resolve the nightly base rate for a room: a room-specific rate if
      * one exists, else the cheapest property-wide rate, else 0.
      */
-    private function resolveBaseRate(Reservation $reservation): float
+    private function resolveBaseRate(int $propertyId, ?int $roomId): float
     {
         $rates = $this->fetchTable('RoomRates');
         $rate = $rates->find()
-            ->where(['RoomRates.property_id' => $reservation->property_id])
-            ->where(function ($exp) use ($reservation) {
+            ->where(['RoomRates.property_id' => $propertyId])
+            ->where(function ($exp) use ($roomId) {
                 return $exp->or([
-                    'RoomRates.room_id' => $reservation->room_id,
+                    'RoomRates.room_id' => $roomId,
                     'RoomRates.room_id IS' => null,
                 ]);
             })
@@ -300,7 +308,7 @@ class ReservationsController extends AppController
     {
         $reservations = $this->fetchTable('Reservations');
         $full = $reservations->get($reservation->id, contain: ['Rooms', 'Guests', 'Receptionist']);
-        $full->set('quote', $reservations->quote($full, $this->resolveBaseRate($full)));
+        $full->set('quote', $reservations->quote($full, $this->resolveBaseRate((int)$full->property_id, $full->room_id)));
 
         $this->response = $this->response->withStatus($status);
         $this->set('reservation', $full);
