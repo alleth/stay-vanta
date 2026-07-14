@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\I18n\DateTime;
 
@@ -132,5 +133,77 @@ class ReportsController extends AppController
             'revenue' => $revenue,
         ]);
         $this->viewBuilder()->setOption('serialize', ['dashboard']);
+    }
+
+    /**
+     * GET /api/reports/daily-collection[?date=YYYY-MM-DD | ?month=&year=]
+     *
+     * Money collected in the window: settled invoices (by settled_at — room
+     * charges, downpayments net of refunds, charged food) + paid standalone
+     * food orders. Defaults to today. The month+year form (a whole month) is
+     * owner/admin only — a receptionist may only view a single day's
+     * collection.
+     */
+    public function dailyCollection(): void
+    {
+        $propertyId = $this->effectivePropertyId();
+        if ($propertyId === null) {
+            throw new BadRequestException('property_id is required.');
+        }
+
+        $month = $this->request->getQuery('month');
+        $year = $this->request->getQuery('year');
+
+        if ($month !== null || $year !== null) {
+            if (!$this->userHasRole('owner', 'admin')) {
+                throw new ForbiddenException('Receptionists can view the daily collection only.');
+            }
+            if (!is_numeric($month) || !is_numeric($year) || (int)$month < 1 || (int)$month > 12) {
+                throw new BadRequestException('Provide a valid month (1-12) and year.');
+            }
+            $from = DateTime::create((int)$year, (int)$month, 1, 0, 0, 0);
+            $to = $from->addMonths(1);
+            $scope = 'month';
+            $label = $from->format('Y-m');
+        } else {
+            $date = (string)($this->request->getQuery('date') ?: date('Y-m-d'));
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                throw new BadRequestException('date must be YYYY-MM-DD.');
+            }
+            $from = DateTime::parse($date . ' 00:00:00');
+            $to = $from->addDays(1);
+            $scope = 'day';
+            $label = $date;
+        }
+
+        $inv = $this->fetchTable('Invoices')->find()->where([
+            'property_id' => $propertyId,
+            'status' => 'settled',
+            'settled_at >=' => $from,
+            'settled_at <' => $to,
+        ]);
+        $invRow = $inv->select(['s' => $inv->func()->sum('total'), 'c' => $inv->func()->count('*')])
+            ->disableHydration()->first();
+
+        $food = $this->fetchTable('FoodOrders')->find()->where([
+            'property_id' => $propertyId,
+            'payment_status' => 'paid',
+            'created >=' => $from,
+            'created <' => $to,
+        ]);
+        $foodRow = $food->select(['s' => $food->func()->sum('total'), 'c' => $food->func()->count('*')])
+            ->disableHydration()->first();
+
+        $invTotal = round((float)($invRow['s'] ?? 0), 2);
+        $foodTotal = round((float)($foodRow['s'] ?? 0), 2);
+
+        $this->set('collection', [
+            'scope' => $scope,
+            'label' => $label,
+            'invoices' => ['total' => $invTotal, 'count' => (int)($invRow['c'] ?? 0)],
+            'food_orders' => ['total' => $foodTotal, 'count' => (int)($foodRow['c'] ?? 0)],
+            'total' => round($invTotal + $foodTotal, 2),
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['collection']);
     }
 }

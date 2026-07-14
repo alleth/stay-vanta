@@ -6,6 +6,7 @@ namespace App\Controller\Api;
 use App\Model\Entity\Reservation;
 use App\Model\Table\PromoRatesTable;
 use Cake\Http\Exception\BadRequestException;
+use Cake\I18n\Date;
 
 /**
  * Reservations — bookings plus the check-in/out/cancel lifecycle.
@@ -15,6 +16,12 @@ use Cake\Http\Exception\BadRequestException;
  */
 class ReservationsController extends AppController
 {
+    /** Downpayment collected up front on an advance booking: 50% of the total. */
+    private const DOWNPAYMENT_RATE = 0.5;
+
+    /** Share of the downpayment retained when an advance booking is cancelled. */
+    private const CANCELLATION_RETENTION = 0.1;
+
     /** Allowed status transitions and the room status each implies. */
     private const TRANSITIONS = [
         'check-in' => ['from' => ['booked'], 'to' => 'checked_in', 'room' => 'occupied'],
@@ -59,6 +66,9 @@ class ReservationsController extends AppController
      *
      * The promo rate is resolved server-side from the promo_rates the admin
      * configured for the booking source — it is not accepted from the client.
+     *
+     * An advance booking (check-in after today) with a guest collects a 50%
+     * downpayment of the quoted total, recorded as a settled invoice.
      */
     public function add(): void
     {
@@ -107,7 +117,36 @@ class ReservationsController extends AppController
                     'additional_beds' => (int)($this->request->getData('additional_beds') ?? 0),
                 ]);
 
-                return $reservations->save($reservation) !== false;
+                if ($reservations->save($reservation) === false) {
+                    return false;
+                }
+
+                // Advance booking (check-in after today): collect a 50%
+                // downpayment of the quoted total (promo rate and senior/PWD
+                // discount included) as an immediately-settled invoice, so it
+                // shows in collections right away. Needs a guest to bill.
+                if ($guestId !== null && $reservation->check_in > Date::today()) {
+                    $quote = $reservations->quote(
+                        $reservation,
+                        $this->resolveBaseRate($propertyId, $roomId ? (int)$roomId : null),
+                    );
+                    $downpayment = round($quote['total'] * self::DOWNPAYMENT_RATE, 2);
+                    if ($downpayment > 0) {
+                        $reservation->set('downpayment', $downpayment);
+                        $reservations->saveOrFail($reservation);
+                        $this->fetchTable('Invoices')->settledInvoiceWith(
+                            $propertyId,
+                            (int)$guestId,
+                            (int)$reservation->id,
+                            sprintf('Downpayment (50%%) — booking #%d', $reservation->id),
+                            $downpayment,
+                            'downpayment',
+                            (int)$reservation->id,
+                        );
+                    }
+                }
+
+                return true;
             }
         );
 
@@ -146,7 +185,8 @@ class ReservationsController extends AppController
             ));
         }
 
-        $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $rule, $transition) {
+        $fromStatus = $reservation->status;
+        $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $rule, $transition, $fromStatus) {
             $reservation->set('status', $rule['to']);
             // Re-stamp: this receptionist is now the last to act on the booking.
             $reservation->set('receptionist_id', (int)$this->currentUser->id);
@@ -176,19 +216,33 @@ class ReservationsController extends AppController
                     $reservation,
                     $this->resolveBaseRate((int)$reservation->property_id, $reservation->room_id),
                 );
-                if ($quote['total'] > 0) {
+                $downpayment = (float)$reservation->downpayment;
+                if ($quote['total'] > 0 || $downpayment > 0) {
                     $invoices = $this->fetchTable('Invoices');
                     $invoice = $invoices->openInvoiceFor(
                         (int)$reservation->property_id,
                         (int)$reservation->guest_id,
                         (int)$reservation->id
                     );
-                    $description = sprintf(
-                        'Room %s · %d night(s)',
-                        $reservation->room_id ? '#' . $reservation->room_id : '',
-                        $quote['nights']
-                    );
-                    $invoices->addLine($invoice, $description, (float)$quote['total'], 'reservation', (int)$reservation->id);
+                    if ($quote['total'] > 0) {
+                        $description = sprintf(
+                            'Room %s · %d night(s)',
+                            $reservation->room_id ? '#' . $reservation->room_id : '',
+                            $quote['nights']
+                        );
+                        $invoices->addLine($invoice, $description, (float)$quote['total'], 'reservation', (int)$reservation->id);
+                    }
+                    // The downpayment was already collected at booking (its own
+                    // settled invoice) — credit it so only the balance is due.
+                    if ($downpayment > 0) {
+                        $invoices->addLine(
+                            $invoice,
+                            'Less: downpayment already collected',
+                            -$downpayment,
+                            'downpayment_credit',
+                            (int)$reservation->id,
+                        );
+                    }
                 }
             }
 
@@ -214,7 +268,27 @@ class ReservationsController extends AppController
 
             // Cancelling reverses any early check-in fee already posted.
             if ($transition === 'cancel') {
-                $this->fetchTable('Invoices')->removeLinesFor('early_check_in', (int)$reservation->id);
+                $invoices = $this->fetchTable('Invoices');
+                $invoices->removeLinesFor('early_check_in', (int)$reservation->id);
+
+                // A cancelled advance booking doesn't get the downpayment back
+                // in full: 10% is retained, 90% is refunded onto the settled
+                // downpayment invoice (its total drops to the retained share,
+                // which is what stays in collections).
+                $downpayment = (float)$reservation->downpayment;
+                if ($fromStatus === 'booked' && $downpayment > 0) {
+                    $invoice = $invoices->invoiceForLine('downpayment', (int)$reservation->id);
+                    if ($invoice !== null) {
+                        $refund = round($downpayment * (1 - self::CANCELLATION_RETENTION), 2);
+                        $invoices->addLine(
+                            $invoice,
+                            'Downpayment refund on cancellation (10% retained)',
+                            -$refund,
+                            'downpayment_refund',
+                            (int)$reservation->id,
+                        );
+                    }
+                }
             }
         });
 

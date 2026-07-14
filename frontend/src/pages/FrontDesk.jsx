@@ -201,6 +201,14 @@ export default function FrontDesk() {
       && !window.confirm('Check out this guest? This finalizes the stay and posts the room charge to their invoice.')) {
       return
     }
+    // Cancelling an advance booking retains 10% of the downpayment.
+    if (transition === 'cancel' && r.status === 'booked' && Number(r.downpayment) > 0) {
+      const dp = Number(r.downpayment)
+      if (!window.confirm(
+        `Cancel this advance booking? 10% of the ${formatMoney(dp)} downpayment is retained — `
+        + `${formatMoney(dp * 0.9)} will be refunded to the guest.`,
+      )) return
+    }
     runTransition(r.id, transition)
   }
 
@@ -341,7 +349,12 @@ export default function FrontDesk() {
                           <Badge bg="info" className="ms-1">{r.discount_type}</Badge>
                         )}
                       </td>
-                      <td className="text-end">{formatMoney(r.quote?.total)}</td>
+                      <td className="text-end">
+                        {formatMoney(r.quote?.total)}
+                        {Number(r.downpayment) > 0 && (
+                          <div className="small text-muted text-nowrap">DP {formatMoney(r.downpayment)}</div>
+                        )}
+                      </td>
                       <td><Badge bg={RES_VARIANT[r.status]}>{r.status.replace('_', ' ')}</Badge></td>
                       <td className="small text-muted" style={{ minWidth: 170 }}>
                         <div>Booked: {fmtDateTime(r.created) ?? '—'}</div>
@@ -717,6 +730,19 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
     ? null
     : resolvePromoMultiplier(promoRates, form.source, form.room_id)
   const promoRate = multiplier !== null && baseRate > 0 ? multiplier * baseRate : null
+
+  // Advance booking (check-in after today) collects a 50% downpayment of the
+  // estimated total — promo rate and senior/PWD discount included. The
+  // backend computes the authoritative amount the same way.
+  const nights = form.check_in && form.check_out
+    ? Math.max(0, Math.round((new Date(form.check_out) - new Date(form.check_in)) / 86400000))
+    : 0
+  const nightly = promoRate ?? (baseRate > 0 ? baseRate : null)
+  const estTotal = nightly !== null && nights > 0
+    ? nightly * nights * (form.discount_type === 'none' ? 1 : 0.8)
+    : 0
+  const isAdvance = Boolean(form.check_in) && form.check_in > todayStr()
+  const downpayment = isAdvance ? estTotal * 0.5 : 0
   const [guestId, setGuestId] = useState(null) // set when reusing an existing guest
   const [duplicates, setDuplicates] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -853,6 +879,14 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
               <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
             </Form.Group></Col>
           </Row>
+          {downpayment > 0 && (
+            <Alert variant="info" className="py-2 mb-3">
+              <strong>Advance booking</strong> — collect a downpayment of{' '}
+              <strong>{formatMoney(downpayment)}</strong> (50% of the {formatMoney(estTotal)} total,
+              promo rate and discount included). If the booking is later cancelled, 10% of the
+              downpayment is retained.
+            </Alert>
+          )}
           <hr />
           <div className="d-flex justify-content-between align-items-center mb-2">
             <span className="fw-semibold">Guest details</span>

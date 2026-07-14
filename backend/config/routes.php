@@ -71,6 +71,7 @@ return function (RouteBuilder $routes): void {
         // Role dashboards.
         $builder->get('/reports/owner-dashboard', ['controller' => 'Reports', 'action' => 'ownerDashboard']);
         $builder->get('/reports/admin-dashboard', ['controller' => 'Reports', 'action' => 'adminDashboard']);
+        $builder->get('/reports/daily-collection', ['controller' => 'Reports', 'action' => 'dailyCollection']);
 
         // Staff (users).
         $builder->get('/users', ['controller' => 'Users', 'action' => 'index']);

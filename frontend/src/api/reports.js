@@ -8,6 +8,12 @@ export const ownerDashboard = () =>
 export const adminDashboard = () =>
   client.get('/reports/admin-dashboard').then((r) => r.data.dashboard)
 
+// Collection report: settled invoices + paid food orders in the window.
+// Pass { date } for a single day (any staff role), or { month, year } for a
+// whole month (owner/admin only).
+export const dailyCollection = (params = {}) =>
+  client.get('/reports/daily-collection', { params }).then((r) => r.data.collection)
+
 // Subscribers (owner view of properties, each with its admin user(s)).
 export const listSubscribers = () =>
   client.get('/properties').then((r) => r.data.properties)

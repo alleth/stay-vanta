@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Model\Table;
 
 use App\Model\Entity\Invoice;
+use Cake\I18n\DateTime;
 use Cake\ORM\Table;
 
 /**
@@ -50,6 +51,47 @@ class InvoicesTable extends Table
         }
 
         return $invoice;
+    }
+
+    /**
+     * Create an invoice that is settled on the spot — money collected right
+     * now, e.g. an advance-booking downpayment. It lands in collected revenue
+     * immediately (revenue buckets settled invoices by settled_at).
+     */
+    public function settledInvoiceWith(
+        int $propertyId,
+        int $guestId,
+        ?int $reservationId,
+        string $description,
+        float $amount,
+        string $sourceType,
+        int $sourceId,
+    ): Invoice {
+        $invoice = $this->newEntity([
+            'property_id' => $propertyId,
+            'guest_id' => $guestId,
+            'reservation_id' => $reservationId,
+            'status' => 'settled',
+            'total' => 0,
+        ]);
+        $invoice->set('settled_at', DateTime::now());
+        $this->saveOrFail($invoice);
+        $this->addLine($invoice, $description, $amount, $sourceType, $sourceId);
+
+        return $invoice;
+    }
+
+    /**
+     * The invoice holding a line from the given source, if any — e.g. find the
+     * downpayment invoice of a reservation so a refund line can be appended.
+     */
+    public function invoiceForLine(string $sourceType, int $sourceId): ?Invoice
+    {
+        $line = $this->InvoiceLines->find()
+            ->where(['source_type' => $sourceType, 'source_id' => $sourceId])
+            ->first();
+
+        return $line ? $this->get($line->invoice_id) : null;
     }
 
     /**

@@ -420,9 +420,12 @@ export default function Food() {
   )
 }
 
-// Charge groups shown on the invoice, in display order.
+// Charge groups shown on the invoice, in display order. The `downpayment`
+// group collects all downpayment lines: the collection itself, the credit
+// applied at check-out, and any cancellation refund.
 const LINE_GROUPS = {
   reservation: 'Room & stay',
+  downpayment: 'Downpayment',
   early_check_in: 'Extra charges',
   food_order: 'Food & orders',
   other: 'Other charges',
@@ -440,11 +443,14 @@ function InvoiceModal({ id, onClose }) {
   const groups = useMemo(() => {
     const lines = invoice?.invoice_lines ?? []
     const known = ['reservation', 'early_check_in', 'food_order']
+    const isDownpayment = (l) => l.source_type.startsWith('downpayment')
     return Object.entries(LINE_GROUPS)
       .map(([key, label]) => {
         const rows = key === 'other'
-          ? lines.filter((l) => !known.includes(l.source_type))
-          : lines.filter((l) => l.source_type === key)
+          ? lines.filter((l) => !known.includes(l.source_type) && !isDownpayment(l))
+          : key === 'downpayment'
+            ? lines.filter(isDownpayment)
+            : lines.filter((l) => l.source_type === key)
         return { key, label, rows, subtotal: rows.reduce((s, l) => s + Number(l.amount), 0) }
       })
       .filter((g) => g.rows.length > 0)

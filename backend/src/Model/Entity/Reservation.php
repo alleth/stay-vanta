@@ -24,6 +24,7 @@ use Cake\ORM\Entity;
  * @property string $status         booked | checked_in | checked_out | cancelled
  * @property string $source         walk_in | cocotel | agoda | trip_com | tripadvisor
  * @property string|null $promo_rate
+ * @property string|null $downpayment  50% collected up front on an advance booking
  * @property string $discount_type  none | senior | pwd
  * @property int $additional_beds
  */
@@ -42,6 +43,7 @@ class Reservation extends Entity
         'status' => true,
         'source' => true,
         'promo_rate' => true,
+        'downpayment' => true,
         'discount_type' => true,
         'additional_beds' => true,
     ];

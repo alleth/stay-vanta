@@ -129,6 +129,7 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET|POST /api/properties` (owner-only create; owner index contains each property's admin) · `PATCH|PUT /api/properties/{id}` (owner-only edit, incl. subscription_status & subscription_fee)
 - `GET /api/reports/owner-dashboard` (owner-only) — subscription revenue (week/month/YTD from each subscriber's monthly fee) + counts (hotels, active subscriptions, admins)
 - `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items, occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time)
+- `GET /api/reports/daily-collection[?date=YYYY-MM-DD | ?month=&year=]` — money collected in the window (settled invoices by `settled_at` + paid food orders); defaults to today; **the month+year form is owner/admin-only** — a receptionist may only view one day (their entire Dashboard is this report)
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate your own account**) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; admins may change their own password & reset their receptionists, but not a peer admin's; see `UsersController`)
 - `GET|POST /api/inventory-categories` (create **owner/admin only**) · `DELETE /api/inventory-categories/{id}` (**owner/admin only**; refused while items still use it)
 - `GET /api/inventory-items` · `POST /api/inventory-items` (**owner/admin only**) · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity) · `DELETE /api/inventory-items/{id}` (**owner/admin only**; **soft-delete** — sets `deleted_at`, hides it from inventory/menu linking, keeps `stock_movements` so the ledger stays intact; unlinks menu items)
@@ -137,7 +138,7 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/room-rates[?room_id=]` · `POST /api/room-rates` (**owner/admin only**) · `PATCH|PUT /api/room-rates/{id}` (**owner/admin only**; fix a mistyped name/rate/target room — receptionists read rates but can't change them; a rate carries an optional `description` of the amenities & bed type the guest gets)
 - `GET /api/promo-rates[?source=]` (any authed — the booking form reads them) · `POST /api/promo-rates` · `PATCH|PUT /api/promo-rates/{id}` · `DELETE /api/promo-rates/{id}` (writes **owner/admin only**; a row = OTA `source` + rate `multiplier` (> 0, of the room's original rate), optionally room-specific via `room_id`)
 - `GET /api/extra-charges` (any authed; index **auto-seeds** the built-in `early_check_in` row per property) · `POST /api/extra-charges` (**owner/admin only**; custom charge, `code` null) · `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; set amount/active, built-in row's name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the built-in early check-in row)
-- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting; `promo_rate` is **never client-supplied** — booking resolves it server-side from `promo_rates` for OTA sources)
+- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; an **advance booking** (check-in after today, guest on file) collects a **50% downpayment** of the quoted total as an immediately-settled invoice; **check-out** credits it against the room charge; **cancel** from `booked` refunds 90% and retains 10% (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`); **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting; `promo_rate` is **never client-supplied** — booking resolves it server-side from `promo_rates` for OTA sources)
 - `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` (total/local/foreign count **today's registrations only** — the cards reset daily; in_house is current) · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
 - `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` · `DELETE /api/food-menu-items/{id}` (owner/admin; **soft-delete** — sets `deleted_at`, hides it from the menu/new orders, keeps the row so order history stays intact)
 - `GET|POST /api/food-orders[?status=&date=YYYY-MM-DD|all&page=&limit=]` (index is **paginated** → returns `{orders,total,page,limit}`; `date` defaults client-side to today for a fresh-start view, `limit` clamped 5–100) · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
@@ -155,8 +156,10 @@ and via `ProtectedRoute roles=` in `App.jsx`** (frontend guards are UX only):
   (week/month/YTD) + active-user counts (`/reports/owner-dashboard`).
 - **admin** (hotel/resort head) → Dashboard, Inventory, Front Desk, Guests, Food & Orders, Staff.
   Dashboard = ops cards + collected revenue (`/reports/admin-dashboard`). Admin adds Receptionists.
-- **receptionist** → Inventory, Front Desk, Guests, Food & Orders only (no Dashboard/Staff/
-  Subscribers). `Dashboard.jsx` redirects receptionists to `/front-desk`.
+- **receptionist** → Dashboard, Inventory, Front Desk, Guests, Food & Orders (no Staff/
+  Subscribers). Their Dashboard is **only the daily collection report** (single-day date
+  filter; the backend rejects month/year queries from receptionists). The admin Dashboard
+  additionally has a Collections section filterable by day or by month+year.
 
 ### Revenue model
 - **Owner (subscription) revenue**: `properties.subscription_fee` is each subscriber's monthly
@@ -167,6 +170,12 @@ and via `ProtectedRoute roles=` in `App.jsx`** (frontend guards are UX only):
 - **Room revenue is persisted on check-out**: `ReservationsController::transition` posts the
   `quote()` total as a `reservation` line on the guest's invoice (via `InvoicesTable::addLine`),
   so rooms become collectable revenue (previously `quote()` was read-time only).
+- **Downpayments are collected at booking**: an advance booking creates an immediately-settled
+  invoice (`InvoicesTable::settledInvoiceWith`, `settled_at` = now) holding the 50% `downpayment`
+  line, so it counts as collected the day it's taken. Check-out posts a negative
+  `downpayment_credit` line so the open invoice only carries the balance; cancellation appends a
+  negative `downpayment_refund` (90%) to the settled invoice, leaving the retained 10% in revenue.
+  The invoice folio groups all `downpayment*` lines under a "Downpayment" section (`Food.jsx`).
 
 ### Subscription model
 StayVanta is subscription-based: the `owner` role is the **platform operator** (no property),

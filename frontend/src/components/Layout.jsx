@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 // subscribers); admin = hotel/resort head (operations); receptionist = the
 // front-line tabs they act on.
 const NAV = [
-  { to: '/', label: 'Dashboard', end: true, roles: ['owner', 'admin'] },
+  { to: '/', label: 'Dashboard', end: true, roles: ['owner', 'admin', 'receptionist'] },
   { to: '/subscribers', label: 'Subscribers', roles: ['owner'] },
   { to: '/inventory', label: 'Inventory', roles: ['admin', 'receptionist'] },
   { to: '/front-desk', label: 'Front Desk', roles: ['admin', 'receptionist'] },
