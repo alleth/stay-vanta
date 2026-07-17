@@ -813,6 +813,19 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
   })
 
   const needGuest = payment === 'charge_to_room'
+  // Charging to room requires an active stay — a guest who already checked
+  // out (or never checked in) has no room to bill. Restrict the picker
+  // accordingly, and drop a selection that's no longer eligible.
+  const eligibleGuests = useMemo(
+    () => (needGuest ? guests.filter((g) => (roomByGuest[g.id]?.length ?? 0) > 0) : guests),
+    [guests, roomByGuest, needGuest],
+  )
+  useEffect(() => {
+    if (needGuest && guestId && !eligibleGuests.some((g) => String(g.id) === String(guestId))) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setGuestId('')
+    }
+  }, [needGuest, eligibleGuests, guestId])
 
   return (
     <Modal show onHide={onClose} centered size="xl">
@@ -969,8 +982,11 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                   <Form.Label className="mb-1">
                     Guest {needGuest ? <span className="text-red-600">*</span> : <span className="font-normal text-muted">(optional)</span>}
                   </Form.Label>
-                  <GuestPicker guests={guests} roomByGuest={roomByGuest} value={guestId}
+                  <GuestPicker guests={eligibleGuests} roomByGuest={roomByGuest} value={guestId}
                     onChange={setGuestId} required={needGuest} propertyId={propertyId} />
+                  {needGuest && (
+                    <Form.Text muted>Only guests currently checked in can be charged to their room.</Form.Text>
+                  )}
                 </Form.Group>
               </div>
             </div>

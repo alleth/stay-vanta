@@ -74,7 +74,8 @@ class FoodOrdersTable extends Table
      *   discount — it's a service fee, not food).
      *
      * @throws \InvalidArgumentException On bad items/discount/payment input.
-     * @throws \RuntimeException On charge-to-room without a guest, or short stock.
+     * @throws \RuntimeException On charge-to-room without a guest (or a guest who
+     *   isn't currently checked in), or short stock.
      */
     public function place(array $payload, int $propertyId, int $receptionistId): FoodOrder
     {
@@ -85,8 +86,20 @@ class FoodOrdersTable extends Table
 
         $paymentStatus = $payload['payment_status'] ?? 'unpaid';
         $guestId = $payload['guest_id'] ?? null;
-        if ($paymentStatus === 'charge_to_room' && !$guestId) {
-            throw new RuntimeException('Charge-to-room requires a guest.');
+        if ($paymentStatus === 'charge_to_room') {
+            if (!$guestId) {
+                throw new RuntimeException('Charge-to-room requires a guest.');
+            }
+            // A checked-out (or never checked-in) guest has no room to charge —
+            // reject rather than silently open a stray tab for them.
+            $hasActiveStay = TableRegistry::getTableLocator()->get('Reservations')->exists([
+                'guest_id' => $guestId,
+                'property_id' => $propertyId,
+                'status' => 'checked_in',
+            ]);
+            if (!$hasActiveStay) {
+                throw new RuntimeException('Charge-to-room requires the guest to be currently checked in.');
+            }
         }
 
         $paymentMethod = $payload['payment_method'] ?? null;
