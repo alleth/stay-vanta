@@ -331,6 +331,12 @@ class ReservationsController extends AppController
      * A Front Desk operational flag the receptionist toggles once the guest
      * has settled up — independent of the booking lifecycle and of the
      * invoice's own settled status (Food & Orders → Invoices).
+     *
+     * Marking a reservation `paid` opens (or reuses) the guest's invoice right
+     * away, ahead of check-out — so any extras ordered afterwards (additional
+     * linens, food) land on that same open tab via `openInvoiceFor()`'s
+     * find-or-create-by-guest lookup, instead of only getting one once the
+     * first charge happens to be posted.
      */
     public function payment(int $id): void
     {
@@ -347,6 +353,14 @@ class ReservationsController extends AppController
 
         $reservation->set('payment_status', $status);
         $reservations->saveOrFail($reservation);
+
+        if ($status === 'paid' && $reservation->guest_id) {
+            $this->fetchTable('Invoices')->openInvoiceFor(
+                (int)$reservation->property_id,
+                (int)$reservation->guest_id,
+                (int)$reservation->id,
+            );
+        }
 
         $this->respondWithReservation($reservation, 200);
     }
