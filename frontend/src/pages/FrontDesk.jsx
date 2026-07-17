@@ -12,7 +12,7 @@ import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
   listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
-  listReservations, createReservation, transitionReservation,
+  listReservations, createReservation, transitionReservation, setReservationPayment,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
 
@@ -221,6 +221,22 @@ export default function FrontDesk() {
     runTransition(r.id, transition)
   }
 
+  // Front Desk operational flag — independent of the booking lifecycle and of
+  // the invoice's own settled status (Food & Orders → Invoices).
+  async function togglePayment(r) {
+    const next = r.payment_status === 'paid' ? 'unpaid' : 'paid'
+    setPending(`payment-${r.id}`)
+    setError(null)
+    try {
+      await setReservationPayment(r.id, next)
+      await refresh()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Could not update payment status.')
+    } finally {
+      setPending(null)
+    }
+  }
+
   async function doDeleteCharge(charge) {
     if (!window.confirm(`Delete the "${charge.name}" charge?`)) return
     setPending(`charge-${charge.id}`)
@@ -334,13 +350,13 @@ export default function FrontDesk() {
                 <thead>
                   <tr>
                     <th>Guest</th><th>Room</th><th>Dates</th><th>Source</th>
-                    <th className="text-right">Total</th><th>Status</th>
+                    <th className="text-right">Total</th><th>Status</th><th>Payment</th>
                     <th>Logs</th><th>Last receptionist</th><th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleReservations.length === 0 && (
-                    <tr><td colSpan={9} className="py-6 text-center text-muted">No reservations to show.</td></tr>
+                    <tr><td colSpan={10} className="py-6 text-center text-muted">No reservations to show.</td></tr>
                   )}
                   {visibleReservations.map((r) => (
                     <tr key={r.id} className={r.status === 'cancelled' ? 'text-muted' : undefined}>
@@ -360,11 +376,35 @@ export default function FrontDesk() {
                       </td>
                       <td className="text-right">
                         {formatMoney(r.quote?.total)}
+                        {r.promo_rate !== null && r.promo_rate !== undefined && (
+                          <div className="whitespace-nowrap text-[11px] text-muted">promo rate</div>
+                        )}
+                        {Number(r.quote?.discount) > 0 && (
+                          <div className="whitespace-nowrap text-[11px] text-muted">
+                            −{formatMoney(r.quote.discount)} ({r.discount_type})
+                          </div>
+                        )}
                         {Number(r.downpayment) > 0 && (
                           <div className="whitespace-nowrap text-xs text-muted">DP {formatMoney(r.downpayment)}</div>
                         )}
                       </td>
                       <td><Badge bg={RES_VARIANT[r.status]}>{r.status.replace('_', ' ')}</Badge></td>
+                      <td>
+                        <Badge bg={r.payment_status === 'paid' ? 'success' : 'secondary'}>
+                          {r.payment_status === 'paid' ? 'paid' : 'unpaid'}
+                        </Badge>
+                        {r.status !== 'cancelled' && (
+                          <div className="mt-1">
+                            <Button size="sm" variant="outline-secondary"
+                              disabled={pending !== null}
+                              onClick={() => togglePayment(r)}>
+                              {pending === `payment-${r.id}`
+                                ? <Spinner size="sm" />
+                                : r.payment_status === 'paid' ? 'Mark unpaid' : 'Mark paid'}
+                            </Button>
+                          </div>
+                        )}
+                      </td>
                       <td className="min-w-[170px] text-xs text-muted">
                         <div>Booked: {fmtDateTime(r.created) ?? '—'}</div>
                         {r.checked_in_at && <div>In: {fmtDateTime(r.checked_in_at)}</div>}

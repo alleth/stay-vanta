@@ -96,6 +96,7 @@ class FoodOrdersController extends AppController
                 [
                     'items' => $this->request->getData('items') ?? [],
                     'payment_status' => $this->request->getData('payment_status') ?? 'unpaid',
+                    'payment_method' => $this->request->getData('payment_method'),
                     'guest_id' => $this->request->getData('guest_id'),
                     'room_id' => $this->request->getData('room_id'),
                     'reservation_id' => $this->request->getData('reservation_id'),

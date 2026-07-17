@@ -43,6 +43,22 @@ class InventoryCategoriesController extends AppController
         }
 
         $categories = $this->fetchTable('InventoryCategories');
+
+        // Block duplicate names within the property (case-insensitive) — done
+        // in PHP rather than SQL LOWER()/TRIM() for MariaDB/MySQL portability;
+        // a property's category list is small so this is cheap.
+        $name = trim((string)$this->request->getData('name'));
+        $existingNames = $categories->find()
+            ->select(['name'])
+            ->where(['InventoryCategories.property_id' => $propertyId])
+            ->all()
+            ->extract('name');
+        foreach ($existingNames as $existingName) {
+            if (mb_strtolower(trim((string)$existingName)) === mb_strtolower($name)) {
+                throw new BadRequestException(sprintf('A category named "%s" already exists.', $name));
+            }
+        }
+
         $category = $categories->newEntity([
             'property_id' => $propertyId,
             'name' => $this->request->getData('name'),

@@ -142,7 +142,7 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items, occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time)
 - `GET /api/reports/daily-collection[?date=YYYY-MM-DD | ?month=&year=]` — money collected in the window (settled invoices by `settled_at` + paid food orders); defaults to today; **the month+year form is owner/admin-only** — a receptionist may only view one day (their entire Dashboard is this report)
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate your own account**) · `POST /api/users/{id}/reset-password` — staff management (owner & admin only; admins may change their own password & reset their receptionists, but not a peer admin's; see `UsersController`)
-- `GET|POST /api/inventory-categories` (create **owner/admin only**) · `DELETE /api/inventory-categories/{id}` (**owner/admin only**; refused while items still use it)
+- `GET|POST /api/inventory-categories` (create **owner/admin only**; a name already used by the property is rejected — case-insensitive check in `InventoryCategoriesController::add()`) · `DELETE /api/inventory-categories/{id}` (**owner/admin only**; refused while items still use it)
 - `GET /api/inventory-items` · `POST /api/inventory-items` (**owner/admin only**) · `GET /api/inventory-items/{id}` · `PUT|PATCH /api/inventory-items/{id}` (**owner/admin only**; edit fixes category/`tracking_type` etc., never touches quantity) · `DELETE /api/inventory-items/{id}` (**owner/admin only**; **soft-delete** — sets `deleted_at`, hides it from inventory/menu linking, keeps `stock_movements` so the ledger stays intact; unlinks menu items; its own sub-items, if any, become top-level again). Consumables can carry a `parent_id` to itemize a sub-item under a parent (one level deep, consumables only — enforced server-side by `InventoryItemsController::assertValidParent()`)
 - `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` (manual move is **owner/admin only**; accepts an optional `note` — the Inventory stock-in modal uses it to record what exactly was restocked; receptionists' stock-out happens via Food & Orders, which records the movement internally stamped to them)
 - `GET /api/receipt-series` (any authed) · `POST /api/receipt-series` (**owner/admin only**; registers a pre-printed booklet — `type` is `invoice` (Physical/Sales Invoice) or `official_receipt`, plus optional `prefix`, `start_number`/`end_number`; zero-padding width is taken from how `start_number` was typed, e.g. `"0001"` → 4 digits) · `PATCH|PUT /api/receipt-series/{id}` (**owner/admin only**; toggles `is_active`) · `DELETE /api/receipt-series/{id}` (**owner/admin only**; refused once any number has been issued — deactivate instead)
@@ -150,15 +150,16 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/room-rates[?room_id=]` · `POST /api/room-rates` (**owner/admin only**) · `PATCH|PUT /api/room-rates/{id}` (**owner/admin only**; fix a mistyped name/rate/target room — receptionists read rates but can't change them; a rate carries an optional `description` of the amenities & bed type the guest gets)
 - `GET /api/promo-rates[?source=]` (any authed — the booking form reads them) · `POST /api/promo-rates` · `PATCH|PUT /api/promo-rates/{id}` · `DELETE /api/promo-rates/{id}` (writes **owner/admin only**; a row = OTA `source` + rate `multiplier` (> 0, of the room's original rate), optionally room-specific via `room_id`)
 - `GET /api/extra-charges` (any authed; index **auto-seeds** the built-in `early_check_in` row per property) · `POST /api/extra-charges` (**owner/admin only**; custom charge, `code` null) · `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; set amount/active, built-in row's name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the built-in early check-in row)
-- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; an **advance booking** (check-in after today, guest on file) collects a **50% downpayment** of the quoted total as an immediately-settled invoice; **check-out** credits it against the room charge; **cancel** from `booked` refunds 90% and retains 10% (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`); **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting; `promo_rate` is **never client-supplied** — booking resolves it server-side from `promo_rates` for OTA sources)
+- `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; an **advance booking** (check-in after today, guest on file) collects a **50% downpayment** of the quoted total as an immediately-settled invoice; **check-out** credits it against the room charge; **cancel** from `booked` refunds 90% and retains 10% (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`); **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting; `promo_rate` is **never client-supplied** — booking resolves it server-side from `promo_rates` for OTA sources) · `POST /api/reservations/{id}/payment` (any authed; `{payment_status: unpaid|paid}` — a Front Desk operational flag independent of the booking lifecycle and of invoice settlement, toggled from the reservations table)
 - `GET /api/guests[?guest_type=&q=]` · `GET /api/guests/stats` (total/local/foreign count **today's registrations only** — the cards reset daily; in_house is current) · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
-- `GET|POST /api/food-menu-items` · `PATCH|PUT /api/food-menu-items/{id}` · `DELETE /api/food-menu-items/{id}` (owner/admin; **soft-delete** — sets `deleted_at`, hides it from the menu/new orders, keeps the row so order history stays intact)
-- `GET|POST /api/food-orders[?status=&date=YYYY-MM-DD|all&page=&limit=]` (index is **paginated** → returns `{orders,total,page,limit}`; `date` defaults client-side to today for a fresh-start view, `limit` clamped 5–100; `items[]` entries are either a menu line (`food_menu_item_id`, `quantity`) or a **custom line** (`description`, `price`, `quantity` — no menu item, no stock deduction, e.g. cooking of guest-brought food); optional `discount_type` (`senior`|`pwd`) applies a statutory **20% off the items subtotal** and requires `discount_name` + `discount_id_number` (the beneficiary's ID, kept on the order and shown on the invoice line); optional `cooking_charge` is added **after** the discount, since it's a service fee, not food) · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
+- `GET|POST /api/food-menu-items[?available=1][?type=food|linen]` · `PATCH|PUT /api/food-menu-items/{id}` · `DELETE /api/food-menu-items/{id}` (owner/admin; **soft-delete** — sets `deleted_at`, hides it from the menu/new orders, keeps the row so order history stays intact). `type` (`food`|`linen`, default `food`) picks which Food & Orders management tab the item lives on; if the linked `inventory_item_id` is out of stock (`quantity <= 0`), the item is **force-saved unavailable** regardless of what was requested (`FoodMenuItemsController::resolveAvailability()`)
+- `GET|POST /api/food-orders[?status=&date=YYYY-MM-DD|all&page=&limit=]` (index is **paginated** → returns `{orders,total,page,limit}`; `date` defaults client-side to today for a fresh-start view, `limit` clamped 5–100; `items[]` entries are either a menu line (`food_menu_item_id`, `quantity`) or a **custom line** (`description`, `price`, `quantity` — no menu item, no stock deduction, e.g. cooking of guest-brought food); optional `discount_type` (`senior`|`pwd`) applies a statutory **20% off the items subtotal** and requires `discount_name` + `discount_id_number` (the beneficiary's ID, kept on the order and shown on the invoice line); optional `cooking_charge` is added **after** the discount, since it's a service fee, not food; `payment_method` (`cash`|`gcash`|`maya`|`gotyme`) is **required when `payment_status` is `paid`**, null otherwise) · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
 - `GET /api/invoices[?guest_id=&status=&date=YYYY-MM-DD|all]` (`date` hides other days, but **open tabs always show**; index includes `InvoiceLines` for the list's charges summary) · `GET /api/invoices/{id}` (with line items, for the folio-style detail modal) · `POST /api/invoices/{id}/settle` (optional `{use_invoice, use_or}` booleans each consume the next number from the property's active `receipt-series` of that type and stamp it onto `invoices.invoice_number`/`or_number`; throws if no active series has numbers left)
 
-Implemented frontend pages (all five modules): `src/pages/Inventory.jsx`, `src/pages/Staff.jsx`,
+Implemented frontend pages (all five modules): `src/pages/Inventory.jsx` (Consumables / Reusables /
+**Receipt Booklets**), `src/pages/Staff.jsx`,
 `src/pages/FrontDesk.jsx` (Reservations / Rooms / Rates / **Promo Rates** / Calendar / **Extra Charges** [admin-only]), `src/pages/Guests.jsx`
-(count cards + registry + stay history), and `src/pages/Food.jsx` (Orders / Menu / Invoices).
+(count cards + registry + stay history), and `src/pages/Food.jsx` (Orders / **Food** / **Linens** / Invoices).
 `src/pages/Subscribers.jsx` (owner-only) manages subscribing hotels/resorts + their admins + fee.
 
 ### Navigation & dashboards are role-scoped
@@ -220,6 +221,19 @@ labor itself, separate from `cooking_charge` below. `place()` computes
 - **`cooking_charge`** is a flat fee added *after* the discount (it's a service charge, not
   discountable food) — for guests whose own brought-in food needs cooking; posted as its own
   invoice line (`Cooking charge — food order #N`) when charge-to-room.
+
+A `paid` order also carries **`payment_method`** (`cash`|`gcash`|`maya`|`gotyme`), required by
+`place()` when `payment_status` is `paid` and null otherwise — how the cash actually moved,
+distinct from `payment_status` (the workflow state). The menu catalogue (`food_menu_items`) has a
+**`type`** (`food`|`linen`, default `food`): `Food.jsx` shows it as two separate management tabs
+— **Food** and **Linens** — each scoping its `MenuModal`'s Linked Stock picker to the matching
+inventory category kind (`food_stock` / `linen`) so, e.g., a Linens or Utensils item never shows
+up as linkable Food Stock. Both types remain orderable together in **New Order**, grouped by
+category as before; clicking a menu row's name (not just its Add button) also adds one. Invoices
+show a **VAT breakdown** (`Food.jsx`'s `vatBreakdown()`) assuming the standard 12% Philippine VAT
+is already included in prices — `VATable Sales` + `VAT (12%)` are derived for display only
+(`total / 1.12`), the stored total is unchanged.
+
 Note: `Table` subclasses get other tables via `TableRegistry::getTableLocator()->get()`
 (there is no `$this->getTableLocator()` on `Table` in CakePHP 5). Active-property selection for owners is handled by
 `src/context/PropertyContext.jsx` (`useProperty()` → `propertyId`): staff are bound to their
@@ -261,6 +275,18 @@ rooms + active reservations) and a **Calendar** tab: a date filter that derives,
 from the loaded rooms+reservations, which rooms are free on a date and which reservations
 touch it (occupancy is the nights `[check_in, check_out)`, so the check-out day is free again).
 
+**Reservation payment status**: `reservations.payment_status` (`unpaid`|`paid`, default `unpaid`)
+is a Front Desk operational flag toggled via `POST /api/reservations/{id}/payment` — independent
+of the booking lifecycle (`status`) and of the linked invoice's own `open`/`settled` state; the
+reservations table shows a badge + Mark paid/unpaid button per row. On **check-out**,
+`ReservationsController::transition()` posts the room charge to the guest's invoice **itemized**:
+the subtotal as one line (noting the OTA promo rate in its description when `promo_rate` is set,
+via `ReservationsTable::SOURCE_LABELS`), then, if `discount_type` is `senior`/`pwd`, a separate
+negative "Senior/PWD discount (20%)" line — mirroring how `FoodOrdersTable::place()` itemizes its
+own discount, so the invoice folio always shows the discount and promo rate as their own lines,
+not folded into a single net figure. The reservations table's Total column shows the same
+breakdown (promo-rate note, discount amount, downpayment) inline.
+
 ### Staff & roles enforcement
 `UsersController` is the staff module and the canonical example of backend role enforcement:
 owners create `admin`/`receptionist` for any property; admins create `receptionist` for their
@@ -290,11 +316,13 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   in_house, where total/local/foreign count only guests **registered today** (daily fresh-start
   cards) and in_house = distinct guests with a `checked_in` reservation). Guests are also
   created inline by the Front Desk booking flow.
-- **Food & Orders** *(implemented)* — admin-managed menu (`food_menu_items`, each optionally
-  linked to a Food Stock `inventory_item_id` so orders decrement stock); receptionist takes
-  orders (`food_orders`). Payment is `paid` / `charge_to_room` / `unpaid`; charge-to-room flows
-  onto the guest's `invoices`. Cancel reverses stock + invoice. See `FoodOrdersTable::place()`
-  (discount/cooking-charge/custom-item handling — see the Food section above).
+- **Food & Orders** *(implemented)* — admin-managed menu (`food_menu_items`, split into **Food**
+  and **Linens** by `type`, each optionally linked to a matching-category `inventory_item_id` so
+  orders decrement stock); receptionist takes orders (`food_orders`). Payment is `paid` /
+  `charge_to_room` / `unpaid`, plus a `payment_method` when `paid`; charge-to-room flows
+  onto the guest's `invoices` (with a VAT breakdown shown for display). Cancel reverses stock +
+  invoice. See `FoodOrdersTable::place()` (discount/cooking-charge/custom-item handling — see the
+  Food section above).
 - **Receipt series** *(implemented)* — `receipt_series` registers a property's pre-printed
   **Sales Invoice** and **Official Receipt** booklets (`ReceiptSeriesController`, owner/admin
   writes; managed on Inventory → **Receipt Booklets**): each row is a `type`

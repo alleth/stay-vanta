@@ -21,6 +21,16 @@ const PAY_VARIANT = { paid: 'success', charge_to_room: 'warning', unpaid: 'secon
 const ORDER_VARIANT = { open: 'primary', served: 'success', cancelled: 'dark' }
 const ORDERS_PER_PAGE = 20
 
+// Philippines standard VAT, assumed already included in prices (shown as a
+// breakdown on invoices/receipts, not added on top).
+const VAT_RATE = 0.12
+const vatBreakdown = (total) => {
+  const vatable = Number(total) / (1 + VAT_RATE)
+  return { vatable, vat: Number(total) - vatable }
+}
+
+const PAYMENT_METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', maya: 'Maya', gotyme: 'GoTyme' }
+
 const todayStr = () => new Date().toISOString().slice(0, 10)
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : '—')
 
@@ -36,7 +46,7 @@ export default function Food() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pending, setPending] = useState(null) // key of the in-flight inline action
-  const [modal, setModal] = useState(null) // 'order' | 'menu' | {type:'menu',item} | {type:'invoice',id}
+  const [modal, setModal] = useState(null) // 'order' | {type:'menu',item?,defaultType?} | {type:'invoice'|'settle',id}
 
   // Orders — server-paginated and filtered (a fresh start each day).
   const [orders, setOrders] = useState([])
@@ -52,10 +62,6 @@ export default function Food() {
   const [invoicesLoading, setInvoicesLoading] = useState(false)
   const [invoiceDate, setInvoiceDate] = useState(todayStr)
   const [invoiceAll, setInvoiceAll] = useState(false)
-
-  // Menu — client-side search + linked-stock filter.
-  const [menuSearch, setMenuSearch] = useState('')
-  const [menuStock, setMenuStock] = useState('all')
 
   const loadBase = useCallback(async () => {
     if (!propertyId) return
@@ -130,33 +136,11 @@ export default function Food() {
     }
   }
 
-  // Distinct linked-stock items for the menu filter.
-  const stockOptions = useMemo(() => {
-    const map = new Map()
-    for (const m of menu) if (m.inventory_item) map.set(m.inventory_item.id, m.inventory_item.name)
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [menu])
-
-  const filteredMenu = useMemo(() => {
-    const q = menuSearch.trim().toLowerCase()
-    return menu.filter((m) => {
-      if (q && !m.name.toLowerCase().includes(q)) return false
-      if (menuStock === 'unlinked') return !m.inventory_item_id
-      if (menuStock !== 'all') return String(m.inventory_item_id) === menuStock
-      return true
-    })
-  }, [menu, menuSearch, menuStock])
-
-  // Group the (filtered) menu by its linked stock's category.
-  const menuGroups = useMemo(() => {
-    const groups = new Map()
-    for (const m of filteredMenu) {
-      const cat = m.inventory_item?.inventory_category?.name ?? 'Unlinked / prepared'
-      if (!groups.has(cat)) groups.set(cat, [])
-      groups.get(cat).push(m)
-    }
-    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  }, [filteredMenu])
+  // The Food & Orders menu catalogue splits into two management tabs by
+  // type — Food items (linked to Food Stock) and Linens (linked to the
+  // Linens category) — while New Order keeps browsing both combined.
+  const foodMenu = useMemo(() => menu.filter((m) => m.type !== 'linen'), [menu])
+  const linenMenu = useMemo(() => menu.filter((m) => m.type === 'linen'), [menu])
 
   const totalPages = Math.max(1, Math.ceil(ordersTotal / ORDERS_PER_PAGE))
 
@@ -234,7 +218,14 @@ export default function Food() {
                           </div>
                         )}
                       </td>
-                      <td><Badge bg={PAY_VARIANT[o.payment_status]}>{o.payment_status.replace('_', ' ')}</Badge></td>
+                      <td>
+                        <Badge bg={PAY_VARIANT[o.payment_status]}>{o.payment_status.replace('_', ' ')}</Badge>
+                        {o.payment_method && (
+                          <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted">
+                            {PAYMENT_METHOD_LABEL[o.payment_method] ?? o.payment_method}
+                          </div>
+                        )}
+                      </td>
                       <td><Badge bg={ORDER_VARIANT[o.status]}>{o.status}</Badge></td>
                       <td className="text-xs text-muted">{o.receptionist?.name ?? '—'}</td>
                       <td className="whitespace-nowrap text-right">
@@ -274,78 +265,24 @@ export default function Food() {
             </Card>
           </Tab>
 
-          {/* ---- Menu ---- */}
-          <Tab eventKey="menu" title={`Menu (${menu.length})`}>
-            <Card className="mb-2 shadow-sm">
-              <Card.Body className="flex flex-wrap items-end gap-4 p-4">
-                <Form.Group>
-                  <Form.Label className="mb-1 text-muted">Search</Form.Label>
-                  <Form.Control size="sm" value={menuSearch} placeholder="Item name" style={{ width: 200 }}
-                    onChange={(e) => setMenuSearch(e.target.value)} />
-                </Form.Group>
-                <Form.Group>
-                  <Form.Label className="mb-1 text-muted">Linked stock</Form.Label>
-                  <Form.Select size="sm" value={menuStock} style={{ width: 'auto' }}
-                    onChange={(e) => setMenuStock(e.target.value)}>
-                    <option value="all">All</option>
-                    <option value="unlinked">Unlinked / prepared</option>
-                    {stockOptions.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
-                  </Form.Select>
-                </Form.Group>
-                <span className="mb-1 text-sm text-muted">{filteredMenu.length} shown</span>
-                {canManageMenu && (
-                  <div className="ml-auto"><Button onClick={() => setModal('menu')}>Add menu item</Button></div>
-                )}
-              </Card.Body>
-            </Card>
-            <Card className="shadow-sm">
-              <Table hover>
-                <thead>
-                  <tr>
-                    <th>Item</th><th className="text-right">Price</th><th>Linked stock</th>
-                    <th>Available</th>{canManageMenu && <th></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMenu.length === 0 && (
-                    <tr><td colSpan={canManageMenu ? 5 : 4} className="py-6 text-center text-muted">No menu items.</td></tr>
-                  )}
-                  {menuGroups.map(([category, items]) => (
-                    <Fragment key={category}>
-                      <tr className="bg-subtle">
-                        <td colSpan={canManageMenu ? 5 : 4} className="text-xs font-semibold uppercase text-muted">
-                          {category}
-                        </td>
-                      </tr>
-                      {items.map((m) => (
-                        <tr key={m.id}>
-                          <td className="font-semibold">{m.name}</td>
-                          <td className="text-right">{formatMoney(m.price)}</td>
-                          <td className="text-xs">{m.inventory_item?.name ?? <span className="text-muted">—</span>}</td>
-                          <td>
-                            {m.is_available
-                              ? <Badge bg="success">yes</Badge>
-                              : <Badge bg="secondary">no</Badge>}
-                          </td>
-                          {canManageMenu && (
-                            <td className="whitespace-nowrap text-right">
-                              <Button size="sm" variant="outline-primary" className="mr-1"
-                                disabled={pending !== null}
-                                onClick={() => setModal({ type: 'menu', item: m })}>Edit</Button>
-                              <Button size="sm" variant="outline-danger"
-                                disabled={pending !== null}
-                                onClick={() => { if (window.confirm(`Remove "${m.name}" from the menu? Past orders keep their record.`)) act(`del-menu-${m.id}`, deleteMenuItem, m.id) }}>
-                                {pending === `del-menu-${m.id}` ? <Spinner size="sm" /> : 'Delete'}
-                              </Button>
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </Table>
-            </Card>
+          {/* ---- Food ---- */}
+          <Tab eventKey="food" title={`Food (${foodMenu.length})`}>
+            <MenuCatalog
+              menuType="food" items={foodMenu} canManageMenu={canManageMenu} pending={pending}
+              onAdd={() => setModal({ type: 'menu', defaultType: 'food' })}
+              onEdit={(m) => setModal({ type: 'menu', item: m })}
+              onDelete={(m) => act(`del-menu-${m.id}`, deleteMenuItem, m.id)}
+            />
+          </Tab>
+
+          {/* ---- Linens ---- */}
+          <Tab eventKey="linens" title={`Linens (${linenMenu.length})`}>
+            <MenuCatalog
+              menuType="linen" items={linenMenu} canManageMenu={canManageMenu} pending={pending}
+              onAdd={() => setModal({ type: 'menu', defaultType: 'linen' })}
+              onEdit={(m) => setModal({ type: 'menu', item: m })}
+              onDelete={(m) => act(`del-menu-${m.id}`, deleteMenuItem, m.id)}
+            />
           </Tab>
 
           {/* ---- Invoices ---- */}
@@ -430,8 +367,8 @@ export default function Food() {
           propertyId={propertyId}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); loadOrders(); loadInvoices() }} />
       )}
-      {(modal === 'menu' || modal?.type === 'menu') && (
-        <MenuModal item={modal?.item} inventory={inventory} propertyId={propertyId}
+      {modal?.type === 'menu' && (
+        <MenuModal item={modal.item} defaultType={modal.defaultType} inventory={inventory} propertyId={propertyId}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); loadBase() }} />
       )}
       {modal?.type === 'invoice' && (
@@ -442,6 +379,119 @@ export default function Food() {
           onSettled={() => { setModal(null); loadInvoices() }} />
       )}
     </div>
+  )
+}
+
+// The Food & Orders catalogue for one menu type (food | linen): search +
+// linked-stock filter, grouped by the linked stock's category. Rendered once
+// per tab with a different `items` slice so Food and Linens stay separate
+// management lists (both still show up together, grouped by category, in
+// New Order's combined browsing list).
+function MenuCatalog({ menuType, items, canManageMenu, pending, onAdd, onEdit, onDelete }) {
+  const [search, setSearch] = useState('')
+  const [stockFilter, setStockFilter] = useState('all')
+
+  const stockOptions = useMemo(() => {
+    const map = new Map()
+    for (const m of items) if (m.inventory_item) map.set(m.inventory_item.id, m.inventory_item.name)
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [items])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return items.filter((m) => {
+      if (q && !m.name.toLowerCase().includes(q)) return false
+      if (stockFilter === 'unlinked') return !m.inventory_item_id
+      if (stockFilter !== 'all') return String(m.inventory_item_id) === stockFilter
+      return true
+    })
+  }, [items, search, stockFilter])
+
+  const groups = useMemo(() => {
+    const map = new Map()
+    for (const m of filtered) {
+      const cat = m.inventory_item?.inventory_category?.name ?? 'Unlinked / prepared'
+      if (!map.has(cat)) map.set(cat, [])
+      map.get(cat).push(m)
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  }, [filtered])
+
+  const noun = menuType === 'linen' ? 'linen item' : 'food item'
+
+  return (
+    <>
+      <Card className="mb-2 shadow-sm">
+        <Card.Body className="flex flex-wrap items-end gap-4 p-4">
+          <Form.Group>
+            <Form.Label className="mb-1 text-muted">Search</Form.Label>
+            <Form.Control size="sm" value={search} placeholder="Item name" style={{ width: 200 }}
+              onChange={(e) => setSearch(e.target.value)} />
+          </Form.Group>
+          <Form.Group>
+            <Form.Label className="mb-1 text-muted">Linked stock</Form.Label>
+            <Form.Select size="sm" value={stockFilter} style={{ width: 'auto' }}
+              onChange={(e) => setStockFilter(e.target.value)}>
+              <option value="all">All</option>
+              <option value="unlinked">Unlinked / prepared</option>
+              {stockOptions.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
+            </Form.Select>
+          </Form.Group>
+          <span className="mb-1 text-sm text-muted">{filtered.length} shown</span>
+          {canManageMenu && (
+            <div className="ml-auto"><Button onClick={onAdd}>Add {noun}</Button></div>
+          )}
+        </Card.Body>
+      </Card>
+      <Card className="shadow-sm">
+        <Table hover>
+          <thead>
+            <tr>
+              <th>Item</th><th className="text-right">Price</th><th>Linked stock</th>
+              <th>Available</th>{canManageMenu && <th></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={canManageMenu ? 5 : 4} className="py-6 text-center text-muted">No {noun}s yet.</td></tr>
+            )}
+            {groups.map(([category, groupItems]) => (
+              <Fragment key={category}>
+                <tr className="bg-subtle">
+                  <td colSpan={canManageMenu ? 5 : 4} className="text-xs font-semibold uppercase text-muted">
+                    {category}
+                  </td>
+                </tr>
+                {groupItems.map((m) => (
+                  <tr key={m.id}>
+                    <td className="font-semibold">{m.name}</td>
+                    <td className="text-right">{formatMoney(m.price)}</td>
+                    <td className="text-xs">{m.inventory_item?.name ?? <span className="text-muted">—</span>}</td>
+                    <td>
+                      {m.is_available
+                        ? <Badge bg="success">yes</Badge>
+                        : <Badge bg="secondary">no</Badge>}
+                    </td>
+                    {canManageMenu && (
+                      <td className="whitespace-nowrap text-right">
+                        <Button size="sm" variant="outline-primary" className="mr-1"
+                          disabled={pending !== null}
+                          onClick={() => onEdit(m)}>Edit</Button>
+                        <Button size="sm" variant="outline-danger"
+                          disabled={pending !== null}
+                          onClick={() => { if (window.confirm(`Remove "${m.name}"? Past orders keep their record.`)) onDelete(m) }}>
+                          {pending === `del-menu-${m.id}` ? <Spinner size="sm" /> : 'Delete'}
+                        </Button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </Table>
+      </Card>
+    </>
   )
 }
 
@@ -573,9 +623,20 @@ function InvoiceModal({ id, onClose }) {
               </div>
             ))}
 
+            {/* ---- VAT breakdown (12%, already included in the total) ---- */}
+            {Number(invoice.total) > 0 && (() => {
+              const { vatable, vat } = vatBreakdown(invoice.total)
+              return (
+                <div className="mt-4 flex flex-col gap-1 border-t border-line pt-3 text-xs text-muted">
+                  <div className="flex justify-between"><span>VATable Sales</span><span className="tabular-nums">{formatMoney(vatable)}</span></div>
+                  <div className="flex justify-between"><span>VAT (12%)</span><span className="tabular-nums">{formatMoney(vat)}</span></div>
+                </div>
+              )
+            })()}
+
             {/* ---- Grand total ---- */}
-            <div className="mt-6 flex items-center justify-between rounded-xl bg-ink px-4 py-3 text-white">
-              <span className="text-sm font-medium opacity-80">Total due</span>
+            <div className="mt-4 flex items-center justify-between rounded-xl bg-ink px-4 py-3 text-white">
+              <span className="text-sm font-medium opacity-80">Total due (VAT-inclusive)</span>
               <span className="text-xl font-bold tabular-nums">{formatMoney(invoice.total)}</span>
             </div>
             {settled && (
@@ -648,8 +709,17 @@ function SettleModal({ id, onClose, onSettled }) {
               {(invoice.invoice_lines ?? []).length === 0 && (
                 <div className="border-b border-line px-3 py-2 text-sm text-muted">No charges on this invoice.</div>
               )}
+              {Number(invoice.total) > 0 && (() => {
+                const { vatable, vat } = vatBreakdown(invoice.total)
+                return (
+                  <div className="flex flex-col gap-0.5 border-b border-line px-3 py-2 text-xs text-muted">
+                    <div className="flex justify-between"><span>VATable Sales</span><span className="tabular-nums">{formatMoney(vatable)}</span></div>
+                    <div className="flex justify-between"><span>VAT (12%)</span><span className="tabular-nums">{formatMoney(vat)}</span></div>
+                  </div>
+                )
+              })()}
               <div className="flex justify-between bg-subtle px-3 py-2 font-bold">
-                <span>Total</span><span className="tabular-nums">{formatMoney(invoice.total)}</span>
+                <span>Total (VAT-inclusive)</span><span className="tabular-nums">{formatMoney(invoice.total)}</span>
               </div>
             </div>
             <div className="space-y-2">
@@ -677,6 +747,7 @@ function SettleModal({ id, onClose, onSettled }) {
 function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved }) {
   const [cart, setCart] = useState({}) // { menuId: qty }
   const [payment, setPayment] = useState('paid')
+  const [paymentMethod, setPaymentMethod] = useState('cash')
   const [guestId, setGuestId] = useState('')
   const [search, setSearch] = useState('')
   // Senior/PWD statutory discount — 20% off the items subtotal, with the
@@ -728,6 +799,7 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
         })),
       ],
       payment_status: payment,
+      payment_method: payment === 'paid' ? paymentMethod : undefined,
       discount_type: discount,
       cooking_charge: cooking,
     }
@@ -761,10 +833,11 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                   const qty = cart[m.id] ?? 0
                   return (
                     <div key={m.id} className="flex items-center gap-2 border-b border-line px-2 py-1 last:border-b-0">
-                      <div className="min-w-0 grow">
+                      <button type="button" className="min-w-0 grow text-left"
+                        title="Click to add one" onClick={() => setQty(m.id, qty + 1)}>
                         <div className="text-sm font-semibold">{m.name}</div>
                         <div className="text-sm text-muted">{formatMoney(m.price)}</div>
-                      </div>
+                      </button>
                       {qty > 0 ? (
                         <InputGroup style={{ width: 116 }}>
                           <Button size="sm" variant="outline-secondary" onClick={() => setQty(m.id, qty - 1)}>−</Button>
@@ -881,6 +954,17 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                     <option value="unpaid">Unpaid (pay later)</option>
                   </Form.Select>
                 </Form.Group>
+                {payment === 'paid' && (
+                  <Form.Group className="mb-2">
+                    <Form.Label className="mb-1">Payment method</Form.Label>
+                    <Form.Select size="sm" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                      <option value="cash">Cash</option>
+                      <option value="gcash">GCash</option>
+                      <option value="maya">Maya</option>
+                      <option value="gotyme">GoTyme</option>
+                    </Form.Select>
+                  </Form.Group>
+                )}
                 <Form.Group>
                   <Form.Label className="mb-1">
                     Guest {needGuest ? <span className="text-red-600">*</span> : <span className="font-normal text-muted">(optional)</span>}
@@ -985,15 +1069,38 @@ function GuestPicker({ guests, roomByGuest, value, onChange, required, propertyI
   )
 }
 
-function MenuModal({ item, inventory, propertyId, onClose, onSaved }) {
+// A menu item's Linked Stock is scoped to the matching inventory category —
+// Food items link to Food Stock, Linens link to Linens — so, e.g., an "Extra
+// Bed" utensil item never shows up as a linkable Food Stock choice.
+const STOCK_KIND_FOR_TYPE = { food: 'food_stock', linen: 'linen' }
+
+function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved }) {
   const editing = Boolean(item)
   const [form, setForm] = useState({
     name: item?.name ?? '',
+    type: item?.type ?? defaultType ?? 'food',
     price: item?.price ?? '',
     inventory_item_id: item?.inventory_item_id ?? '',
     is_available: item?.is_available ?? true,
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+
+  const stockOptions = useMemo(
+    () => inventory.filter((i) => i.inventory_category?.kind === STOCK_KIND_FOR_TYPE[form.type]),
+    [inventory, form.type],
+  )
+  // Switching type can orphan the current link (e.g. Food → Linen) — clear it
+  // rather than silently submit a mismatched item.
+  function setType(e) {
+    const type = e.target.value
+    const stillValid = stockOptions.some((i) => String(i.id) === String(form.inventory_item_id))
+      && STOCK_KIND_FOR_TYPE[type] === STOCK_KIND_FOR_TYPE[form.type]
+    setForm({ ...form, type, inventory_item_id: stillValid ? form.inventory_item_id : '' })
+  }
+
+  const linkedItem = inventory.find((i) => String(i.id) === String(form.inventory_item_id))
+  const outOfStock = linkedItem && Number(linkedItem.quantity) <= 0
+
   const { run, busy, err } = useSubmit(async () => {
     const payload = { ...form, inventory_item_id: form.inventory_item_id || null }
     if (editing) await updateMenuItem(item.id, payload)
@@ -1004,9 +1111,18 @@ function MenuModal({ item, inventory, propertyId, onClose, onSaved }) {
   return (
     <Modal show onHide={onClose} centered>
       <Form onSubmit={run}>
-        <Modal.Header closeButton><Modal.Title>{editing ? 'Edit menu item' : 'Add menu item'}</Modal.Title></Modal.Header>
+        <Modal.Header closeButton>
+          <Modal.Title>{editing ? 'Edit item' : form.type === 'linen' ? 'Add linen item' : 'Add food item'}</Modal.Title>
+        </Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
+          <Form.Group className="mb-4">
+            <Form.Label>Type</Form.Label>
+            <Form.Select value={form.type} onChange={setType}>
+              <option value="food">Food</option>
+              <option value="linen">Linen</option>
+            </Form.Select>
+          </Form.Group>
           <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus />
@@ -1026,13 +1142,20 @@ function MenuModal({ item, inventory, propertyId, onClose, onSaved }) {
             </Form.Group>
           </div>
           <Form.Group>
-            <Form.Label>Linked food stock (decrements on order)</Form.Label>
+            <Form.Label>
+              Linked {form.type === 'linen' ? 'linen' : 'food'} stock (decrements on order)
+            </Form.Label>
             <Form.Select value={form.inventory_item_id} onChange={set('inventory_item_id')}>
               <option value="">Not linked</option>
-              {inventory.map((i) => (
+              {stockOptions.map((i) => (
                 <option key={i.id} value={i.id}>{i.name} ({Number(i.quantity)} {i.unit})</option>
               ))}
             </Form.Select>
+            {outOfStock && (
+              <Form.Text className="text-amber-600">
+                This item is out of stock — it will be saved as unavailable.
+              </Form.Text>
+            )}
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>

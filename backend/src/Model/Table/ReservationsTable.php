@@ -18,6 +18,16 @@ class ReservationsTable extends Table
     public const STATUSES = ['booked', 'checked_in', 'checked_out', 'cancelled'];
     public const SOURCES = ['walk_in', 'cocotel', 'agoda', 'trip_com', 'tripadvisor'];
     public const DISCOUNT_TYPES = ['none', 'senior', 'pwd'];
+    public const PAYMENT_STATUSES = ['unpaid', 'paid'];
+
+    /** Human-readable OTA source labels, for invoice line descriptions. */
+    public const SOURCE_LABELS = [
+        'walk_in' => 'Walk-in',
+        'cocotel' => 'Cocotel',
+        'agoda' => 'Agoda',
+        'trip_com' => 'Trip.com',
+        'tripadvisor' => 'TripAdvisor',
+    ];
 
     /** Statutory Senior Citizen / PWD discount (Philippines). */
     public const STATUTORY_DISCOUNT = 0.20;
@@ -49,6 +59,7 @@ class ReservationsTable extends Table
         $validator->inList('status', self::STATUSES);
         $validator->inList('source', self::SOURCES);
         $validator->inList('discount_type', self::DISCOUNT_TYPES);
+        $validator->inList('payment_status', self::PAYMENT_STATUSES);
 
         $validator
             ->date('check_in')
@@ -60,7 +71,7 @@ class ReservationsTable extends Table
             ->requirePresence('check_out', 'create')
             ->notEmptyDate('check_out')
             ->add('check_out', 'after', [
-                'rule' => fn ($value, $context) => empty($context['data']['check_in'])
+                'rule' => fn($value, $context) => empty($context['data']['check_in'])
                     || strtotime((string)$value) > strtotime((string)$context['data']['check_in']),
                 'message' => 'Check-out must be after check-in.',
             ]);

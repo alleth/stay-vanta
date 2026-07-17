@@ -25,6 +25,7 @@ class FoodOrdersTable extends Table
 {
     public const STATUSES = ['open', 'served', 'cancelled'];
     public const PAYMENT_STATUSES = ['paid', 'charge_to_room', 'unpaid'];
+    public const PAYMENT_METHODS = ['cash', 'gcash', 'maya', 'gotyme'];
     public const DISCOUNT_TYPES = ['none', 'senior', 'pwd'];
 
     /** Statutory Senior Citizen / PWD discount, applied to the items subtotal. */
@@ -54,6 +55,9 @@ class FoodOrdersTable extends Table
     {
         $validator->inList('status', self::STATUSES);
         $validator->inList('payment_status', self::PAYMENT_STATUSES);
+        $validator
+            ->inList('payment_method', self::PAYMENT_METHODS)
+            ->allowEmptyString('payment_method');
 
         return $validator;
     }
@@ -63,12 +67,13 @@ class FoodOrdersTable extends Table
      *   items[]: {food_menu_item_id, quantity} for menu lines, OR
      *            {description, price, quantity} for custom lines (e.g. cooking
      *            of guest-brought food — no menu item, no stock deduction);
-     *   payment_status, guest_id?, room_id?, reservation_id?;
+     *   payment_status, payment_method? (required when payment_status is
+     *   'paid' — cash|gcash|maya|gotyme), guest_id?, room_id?, reservation_id?;
      *   discount_type? (senior|pwd → 20% off the items subtotal, requires
      *   discount_name + discount_id_number); cooking_charge? (added after the
      *   discount — it's a service fee, not food).
      *
-     * @throws \InvalidArgumentException On bad items/discount input.
+     * @throws \InvalidArgumentException On bad items/discount/payment input.
      * @throws \RuntimeException On charge-to-room without a guest, or short stock.
      */
     public function place(array $payload, int $propertyId, int $receptionistId): FoodOrder
@@ -82,6 +87,15 @@ class FoodOrdersTable extends Table
         $guestId = $payload['guest_id'] ?? null;
         if ($paymentStatus === 'charge_to_room' && !$guestId) {
             throw new RuntimeException('Charge-to-room requires a guest.');
+        }
+
+        $paymentMethod = $payload['payment_method'] ?? null;
+        if ($paymentStatus === 'paid') {
+            if (!in_array($paymentMethod, self::PAYMENT_METHODS, true)) {
+                throw new InvalidArgumentException('Pick how the order was paid (cash, GCash, Maya, or GoTyme).');
+            }
+        } else {
+            $paymentMethod = null;
         }
 
         $discountType = $payload['discount_type'] ?? 'none';
@@ -104,6 +118,7 @@ class FoodOrdersTable extends Table
                 $items,
                 $payload,
                 $paymentStatus,
+                $paymentMethod,
                 $guestId,
                 $discountType,
                 $discountName,
@@ -125,6 +140,7 @@ class FoodOrdersTable extends Table
                     'receptionist_id' => $receptionistId,
                     'status' => 'open',
                     'payment_status' => $paymentStatus,
+                    'payment_method' => $paymentMethod,
                     'discount_type' => $discountType,
                     'discount_name' => $discountType !== 'none' ? $discountName : null,
                     'discount_id_number' => $discountType !== 'none' ? $discountIdNumber : null,
@@ -203,16 +219,20 @@ class FoodOrdersTable extends Table
                         (int)$guestId,
                         $payload['reservation_id'] ?? null,
                     );
-                    $description = 'Food order #' . $order->id;
-                    if ($discountType !== 'none') {
-                        $description .= sprintf(
-                            ' — %s 20%% off (%s, ID %s)',
-                            $discountType === 'senior' ? 'Senior' : 'PWD',
-                            $discountName,
-                            $discountIdNumber,
+                    // Itemized: the subtotal, then the discount (if any) as its
+                    // own negative line, so the folio shows exactly what was
+                    // charged and what was taken off — not a single net figure.
+                    $invoices->addLine($invoice, 'Food order #' . $order->id, $subtotal, 'food_order', (int)$order->id);
+                    if ($discount > 0) {
+                        $label = $discountType === 'senior' ? 'Senior' : 'PWD';
+                        $invoices->addLine(
+                            $invoice,
+                            sprintf('%s discount (20%%) — %s, ID %s', $label, $discountName, $discountIdNumber),
+                            -$discount,
+                            'food_order',
+                            (int)$order->id,
                         );
                     }
-                    $invoices->addLine($invoice, $description, $subtotal - $discount, 'food_order', (int)$order->id);
                     if ($cookingCharge > 0) {
                         $invoices->addLine(
                             $invoice,

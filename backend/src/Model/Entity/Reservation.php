@@ -26,6 +26,8 @@ use Cake\ORM\Entity;
  * @property string|null $promo_rate
  * @property string|null $downpayment  50% collected up front on an advance booking
  * @property string $discount_type  none | senior | pwd
+ * @property string $payment_status unpaid | paid — Front Desk operational flag,
+ *   independent of the booking lifecycle and of invoice settlement
  * @property int $additional_beds
  */
 class Reservation extends Entity
@@ -45,6 +47,7 @@ class Reservation extends Entity
         'promo_rate' => true,
         'downpayment' => true,
         'discount_type' => true,
+        'payment_status' => true,
         'additional_beds' => true,
     ];
 }

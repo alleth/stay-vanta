@@ -14,6 +14,8 @@ use Cake\Validation\Validator;
  */
 class FoodMenuItemsTable extends Table
 {
+    public const TYPES = ['food', 'linen'];
+
     public function initialize(array $config): void
     {
         parent::initialize($config);
@@ -32,6 +34,8 @@ class FoodMenuItemsTable extends Table
         $validator
             ->requirePresence('property_id', 'create')
             ->integer('property_id');
+
+        $validator->inList('type', self::TYPES, 'Type must be food or linen.');
 
         $validator
             ->scalar('name')

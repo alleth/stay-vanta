@@ -51,6 +51,11 @@ export const createReservation = (data, propertyId) =>
 export const transitionReservation = (id, transition, data = {}) =>
   client.post(`/reservations/${id}/${transition}`, data).then((r) => r.data.reservation)
 
+// Front Desk operational flag — independent of the booking lifecycle and of
+// the invoice's own settled status.
+export const setReservationPayment = (id, paymentStatus) =>
+  client.post(`/reservations/${id}/payment`, { payment_status: paymentStatus }).then((r) => r.data.reservation)
+
 // Extra charges (admin-configurable surcharges, e.g. early check-in).
 export const listExtraCharges = (propertyId) =>
   client.get('/extra-charges', { params: withProp({}, propertyId) }).then((r) => r.data.extraCharges)

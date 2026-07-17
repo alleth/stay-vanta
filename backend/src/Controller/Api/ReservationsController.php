@@ -5,8 +5,10 @@ namespace App\Controller\Api;
 
 use App\Model\Entity\Reservation;
 use App\Model\Table\PromoRatesTable;
+use App\Model\Table\ReservationsTable;
 use Cake\Http\Exception\BadRequestException;
 use Cake\I18n\Date;
+use Cake\I18n\DateTime;
 
 /**
  * Reservations — bookings plus the check-in/out/cancel lifecycle.
@@ -39,7 +41,7 @@ class ReservationsController extends AppController
             $reservations->find()
                 ->contain(['Rooms', 'Guests', 'Receptionist'])
                 ->orderBy(['Reservations.check_in' => 'DESC'])
-                ->limit(200)
+                ->limit(200),
         );
 
         $status = $this->request->getQuery('status');
@@ -147,7 +149,7 @@ class ReservationsController extends AppController
                 }
 
                 return true;
-            }
+            },
         );
 
         if (!$ok) {
@@ -181,7 +183,7 @@ class ReservationsController extends AppController
             throw new BadRequestException(sprintf(
                 'Cannot %s a reservation that is %s.',
                 $transition,
-                $reservation->status
+                $reservation->status,
             ));
         }
 
@@ -193,11 +195,11 @@ class ReservationsController extends AppController
             // Log when the check-in/out *event* actually happened (distinct from
             // the planned check_in/check_out dates) for the Front Desk audit log.
             if ($transition === 'check-in') {
-                $reservation->set('checked_in_at', new \Cake\I18n\DateTime());
+                $reservation->set('checked_in_at', new DateTime());
             } elseif ($transition === 'check-out') {
-                $reservation->set('checked_out_at', new \Cake\I18n\DateTime());
+                $reservation->set('checked_out_at', new DateTime());
             } elseif ($transition === 'cancel') {
-                $reservation->set('cancelled_at', new \Cake\I18n\DateTime());
+                $reservation->set('cancelled_at', new DateTime());
             }
             $reservations->saveOrFail($reservation);
 
@@ -217,20 +219,47 @@ class ReservationsController extends AppController
                     $this->resolveBaseRate((int)$reservation->property_id, $reservation->room_id),
                 );
                 $downpayment = (float)$reservation->downpayment;
-                if ($quote['total'] > 0 || $downpayment > 0) {
+                if ($quote['subtotal'] > 0 || $downpayment > 0) {
                     $invoices = $this->fetchTable('Invoices');
                     $invoice = $invoices->openInvoiceFor(
                         (int)$reservation->property_id,
                         (int)$reservation->guest_id,
-                        (int)$reservation->id
+                        (int)$reservation->id,
                     );
-                    if ($quote['total'] > 0) {
+                    // Itemized: the room subtotal (noting the promo rate, if
+                    // any), then the senior/PWD discount as its own negative
+                    // line — the folio shows exactly what applied, not a
+                    // single net figure.
+                    if ($quote['subtotal'] > 0) {
+                        $rateNote = $reservation->promo_rate !== null
+                            ? sprintf(
+                                ' (%s promo rate)',
+                                ReservationsTable::SOURCE_LABELS[$reservation->source] ?? $reservation->source,
+                            )
+                            : '';
                         $description = sprintf(
-                            'Room %s · %d night(s)',
+                            'Room %s · %d night(s)%s',
                             $reservation->room_id ? '#' . $reservation->room_id : '',
-                            $quote['nights']
+                            $quote['nights'],
+                            $rateNote,
                         );
-                        $invoices->addLine($invoice, $description, (float)$quote['total'], 'reservation', (int)$reservation->id);
+                        $invoices->addLine(
+                            $invoice,
+                            $description,
+                            (float)$quote['subtotal'],
+                            'reservation',
+                            (int)$reservation->id,
+                        );
+                    }
+                    if ($quote['discount'] > 0) {
+                        $label = $reservation->discount_type === 'senior' ? 'Senior' : 'PWD';
+                        $invoices->addLine(
+                            $invoice,
+                            sprintf('%s discount (20%%)', $label),
+                            -(float)$quote['discount'],
+                            'reservation',
+                            (int)$reservation->id,
+                        );
                     }
                     // The downpayment was already collected at booking (its own
                     // settled invoice) — credit it so only the balance is due.
@@ -248,7 +277,8 @@ class ReservationsController extends AppController
 
             // Early check-in: the receptionist confirmed an early arrival, so
             // bill the configured fee to the guest's invoice.
-            if ($transition === 'check-in'
+            if (
+                $transition === 'check-in'
                 && $this->request->getData('early_check_in')
                 && $reservation->guest_id
             ) {
@@ -260,7 +290,7 @@ class ReservationsController extends AppController
                     $invoice = $invoices->openInvoiceFor(
                         (int)$reservation->property_id,
                         (int)$reservation->guest_id,
-                        (int)$reservation->id
+                        (int)$reservation->id,
                     );
                     $invoices->addLine($invoice, 'Early check-in', $fee, 'early_check_in', (int)$reservation->id);
                 }
@@ -291,6 +321,32 @@ class ReservationsController extends AppController
                 }
             }
         });
+
+        $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * POST /api/reservations/{id}/payment  { payment_status: unpaid|paid }
+     *
+     * A Front Desk operational flag the receptionist toggles once the guest
+     * has settled up — independent of the booking lifecycle and of the
+     * invoice's own settled status (Food & Orders → Invoices).
+     */
+    public function payment(int $id): void
+    {
+        $this->request->allowMethod('post');
+
+        $reservations = $this->fetchTable('Reservations');
+        $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
+            ->firstOrFail();
+
+        $status = $this->request->getData('payment_status');
+        if (!in_array($status, ReservationsTable::PAYMENT_STATUSES, true)) {
+            throw new BadRequestException('payment_status must be unpaid or paid.');
+        }
+
+        $reservation->set('payment_status', $status);
+        $reservations->saveOrFail($reservation);
 
         $this->respondWithReservation($reservation, 200);
     }

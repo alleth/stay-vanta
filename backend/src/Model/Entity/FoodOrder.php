@@ -10,7 +10,8 @@ use Cake\ORM\Entity;
  *
  * `receptionist_id` is the accountability stamp (who took the order).
  * `payment_status`: paid | charge_to_room | unpaid. charge_to_room orders are
- * mirrored onto the guest's invoice.
+ * mirrored onto the guest's invoice. `payment_method` records how a `paid`
+ * order was actually settled (cash/e-wallet); null otherwise.
  *
  * @property int $id
  * @property int $property_id
@@ -20,6 +21,7 @@ use Cake\ORM\Entity;
  * @property int $receptionist_id
  * @property string $status         open | served | cancelled
  * @property string $payment_status paid | charge_to_room | unpaid
+ * @property string|null $payment_method cash | gcash | maya | gotyme
  * @property string $total
  */
 class FoodOrder extends Entity
@@ -32,6 +34,7 @@ class FoodOrder extends Entity
         'receptionist_id' => true,
         'status' => true,
         'payment_status' => true,
+        'payment_method' => true,
         'total' => true,
         'discount_type' => true,
         'discount_name' => true,

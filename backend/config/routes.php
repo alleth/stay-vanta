@@ -155,6 +155,8 @@ return function (RouteBuilder $routes): void {
         $builder->post('/reservations/{id}/{transition}', ['controller' => 'Reservations', 'action' => 'transition'])
             ->setPatterns(['id' => '\d+', 'transition' => 'check-in|check-out|cancel'])
             ->setPass(['id', 'transition']);
+        $builder->post('/reservations/{id}/payment', ['controller' => 'Reservations', 'action' => 'payment'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         // Guests module.
         $builder->get('/guests/stats', ['controller' => 'Guests', 'action' => 'stats']);
