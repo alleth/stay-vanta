@@ -9,6 +9,7 @@ import { SkeletonTable } from '../components/Skeleton'
 import {
   listCategories, createCategory, deleteCategory,
   listItems, createItem, updateItem, deleteItem, listMovements, recordMovement,
+  listReceiptSeries, createReceiptSeries, updateReceiptSeries, deleteReceiptSeries,
 } from '../api/inventory'
 
 const KINDS = ['food_stock', 'hygiene', 'linen', 'utensil', 'other']
@@ -44,7 +45,9 @@ export default function Inventory() {
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [view, setView] = useState('consumable') // consumable | reusable
+  const [view, setView] = useState('consumable') // consumable | reusable | receipts
+  const [expanded, setExpanded] = useState(() => new Set()) // parent items with sub-items open
+  const [series, setSeries] = useState([]) // receipt booklet series
 
   const [modal, setModal] = useState(null) // 'category' | 'categories' | 'item' | 'move'
   const [moveTarget, setMoveTarget] = useState(null)
@@ -54,14 +57,16 @@ export default function Inventory() {
   const refresh = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [c, i, m] = await Promise.all([
+      const [c, i, m, s] = await Promise.all([
         listCategories(propertyId),
         listItems(propertyId),
         listMovements(propertyId),
+        listReceiptSeries(propertyId),
       ])
       setCategories(c)
       setItems(i)
       setMovements(m)
+      setSeries(s)
       setError(null)
     } catch {
       setError('Could not load inventory.')
@@ -79,6 +84,27 @@ export default function Inventory() {
 
   const shown = useMemo(() => items.filter((it) => trackingOf(it) === view), [items, view])
   const reusable = view === 'reusable'
+
+  // Consumables can be itemized: sub-items nest under a parent (one level).
+  const childrenByParent = useMemo(() => {
+    const m = new Map()
+    for (const it of items) {
+      if (it.parent_id) {
+        if (!m.has(it.parent_id)) m.set(it.parent_id, [])
+        m.get(it.parent_id).push(it)
+      }
+    }
+    return m
+  }, [items])
+  const topLevel = useMemo(() => shown.filter((it) => !it.parent_id), [shown])
+
+  const toggleExpanded = (id) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const openMove = (item, action) => { setMoveTarget({ item, action }); setModal('move') }
 
@@ -126,7 +152,7 @@ export default function Inventory() {
       {error && <Alert variant="danger">{error}</Alert>}
 
       <ButtonGroup className="mb-4">
-        {[['consumable', 'Consumables'], ['reusable', 'Reusables']].map(([val, label]) => (
+        {[['consumable', 'Consumables'], ['reusable', 'Reusables'], ['receipts', 'Receipt Booklets']].map(([val, label]) => (
           <Button
             key={val}
             variant={view === val ? 'primary' : 'outline-secondary'}
@@ -139,6 +165,8 @@ export default function Inventory() {
 
       {loading ? (
         <SkeletonTable rows={6} />
+      ) : view === 'receipts' ? (
+        <ReceiptBooklets series={series} canManage={canManage} propertyId={propertyId} onChanged={refresh} />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           <div className="lg:col-span-8">
@@ -173,14 +201,43 @@ export default function Inventory() {
                       </td>
                     </tr>
                   )}
-                  {shown.map((it) => {
+                  {(reusable ? shown : topLevel)
+                    .flatMap((p) => [
+                      { it: p, isChild: false },
+                      ...(!reusable && expanded.has(p.id)
+                        ? (childrenByParent.get(p.id) ?? []).map((c) => ({ it: c, isChild: true }))
+                        : []),
+                    ])
+                    .map(({ it, isChild }) => {
+                    const kids = reusable ? [] : childrenByParent.get(it.id) ?? []
+                    const isOpen = expanded.has(it.id)
                     const available = Number(it.quantity)
                     const total = Number(it.total_quantity ?? 0)
                     const inUse = Math.max(0, total - available)
                     const low = available <= Number(it.reorder_level)
                     return (
                       <tr key={it.id}>
-                        <td className="font-semibold">{it.name}</td>
+                        <td className="font-semibold">
+                          {isChild ? (
+                            <span className="inline-flex items-center">
+                              <span className="mr-2 ml-1 text-muted">↳</span>
+                              {it.name}
+                            </span>
+                          ) : kids.length > 0 ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5"
+                              title={isOpen ? 'Hide sub-items' : 'Show sub-items'}
+                              onClick={() => toggleExpanded(it.id)}
+                            >
+                              <span className="text-[10px] text-muted">{isOpen ? '▼' : '▶'}</span>
+                              {it.name}
+                              <Badge bg="secondary">{kids.length}</Badge>
+                            </button>
+                          ) : (
+                            it.name
+                          )}
+                        </td>
                         <td>{it.inventory_category?.name ?? '—'}</td>
                         {reusable ? (
                           <>
@@ -298,8 +355,9 @@ export default function Inventory() {
         <ItemModal
           propertyId={propertyId}
           categories={categories}
+          items={items}
           item={editTarget}
-          defaultTracking={view}
+          defaultTracking={view === 'reusable' ? 'reusable' : 'consumable'}
           onClose={() => { setModal(null); setEditTarget(null) }}
           onSaved={() => { setModal(null); setEditTarget(null); refresh() }}
         />
@@ -404,10 +462,11 @@ function CategoriesModal({ categories, items, onClose, onChanged }) {
   )
 }
 
-function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onSaved }) {
+function ItemModal({ propertyId, categories, items = [], item, defaultTracking, onClose, onSaved }) {
   const editing = Boolean(item)
   const [form, setForm] = useState({
     inventory_category_id: item?.inventory_category_id ?? categories[0]?.id ?? '',
+    parent_id: item?.parent_id ?? '',
     name: item?.name ?? '',
     tracking_type: item?.tracking_type ?? defaultTracking ?? 'consumable',
     unit: item?.unit ?? 'pcs',
@@ -417,13 +476,20 @@ function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onS
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const reusable = form.tracking_type === 'reusable'
   const typeChanged = editing && form.tracking_type !== item.tracking_type
+  // Valid parents: top-level consumables (one level deep), never itself. An
+  // item that already has sub-items can't become one — the backend enforces
+  // the same.
+  const hasChildren = editing && items.some((i) => i.parent_id === item.id)
+  const parentOptions = items.filter(
+    (i) => trackingOf(i) === 'consumable' && !i.parent_id && i.id !== item?.id,
+  )
   const { run, busy, err } = useSubmit(async () => {
+    const payload = { ...form, parent_id: reusable ? null : form.parent_id || null }
     if (editing) {
-      const patch = { ...form }
-      delete patch.quantity // never edit quantity directly
-      await updateItem(item.id, patch)
+      delete payload.quantity // never edit quantity directly
+      await updateItem(item.id, payload)
     } else {
-      await createItem(form, propertyId)
+      await createItem(payload, propertyId)
     }
     onSaved()
   })
@@ -453,6 +519,17 @@ function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onS
               {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Form.Select>
           </Form.Group>
+          {!reusable && !hasChildren && (
+            <Form.Group className="mb-4">
+              <Form.Label>
+                Under item <span className="font-normal text-muted">(optional — makes this a sub-item)</span>
+              </Form.Label>
+              <Form.Select value={form.parent_id} onChange={set('parent_id')}>
+                <option value="">None — top-level item</option>
+                {parentOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Form.Select>
+            </Form.Group>
+          )}
           <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus />
@@ -555,6 +632,176 @@ function MoveModal({ propertyId, target, onClose, onSaved }) {
           <Button type="submit" variant={a.direction === 'in' ? 'success' : 'danger'} disabled={busy}>
             {busy ? <Spinner size="sm" /> : a.label}
           </Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  )
+}
+
+/* ---- Receipt booklets: registered physical invoice / OR number series ---- */
+
+const SERIES_TYPE_LABEL = { invoice: 'Physical Invoice', official_receipt: 'Official Receipt' }
+
+// A number the way it reads on the physical page (prefix + zero-padded digits).
+const seriesNumber = (s, n) => `${s.prefix ?? ''}${String(n).padStart(s.pad_length ?? 0, '0')}`
+
+function ReceiptBooklets({ series, canManage, propertyId, onChanged }) {
+  const [modal, setModal] = useState(false)
+  const [pending, setPending] = useState(null)
+  const [err, setErr] = useState(null)
+
+  async function act(key, fn) {
+    setPending(key)
+    setErr(null)
+    try {
+      await fn()
+      await onChanged()
+    } catch (ex) {
+      setErr(ex?.response?.data?.message ?? 'Action failed.')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  return (
+    <div>
+      {err && <Alert variant="danger">{err}</Alert>}
+      <Card className="shadow-sm">
+        <Card.Header className="flex items-center justify-between px-4 py-3">
+          <span>Receipt booklets</span>
+          {canManage && (
+            <Button size="sm" onClick={() => setModal(true)}>Register series</Button>
+          )}
+        </Card.Header>
+        <Table hover>
+          <thead>
+            <tr>
+              <th>Type</th><th>Series</th><th>Next number</th>
+              <th className="text-right">Remaining</th><th>Status</th>
+              {canManage && <th className="text-right">Actions</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {series.length === 0 && (
+              <tr>
+                <td colSpan={canManage ? 6 : 5} className="py-6 text-center text-muted">
+                  No booklet series registered yet.
+                </td>
+              </tr>
+            )}
+            {series.map((s) => {
+              const remaining = Math.max(0, s.end_number - s.next_number + 1)
+              const exhausted = remaining === 0
+              return (
+                <tr key={s.id}>
+                  <td className="font-semibold">{SERIES_TYPE_LABEL[s.type] ?? s.type}</td>
+                  <td className="whitespace-nowrap">
+                    {seriesNumber(s, s.start_number)} – {seriesNumber(s, s.end_number)}
+                  </td>
+                  <td className="whitespace-nowrap">
+                    {exhausted
+                      ? <span className="text-muted">— exhausted —</span>
+                      : seriesNumber(s, s.next_number)}
+                  </td>
+                  <td className="text-right">{remaining}</td>
+                  <td>
+                    <Badge bg={s.is_active && !exhausted ? 'success' : 'secondary'}>
+                      {exhausted ? 'used up' : s.is_active ? 'active' : 'inactive'}
+                    </Badge>
+                  </td>
+                  {canManage && (
+                    <td className="whitespace-nowrap text-right">
+                      <Button size="sm" variant="outline-secondary" className="mr-1"
+                        disabled={pending !== null}
+                        onClick={() => act(`toggle-${s.id}`, () => updateReceiptSeries(s.id, { is_active: !s.is_active }))}>
+                        {pending === `toggle-${s.id}` ? <Spinner size="sm" /> : s.is_active ? 'Deactivate' : 'Activate'}
+                      </Button>
+                      <Button size="sm" variant="outline-danger"
+                        disabled={pending !== null}
+                        onClick={() => {
+                          if (window.confirm('Delete this unused series?')) {
+                            act(`del-${s.id}`, () => deleteReceiptSeries(s.id))
+                          }
+                        }}>
+                        {pending === `del-${s.id}` ? <Spinner size="sm" /> : 'Delete'}
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              )
+            })}
+          </tbody>
+        </Table>
+      </Card>
+      <p className="mt-2 mb-0 text-sm text-muted">
+        Register your pre-printed <strong>Sales Invoice</strong> and <strong>Official Receipt</strong> booklets
+        here. When an invoice is settled in Food &amp; Orders, the receptionist can mark which document was
+        issued and the system stamps the next number from the active series onto the record. A series with
+        issued numbers can be deactivated but not deleted.
+      </p>
+
+      {modal && (
+        <SeriesModal
+          propertyId={propertyId}
+          onClose={() => setModal(false)}
+          onSaved={async () => { setModal(false); await onChanged() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function SeriesModal({ propertyId, onClose, onSaved }) {
+  const [form, setForm] = useState({ type: 'invoice', prefix: '', start_number: '', end_number: '' })
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+  const { run, busy, err } = useSubmit(async () => {
+    await createReceiptSeries(form, propertyId)
+    onSaved()
+  })
+
+  const preview = form.start_number
+    ? `${form.prefix}${form.start_number}`
+    : null
+
+  return (
+    <Modal show onHide={onClose} centered>
+      <Form onSubmit={run}>
+        <Modal.Header closeButton><Modal.Title>Register booklet series</Modal.Title></Modal.Header>
+        <Modal.Body>
+          {err && <Alert variant="danger">{err}</Alert>}
+          <Form.Group className="mb-4">
+            <Form.Label>Type</Form.Label>
+            <Form.Select value={form.type} onChange={set('type')} autoFocus>
+              <option value="invoice">Physical Invoice (Sales Invoice)</option>
+              <option value="official_receipt">Official Receipt</option>
+            </Form.Select>
+          </Form.Group>
+          <Form.Group className="mb-4">
+            <Form.Label>Prefix <span className="font-normal text-muted">(optional, e.g. &quot;OR-&quot;)</span></Form.Label>
+            <Form.Control value={form.prefix} onChange={set('prefix')} placeholder="e.g. OR-" />
+          </Form.Group>
+          <div className="grid grid-cols-2 gap-x-6">
+            <Form.Group className="mb-4">
+              <Form.Label>Start number</Form.Label>
+              <Form.Control value={form.start_number} onChange={set('start_number')}
+                required inputMode="numeric" pattern="\d+" placeholder="e.g. 0001" />
+              <Form.Text muted>Type it with leading zeros to keep the padding.</Form.Text>
+            </Form.Group>
+            <Form.Group className="mb-4">
+              <Form.Label>End number</Form.Label>
+              <Form.Control type="number" min={0} value={form.end_number} onChange={set('end_number')}
+                required placeholder="e.g. 500" />
+            </Form.Group>
+          </div>
+          {preview && (
+            <p className="mb-0 text-sm text-muted">
+              First number to be issued: <strong className="text-body">{preview}</strong>
+            </p>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : 'Register'}</Button>
         </Modal.Footer>
       </Form>
     </Modal>

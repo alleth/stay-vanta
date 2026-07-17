@@ -103,6 +103,16 @@ return function (RouteBuilder $routes): void {
         $builder->get('/stock-movements', ['controller' => 'StockMovements', 'action' => 'index']);
         $builder->post('/stock-movements', ['controller' => 'StockMovements', 'action' => 'add']);
 
+        // Receipt booklet series (physical sales invoice & official receipt numbers).
+        $builder->get('/receipt-series', ['controller' => 'ReceiptSeries', 'action' => 'index']);
+        $builder->post('/receipt-series', ['controller' => 'ReceiptSeries', 'action' => 'add']);
+        $builder->patch('/receipt-series/{id}', ['controller' => 'ReceiptSeries', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->put('/receipt-series/{id}', ['controller' => 'ReceiptSeries', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->delete('/receipt-series/{id}', ['controller' => 'ReceiptSeries', 'action' => 'delete'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+
         // Front Desk module: rooms, rates, reservations.
         $builder->get('/rooms', ['controller' => 'Rooms', 'action' => 'index']);
         $builder->post('/rooms', ['controller' => 'Rooms', 'action' => 'add']);

@@ -38,3 +38,16 @@ export const listMovements = (propertyId, params = {}) =>
 // Record a stock movement (the accountability action). Returns { movement, item }.
 export const recordMovement = (data, propertyId) =>
   client.post('/stock-movements', withProp(data, propertyId)).then((r) => r.data)
+
+// Receipt booklet series (physical sales invoice / official receipt numbers).
+export const listReceiptSeries = (propertyId) =>
+  client.get('/receipt-series', { params: withProp({}, propertyId) }).then((r) => r.data.series)
+
+export const createReceiptSeries = (data, propertyId) =>
+  client.post('/receipt-series', withProp(data, propertyId)).then((r) => r.data.series)
+
+export const updateReceiptSeries = (id, data) =>
+  client.patch(`/receipt-series/${id}`, data).then((r) => r.data.series)
+
+export const deleteReceiptSeries = (id) =>
+  client.delete(`/receipt-series/${id}`).then((r) => r.data)

@@ -33,6 +33,10 @@ class FoodOrder extends Entity
         'status' => true,
         'payment_status' => true,
         'total' => true,
+        'discount_type' => true,
+        'discount_name' => true,
+        'discount_id_number' => true,
+        'cooking_charge' => true,
         'food_order_items' => true,
     ];
 }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use Cake\Http\Exception\BadRequestException;
+use Cake\I18n\DateTime;
+use RuntimeException;
 
 /**
  * Invoices — guest tabs. Charge-to-room food orders append lines here.
@@ -63,6 +65,11 @@ class InvoicesController extends AppController
 
     /**
      * POST /api/invoices/{id}/settle — close out a paid tab.
+     *
+     * Optional body { use_invoice?: bool, use_or?: bool }: when set, the next
+     * number is consumed from the property's active Physical Invoice /
+     * Official Receipt series and stamped onto the invoice (invoice_number /
+     * or_number), mirroring the physical document handed to the guest.
      */
     public function settle(int $id): void
     {
@@ -73,9 +80,29 @@ class InvoicesController extends AppController
         if ($invoice->status !== 'open') {
             throw new BadRequestException('Invoice is not open.');
         }
-        $invoice->set('status', 'settled');
-        $invoice->set('settled_at', \Cake\I18n\DateTime::now());
-        $invoices->saveOrFail($invoice);
+
+        $useInvoice = (bool)$this->request->getData('use_invoice');
+        $useOr = (bool)$this->request->getData('use_or');
+        $series = $this->fetchTable('ReceiptSeries');
+
+        try {
+            $invoices->getConnection()->transactional(
+                function () use ($invoices, $invoice, $series, $useInvoice, $useOr): void {
+                    if ($useInvoice) {
+                        $invoice->set('invoice_number', $series->assignNext((int)$invoice->property_id, 'invoice'));
+                    }
+                    if ($useOr) {
+                        $invoice->set('or_number', $series->assignNext((int)$invoice->property_id, 'official_receipt'));
+                    }
+                    $invoice->set('status', 'settled');
+                    $invoice->set('settled_at', DateTime::now());
+                    $invoices->saveOrFail($invoice);
+                },
+            );
+        } catch (RuntimeException $e) {
+            // e.g. no active series / booklet exhausted.
+            throw new BadRequestException($e->getMessage());
+        }
 
         $this->set('invoice', $invoice);
         $this->viewBuilder()->setOption('serialize', ['invoice']);

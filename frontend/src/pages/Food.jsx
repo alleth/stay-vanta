@@ -217,10 +217,23 @@ export default function Food() {
                       <td className="whitespace-nowrap text-xs text-muted">{fmtDateTime(o.created)}</td>
                       <td className="text-xs">
                         {o.food_order_items?.map((it) =>
-                          `${it.quantity}× ${it.food_menu_item?.name ?? 'item'}`).join(', ')}
+                          `${it.quantity}× ${it.food_menu_item?.name ?? it.description ?? 'item'}`).join(', ')}
                       </td>
                       <td>{o.guest?.full_name ?? '—'}{o.room ? ` (Rm ${o.room.room_number})` : ''}</td>
-                      <td className="text-right">{formatMoney(o.total)}</td>
+                      <td className="text-right">
+                        {formatMoney(o.total)}
+                        {o.discount_type && o.discount_type !== 'none' && (
+                          <div className="whitespace-nowrap text-[11px] text-muted"
+                            title={`${o.discount_name ?? ''} · ID ${o.discount_id_number ?? ''}`}>
+                            −20% {o.discount_type}
+                          </div>
+                        )}
+                        {Number(o.cooking_charge) > 0 && (
+                          <div className="whitespace-nowrap text-[11px] text-muted">
+                            incl. cooking {formatMoney(o.cooking_charge)}
+                          </div>
+                        )}
+                      </td>
                       <td><Badge bg={PAY_VARIANT[o.payment_status]}>{o.payment_status.replace('_', ' ')}</Badge></td>
                       <td><Badge bg={ORDER_VARIANT[o.status]}>{o.status}</Badge></td>
                       <td className="text-xs text-muted">{o.receptionist?.name ?? '—'}</td>
@@ -365,7 +378,15 @@ export default function Food() {
                   )}
                   {!invoicesLoading && invoices.map((inv) => (
                     <tr key={inv.id}>
-                      <td className="text-muted">{String(inv.id).padStart(4, '0')}</td>
+                      <td className="text-muted">
+                        {String(inv.id).padStart(4, '0')}
+                        {inv.invoice_number && (
+                          <div className="whitespace-nowrap text-[11px]">SI {inv.invoice_number}</div>
+                        )}
+                        {inv.or_number && (
+                          <div className="whitespace-nowrap text-[11px]">OR {inv.or_number}</div>
+                        )}
+                      </td>
                       <td className="font-semibold">{inv.guest?.full_name ?? '—'}</td>
                       <td className="whitespace-nowrap text-xs text-muted">{fmtDateTime(inv.created)}</td>
                       <td className="max-w-[260px]">
@@ -390,8 +411,8 @@ export default function Food() {
                         {inv.status === 'open' && (
                           <Button size="sm" variant="outline-success"
                             disabled={pending !== null}
-                            onClick={() => act(`settle-${inv.id}`, settleInvoice, inv.id)}>
-                            {pending === `settle-${inv.id}` ? <Spinner size="sm" /> : 'Settle'}
+                            onClick={() => setModal({ type: 'settle', id: inv.id })}>
+                            Settle
                           </Button>
                         )}
                       </td>
@@ -415,6 +436,10 @@ export default function Food() {
       )}
       {modal?.type === 'invoice' && (
         <InvoiceModal id={modal.id} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'settle' && (
+        <SettleModal id={modal.id} onClose={() => setModal(null)}
+          onSettled={() => { setModal(null); loadInvoices() }} />
       )}
     </div>
   )
@@ -511,6 +536,12 @@ function InvoiceModal({ id, onClose }) {
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Settled</div>
                 <div className="mt-0.5 text-sm">{invoice.settled_at ? fmtDateTime(invoice.settled_at) : '—'}</div>
+                {(invoice.invoice_number || invoice.or_number) && (
+                  <div className="mt-0.5 text-xs text-muted">
+                    {invoice.invoice_number && <div>Sales Invoice {invoice.invoice_number}</div>}
+                    {invoice.or_number && <div>Official Receipt {invoice.or_number}</div>}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -562,13 +593,110 @@ function InvoiceModal({ id, onClose }) {
   )
 }
 
+// Settling shows the itemized charges first, and lets the receptionist mark
+// which physical document was issued — the next number from the registered
+// booklet series (Inventory → Receipt Booklets) is stamped onto the invoice.
+function SettleModal({ id, onClose, onSettled }) {
+  const [invoice, setInvoice] = useState(null)
+  const [error, setError] = useState(null)
+  const [useInvoiceDoc, setUseInvoiceDoc] = useState(false)
+  const [useOr, setUseOr] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    getInvoice(id).then(setInvoice).catch(() => setError('Could not load the invoice.'))
+  }, [id])
+
+  async function settle() {
+    setBusy(true)
+    setError(null)
+    try {
+      await settleInvoice(id, { use_invoice: useInvoiceDoc, use_or: useOr })
+      onSettled()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Could not settle the invoice.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal show onHide={onClose} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Settle invoice #{String(id).padStart(4, '0')}</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        {error && <Alert variant="danger">{error}</Alert>}
+        {!invoice && !error && (
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-3/4" />
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-5 w-2/3" />
+          </div>
+        )}
+        {invoice && (
+          <>
+            <div className="mb-2 text-sm text-muted">
+              Billed to <span className="font-semibold text-body">{invoice.guest?.full_name ?? 'Walk-in guest'}</span>
+            </div>
+            <div className="mb-4 overflow-hidden rounded-lg border border-line">
+              {(invoice.invoice_lines ?? []).map((l) => (
+                <div key={l.id} className="flex justify-between gap-3 border-b border-line px-3 py-2 text-sm">
+                  <span className="min-w-0">{l.description}</span>
+                  <span className="shrink-0 tabular-nums">{formatMoney(l.amount)}</span>
+                </div>
+              ))}
+              {(invoice.invoice_lines ?? []).length === 0 && (
+                <div className="border-b border-line px-3 py-2 text-sm text-muted">No charges on this invoice.</div>
+              )}
+              <div className="flex justify-between bg-subtle px-3 py-2 font-bold">
+                <span>Total</span><span className="tabular-nums">{formatMoney(invoice.total)}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Form.Check label="Issued a physical Sales Invoice (stamps the next invoice number)"
+                checked={useInvoiceDoc} onChange={(e) => setUseInvoiceDoc(e.target.checked)} />
+              <Form.Check label="Issued an Official Receipt (stamps the next OR number)"
+                checked={useOr} onChange={(e) => setUseOr(e.target.checked)} />
+            </div>
+            <p className="mt-2 mb-0 text-xs text-muted">
+              Numbers come from the active booklet series registered in Inventory → Receipt Booklets.
+            </p>
+          </>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="success" disabled={busy || !invoice} onClick={settle}>
+          {busy ? <Spinner size="sm" /> : 'Settle'}
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  )
+}
+
 function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved }) {
   const [cart, setCart] = useState({}) // { menuId: qty }
   const [payment, setPayment] = useState('paid')
   const [guestId, setGuestId] = useState('')
   const [search, setSearch] = useState('')
+  // Senior/PWD statutory discount — 20% off the items subtotal, with the
+  // beneficiary's name + ID number (kept on the order and shown on invoices).
+  const [discount, setDiscount] = useState('none')
+  const [discountName, setDiscountName] = useState('')
+  const [discountId, setDiscountId] = useState('')
+  // Cooking charge: guests who bring their own food to be cooked. The amount
+  // depends on what was brought, so it's typed per order.
+  const [hasCooking, setHasCooking] = useState(false)
+  const [cookingCharge, setCookingCharge] = useState('')
+  // Custom (off-menu) lines, e.g. the guest-brought dish + ingredients used.
+  const [custom, setCustom] = useState([]) // [{ key, name, price, qty }]
 
   const setQty = (id, qty) => setCart((c) => ({ ...c, [id]: Math.max(0, qty) }))
+
+  const addCustom = () => setCustom((c) => [...c, { key: Date.now(), name: '', price: '', qty: 1 }])
+  const setCustomField = (key, field) => (e) =>
+    setCustom((c) => c.map((row) => (row.key === key ? { ...row, [field]: e.target.value } : row)))
+  const removeCustom = (key) => setCustom((c) => c.filter((row) => row.key !== key))
 
   const filteredMenu = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -579,13 +707,33 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
     () => menu.filter((m) => (cart[m.id] ?? 0) > 0).map((m) => ({ menu: m, qty: cart[m.id] })),
     [menu, cart],
   )
-  const total = lines.reduce((sum, l) => sum + Number(l.menu.price) * l.qty, 0)
+  const customLines = custom.filter(
+    (c) => c.name.trim() !== '' && Number(c.price) >= 0 && Number(c.qty) > 0,
+  )
+  const itemsSubtotal =
+    lines.reduce((sum, l) => sum + Number(l.menu.price) * l.qty, 0)
+    + customLines.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0)
+  const discountAmt = discount !== 'none' ? itemsSubtotal * 0.2 : 0
+  const cooking = hasCooking ? Number(cookingCharge) || 0 : 0
+  const total = itemsSubtotal - discountAmt + cooking
   const count = lines.reduce((sum, l) => sum + l.qty, 0)
+    + customLines.reduce((sum, c) => sum + Number(c.qty), 0)
 
   const { run, busy, err } = useSubmit(async () => {
     const payload = {
-      items: lines.map((l) => ({ food_menu_item_id: l.menu.id, quantity: l.qty })),
+      items: [
+        ...lines.map((l) => ({ food_menu_item_id: l.menu.id, quantity: l.qty })),
+        ...customLines.map((c) => ({
+          description: c.name.trim(), price: Number(c.price), quantity: Number(c.qty),
+        })),
+      ],
       payment_status: payment,
+      discount_type: discount,
+      cooking_charge: cooking,
+    }
+    if (discount !== 'none') {
+      payload.discount_name = discountName
+      payload.discount_id_number = discountId
     }
     if (guestId) payload.guest_id = Number(guestId)
     await createOrder(payload, propertyId)
@@ -661,9 +809,70 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                     </div>
                   ))}
                 </div>
-                <div className="mb-4 flex items-center justify-between border-t border-line pt-2 font-bold">
-                  <span>Total</span><span className="text-xl">{formatMoney(total)}</span>
+                <div className="mb-2">
+                  {custom.map((row) => (
+                    <div key={row.key} className="mb-1 flex items-center gap-1">
+                      <Form.Control size="sm" value={row.name} onChange={setCustomField(row.key, 'name')}
+                        placeholder="Custom item — e.g. cooking of guest's fish" required />
+                      <Form.Control size="sm" type="number" min={0} step="0.01" value={row.price}
+                        onChange={setCustomField(row.key, 'price')} placeholder="Price" required
+                        style={{ width: 96 }} />
+                      <Form.Control size="sm" type="number" min={1} value={row.qty}
+                        onChange={setCustomField(row.key, 'qty')} style={{ width: 60 }} />
+                      <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                        onClick={() => removeCustom(row.key)}>×</button>
+                    </div>
+                  ))}
+                  <Button size="sm" variant="outline-secondary" onClick={addCustom}>
+                    + Custom item (not on the menu)
+                  </Button>
                 </div>
+                <div className="mb-2 border-t border-line pt-2 text-sm">
+                  {(discountAmt > 0 || cooking > 0) && (
+                    <>
+                      <div className="flex justify-between text-muted">
+                        <span>Items subtotal</span><span>{formatMoney(itemsSubtotal)}</span>
+                      </div>
+                      {discountAmt > 0 && (
+                        <div className="flex justify-between text-muted">
+                          <span>{discount === 'senior' ? 'Senior' : 'PWD'} discount (20%)</span>
+                          <span>−{formatMoney(discountAmt)}</span>
+                        </div>
+                      )}
+                      {cooking > 0 && (
+                        <div className="flex justify-between text-muted">
+                          <span>Cooking charge</span><span>{formatMoney(cooking)}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="flex items-center justify-between font-bold">
+                    <span>Total</span><span className="text-xl">{formatMoney(total)}</span>
+                  </div>
+                </div>
+                <Form.Group className="mb-2">
+                  <Form.Label className="mb-1">Discount</Form.Label>
+                  <Form.Select size="sm" value={discount} onChange={(e) => setDiscount(e.target.value)}>
+                    <option value="none">None</option>
+                    <option value="senior">Senior citizen (20%)</option>
+                    <option value="pwd">PWD (20%)</option>
+                  </Form.Select>
+                </Form.Group>
+                {discount !== 'none' && (
+                  <div className="mb-2 grid grid-cols-2 gap-2">
+                    <Form.Control size="sm" value={discountName} onChange={(e) => setDiscountName(e.target.value)}
+                      placeholder="Beneficiary name" required />
+                    <Form.Control size="sm" value={discountId} onChange={(e) => setDiscountId(e.target.value)}
+                      placeholder="Senior/PWD ID number" required />
+                  </div>
+                )}
+                <Form.Check className="mb-2" label="Add cooking charge (guest-brought food)"
+                  checked={hasCooking} onChange={(e) => setHasCooking(e.target.checked)} />
+                {hasCooking && (
+                  <Form.Control size="sm" type="number" min={0} step="0.01" className="mb-2"
+                    value={cookingCharge} onChange={(e) => setCookingCharge(e.target.value)}
+                    placeholder="Cooking charge amount" required />
+                )}
                 <Form.Group className="mb-2">
                   <Form.Label className="mb-1">Payment</Form.Label>
                   <Form.Select size="sm" value={payment} onChange={(e) => setPayment(e.target.value)}>
@@ -685,7 +894,7 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy || lines.length === 0}>
+          <Button type="submit" disabled={busy || (lines.length === 0 && customLines.length === 0)}>
             {busy ? <Spinner size="sm" /> : `Place order${count ? ` (${count})` : ''}`}
           </Button>
         </Modal.Footer>

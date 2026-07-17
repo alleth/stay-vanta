@@ -20,6 +20,7 @@ class FoodOrderItem extends Entity
     protected array $_accessible = [
         'food_order_id' => true,
         'food_menu_item_id' => true,
+        'description' => true,
         'quantity' => true,
         'unit_price' => true,
         'line_total' => true,

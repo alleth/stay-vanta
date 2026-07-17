@@ -36,5 +36,7 @@ export const listInvoices = (propertyId, params = {}) =>
 export const getInvoice = (id) =>
   client.get(`/invoices/${id}`).then((r) => r.data.invoice)
 
-export const settleInvoice = (id) =>
-  client.post(`/invoices/${id}/settle`).then((r) => r.data.invoice)
+// data: { use_invoice?: bool, use_or?: bool } — assigns the next number from
+// the property's registered booklet series onto the settled invoice.
+export const settleInvoice = (id, data = {}) =>
+  client.post(`/invoices/${id}/settle`, data).then((r) => r.data.invoice)

@@ -99,6 +99,10 @@ class FoodOrdersController extends AppController
                     'guest_id' => $this->request->getData('guest_id'),
                     'room_id' => $this->request->getData('room_id'),
                     'reservation_id' => $this->request->getData('reservation_id'),
+                    'discount_type' => $this->request->getData('discount_type') ?? 'none',
+                    'discount_name' => $this->request->getData('discount_name'),
+                    'discount_id_number' => $this->request->getData('discount_id_number'),
+                    'cooking_charge' => $this->request->getData('cooking_charge') ?? 0,
                 ],
                 $propertyId,
                 (int)$this->currentUser->id

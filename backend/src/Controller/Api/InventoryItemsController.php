@@ -73,9 +73,16 @@ class InventoryItemsController extends AppController
         $trackingType = $this->request->getData('tracking_type') === 'reusable' ? 'reusable' : 'consumable';
 
         $items = $this->fetchTable('InventoryItems');
+
+        $parentId = $this->request->getData('parent_id') ? (int)$this->request->getData('parent_id') : null;
+        if ($parentId !== null) {
+            $this->assertValidParent($parentId, $propertyId, $trackingType);
+        }
+
         $item = $items->newEntity([
             'property_id' => $propertyId,
             'inventory_category_id' => $this->request->getData('inventory_category_id'),
+            'parent_id' => $parentId,
             'name' => $this->request->getData('name'),
             'tracking_type' => $trackingType,
             'unit' => $this->request->getData('unit') ?? 'pcs',
@@ -132,14 +139,30 @@ class InventoryItemsController extends AppController
         )->firstOrFail();
 
         $newTracking = $this->request->getData('tracking_type');
+        $tracking = in_array($newTracking, ['consumable', 'reusable'], true)
+            ? $newTracking
+            : $item->tracking_type;
+
+        // Sub-item rules: one level deep, consumables only, no self-nesting.
+        $parentId = $this->request->getData('parent_id') ? (int)$this->request->getData('parent_id') : null;
+        if ($parentId !== null) {
+            if ($parentId === $id) {
+                throw new BadRequestException('An item cannot be its own parent.');
+            }
+            $hasChildren = $items->exists(['parent_id' => $id, 'deleted_at IS' => null]);
+            if ($hasChildren) {
+                throw new BadRequestException('This item has sub-items; it cannot be nested under another item.');
+            }
+            $this->assertValidParent($parentId, (int)$item->property_id, $tracking);
+        }
+
         $items->patchEntity($item, [
             'name' => $this->request->getData('name'),
             'unit' => $this->request->getData('unit'),
             'reorder_level' => $this->request->getData('reorder_level'),
             'inventory_category_id' => $this->request->getData('inventory_category_id'),
-            'tracking_type' => in_array($newTracking, ['consumable', 'reusable'], true)
-                ? $newTracking
-                : $item->tracking_type,
+            'parent_id' => $parentId,
+            'tracking_type' => $tracking,
         ]);
 
         // Keep total_quantity coherent when the type changes: a reusable needs an
@@ -188,11 +211,44 @@ class InventoryItemsController extends AppController
                 ['inventory_item_id' => null],
                 ['inventory_item_id' => $id]
             );
+            // Its sub-items become top-level again (they keep their own stock).
+            $items->updateAll(['parent_id' => null], ['parent_id' => $id]);
             $item->set('deleted_at', new \Cake\I18n\DateTime());
             $items->saveOrFail($item);
         });
 
         $this->set('ok', true);
         $this->viewBuilder()->setOption('serialize', ['ok']);
+    }
+
+    /**
+     * A valid parent for a sub-item: same property, not deleted, consumable,
+     * and itself top-level (nesting is one level deep). Only consumables can
+     * be itemized this way.
+     */
+    private function assertValidParent(int $parentId, int $propertyId, string $trackingType): void
+    {
+        if ($trackingType !== 'consumable') {
+            throw new BadRequestException('Only consumable items can be nested under a parent item.');
+        }
+
+        $items = $this->fetchTable('InventoryItems');
+        $parent = $items->find()
+            ->where([
+                'InventoryItems.id' => $parentId,
+                'InventoryItems.property_id' => $propertyId,
+                'InventoryItems.deleted_at IS' => null,
+            ])
+            ->first();
+
+        if ($parent === null) {
+            throw new BadRequestException('Parent item not found.');
+        }
+        if ($parent->tracking_type !== 'consumable') {
+            throw new BadRequestException('The parent must be a consumable item.');
+        }
+        if ($parent->parent_id) {
+            throw new BadRequestException('Sub-items can only go one level deep.');
+        }
     }
 }

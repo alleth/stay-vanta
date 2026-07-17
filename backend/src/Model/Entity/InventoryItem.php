@@ -29,6 +29,7 @@ class InventoryItem extends Entity
     protected array $_accessible = [
         'property_id' => true,
         'inventory_category_id' => true,
+        'parent_id' => true,
         'name' => true,
         'tracking_type' => true,
         'unit' => true,
