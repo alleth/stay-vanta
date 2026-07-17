@@ -6,7 +6,7 @@ A monorepo with two apps:
 
 | Path        | Stack                                              | Role            |
 | ----------- | -------------------------------------------------- | --------------- |
-| `frontend/` | React 19 + Vite, React-Bootstrap, Tailwind CSS v4  | SPA (UI)        |
+| `frontend/` | React 19 + Vite, pure Tailwind CSS v4              | SPA (UI)        |
 | `backend/`  | CakePHP 5, MySQL                                    | JSON REST API   |
 
 - **Database:** MySQL (local: XAMPP; production: Railway)

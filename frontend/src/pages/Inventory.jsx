@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Row, Col, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ButtonGroup, ToggleButton,
-} from 'react-bootstrap'
+  Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ButtonGroup,
+} from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
@@ -101,15 +101,15 @@ export default function Inventory() {
 
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="h3 fw-bold mb-0">Inventory</h1>
+          <h1 className="mb-0 text-2xl font-bold">Inventory</h1>
           <small className="text-muted">
             Every in/out movement records the acting receptionist.
           </small>
         </div>
         {canManage && (
-          <div className="d-flex gap-2">
+          <div className="flex gap-2">
             <Button variant="outline-secondary" onClick={() => setModal('categories')}>
               Manage categories
             </Button>
@@ -125,40 +125,40 @@ export default function Inventory() {
 
       {error && <Alert variant="danger">{error}</Alert>}
 
-      <ButtonGroup className="mb-3">
+      <ButtonGroup className="mb-4">
         {[['consumable', 'Consumables'], ['reusable', 'Reusables']].map(([val, label]) => (
-          <ToggleButton
-            key={val} id={`view-${val}`} type="radio" name="inv-view"
-            value={val} checked={view === val} variant="outline-primary"
-            onChange={(e) => setView(e.currentTarget.value)}
+          <Button
+            key={val}
+            variant={view === val ? 'primary' : 'outline-secondary'}
+            onClick={() => setView(val)}
           >
             {label}
-          </ToggleButton>
+          </Button>
         ))}
       </ButtonGroup>
 
       {loading ? (
         <SkeletonTable rows={6} />
       ) : (
-        <Row className="g-3">
-          <Col lg={8}>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+          <div className="lg:col-span-8">
             <Card className="shadow-sm">
-              <Card.Header className="fw-semibold">
+              <Card.Header>
                 {reusable ? 'Reusable items (issued & returned)' : 'Consumable items'}
               </Card.Header>
-              <Table responsive hover className="mb-0 align-middle">
+              <Table hover>
                 <thead>
                   <tr>
                     <th>Item</th>
                     <th>Category</th>
                     {reusable ? (
                       <>
-                        <th className="text-end">Available</th>
-                        <th className="text-end">In use</th>
-                        <th className="text-end">Total</th>
+                        <th className="text-right">Available</th>
+                        <th className="text-right">In use</th>
+                        <th className="text-right">Total</th>
                       </>
                     ) : (
-                      <th className="text-end">On hand</th>
+                      <th className="text-right">On hand</th>
                     )}
                     <th>Date added</th>
                     <th>Last receptionist</th>
@@ -168,7 +168,7 @@ export default function Inventory() {
                 <tbody>
                   {shown.length === 0 && (
                     <tr>
-                      <td colSpan={reusable ? 8 : 6} className="text-center text-muted py-4">
+                      <td colSpan={reusable ? 8 : 6} className="py-6 text-center text-muted">
                         No {reusable ? 'reusable' : 'consumable'} items yet.
                       </td>
                     </tr>
@@ -180,53 +180,53 @@ export default function Inventory() {
                     const low = available <= Number(it.reorder_level)
                     return (
                       <tr key={it.id}>
-                        <td className="fw-semibold">{it.name}</td>
+                        <td className="font-semibold">{it.name}</td>
                         <td>{it.inventory_category?.name ?? '—'}</td>
                         {reusable ? (
                           <>
-                            <td className="text-end">
-                              {available} {low && <Badge bg="warning" text="dark">low</Badge>}
+                            <td className="text-right">
+                              {available} {low && <Badge bg="warning">low</Badge>}
                             </td>
-                            <td className="text-end">{inUse}</td>
-                            <td className="text-end">{total}</td>
+                            <td className="text-right">{inUse}</td>
+                            <td className="text-right">{total}</td>
                           </>
                         ) : (
-                          <td className="text-end">
+                          <td className="text-right">
                             {available} {it.unit}{' '}
-                            {low && <Badge bg="warning" text="dark">low</Badge>}
+                            {low && <Badge bg="warning">low</Badge>}
                           </td>
                         )}
-                        <td className="text-nowrap text-xs text-[color:var(--sv-muted)]">
+                        <td className="whitespace-nowrap text-xs text-muted">
                           {fmtDate(it.created)}
                         </td>
-                        <td className="text-muted small">
+                        <td className="text-xs text-muted">
                           {it.last_receptionist?.name ?? '—'}
                         </td>
-                        <td className="text-end text-nowrap">
+                        <td className="whitespace-nowrap text-right">
                           {canManage && (
-                            <Button size="sm" variant="outline-primary" className="me-1"
+                            <Button size="sm" variant="outline-primary" className="mr-1"
                               disabled={pending !== null}
                               onClick={() => { setEditTarget(it); setModal('item') }}>Edit</Button>
                           )}
                           {canManage && (
-                            <Button size="sm" variant="outline-danger" className="me-1"
+                            <Button size="sm" variant="outline-danger" className="mr-1"
                               disabled={pending !== null}
                               onClick={() => doDeleteItem(it)}>
                               {pending === `item-${it.id}` ? <Spinner size="sm" /> : 'Delete'}
                             </Button>
                           )}
                           {canManage && (reusable ? (
-                            <ButtonGroup size="sm">
+                            <ButtonGroup className="inline-flex align-middle">
                               {Object.entries(REUSABLE_ACTIONS).map(([key, a]) => (
-                                <Button key={key} variant={a.variant} onClick={() => openMove(it, key)}>
+                                <Button key={key} size="sm" variant={a.variant} onClick={() => openMove(it, key)}>
                                   {a.label}
                                 </Button>
                               ))}
                             </ButtonGroup>
                           ) : (
-                            <ButtonGroup size="sm">
-                              <Button variant="outline-success" onClick={() => openMove(it, 'in')}>In</Button>
-                              <Button variant="outline-danger" onClick={() => openMove(it, 'out')}>Out</Button>
+                            <ButtonGroup className="inline-flex align-middle">
+                              <Button size="sm" variant="outline-success" onClick={() => openMove(it, 'in')}>In</Button>
+                              <Button size="sm" variant="outline-danger" onClick={() => openMove(it, 'out')}>Out</Button>
                             </ButtonGroup>
                           ))}
                         </td>
@@ -236,35 +236,35 @@ export default function Inventory() {
                 </tbody>
               </Table>
             </Card>
-          </Col>
+          </div>
 
-          <Col lg={4}>
+          <div className="lg:col-span-4">
             <Card className="shadow-sm">
-              <Card.Header className="fw-semibold">Recent movements</Card.Header>
-              <Card.Body className="p-0" style={{ maxHeight: 460, overflowY: 'auto' }}>
+              <Card.Header>Recent movements</Card.Header>
+              <Card.Body className="max-h-[460px] overflow-y-auto p-0">
                 {movements.length === 0 ? (
-                  <p className="text-muted small p-3 mb-0">No movements yet.</p>
+                  <p className="mb-0 p-4 text-sm text-muted">No movements yet.</p>
                 ) : (
-                  <ul className="list-group list-group-flush">
+                  <ul className="divide-y divide-line">
                     {movements.map((m) => (
-                      <li key={m.id} className="list-group-item py-2.5">
+                      <li key={m.id} className="px-4 py-2.5">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div className="text-sm font-semibold truncate">{m.inventory_item?.name}</div>
+                            <div className="truncate text-sm font-semibold">{m.inventory_item?.name}</div>
                             {m.note && (
-                              <div className="mt-0.5 inline-block rounded-md bg-[color:var(--sv-accent-soft)] px-2 py-0.5 text-xs text-[color:var(--sv-accent)]">
+                              <div className="mt-0.5 inline-block rounded-md bg-accent-soft px-2 py-0.5 text-xs text-accent">
                                 {m.note}
                               </div>
                             )}
-                            <div className="mt-0.5 text-xs text-[color:var(--sv-muted)]">
+                            <div className="mt-0.5 text-xs text-muted">
                               {m.receptionist?.name} · {m.reason ?? 'movement'}
                             </div>
                           </div>
-                          <div className="shrink-0 text-end">
+                          <div className="shrink-0 text-right">
                             <Badge bg={m.direction === 'in' ? 'success' : 'danger'}>
                               {m.direction === 'in' ? '+' : '−'}{Number(m.quantity)}
                             </Badge>
-                            <div className="mt-1 text-[11px] leading-tight text-[color:var(--sv-muted)] whitespace-nowrap">
+                            <div className="mt-1 whitespace-nowrap text-[11px] leading-tight text-muted">
                               {fmtDateTime(m.created)}
                             </div>
                           </div>
@@ -275,8 +275,8 @@ export default function Inventory() {
                 )}
               </Card.Body>
             </Card>
-          </Col>
-        </Row>
+          </div>
+        </div>
       )}
 
       {modal === 'category' && (
@@ -329,7 +329,7 @@ function CategoryModal({ propertyId, onClose, onSaved }) {
         <Modal.Header closeButton><Modal.Title>New category</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
           </Form.Group>
@@ -374,17 +374,17 @@ function CategoriesModal({ categories, items, onClose, onChanged }) {
       <Modal.Body>
         {err && <Alert variant="danger">{err}</Alert>}
         {categories.length === 0 ? (
-          <p className="text-muted mb-0">No categories yet.</p>
+          <p className="mb-0 text-muted">No categories yet.</p>
         ) : (
-          <ul className="list-group list-group-flush">
+          <ul className="divide-y divide-line">
             {categories.map((c) => {
               const used = countFor(c.id)
               return (
-                <li key={c.id} className="list-group-item d-flex justify-content-between align-items-center px-0">
+                <li key={c.id} className="flex items-center justify-between py-3">
                   <span>
-                    <span className="fw-semibold">{c.name}</span>
-                    <span className="text-muted small ms-2">{c.kind?.replace('_', ' ')}</span>
-                    {used > 0 && <span className="text-muted small ms-2">· {used} item(s)</span>}
+                    <span className="font-semibold">{c.name}</span>
+                    <span className="ml-2 text-sm text-muted">{c.kind?.replace('_', ' ')}</span>
+                    {used > 0 && <span className="ml-2 text-sm text-muted">· {used} item(s)</span>}
                   </span>
                   <Button size="sm" variant="outline-danger" disabled={busyId !== null || used > 0}
                     title={used > 0 ? 'Move or delete its items first' : 'Delete category'}
@@ -433,46 +433,46 @@ function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onS
         <Modal.Header closeButton><Modal.Title>{editing ? 'Edit item' : 'New item'}</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Type</Form.Label>
             <Form.Select value={form.tracking_type} onChange={set('tracking_type')}>
               <option value="consumable">Consumable (depletes when used)</option>
               <option value="reusable">Reusable (issued out & returned)</option>
             </Form.Select>
             {typeChanged && (
-              <Form.Text className="text-warning">
+              <Form.Text className="text-amber-600">
                 {reusable
                   ? 'Switching to reusable: current on-hand becomes the owned total.'
                   : 'Switching to consumable: the owned-total tracking is dropped.'}
               </Form.Text>
             )}
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Category</Form.Label>
             <Form.Select value={form.inventory_category_id} onChange={set('inventory_category_id')} required>
               {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Form.Select>
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus />
           </Form.Group>
-          <Row>
-            <Col><Form.Group className="mb-3">
+          <div className={`grid gap-x-6 ${editing ? 'grid-cols-2' : 'grid-cols-3'}`}>
+            <Form.Group className="mb-4">
               <Form.Label>Unit</Form.Label>
               <Form.Control value={form.unit} onChange={set('unit')} />
-            </Form.Group></Col>
-            <Col><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4">
               <Form.Label>Reorder level</Form.Label>
               <Form.Control type="number" min={0} value={form.reorder_level} onChange={set('reorder_level')} />
-            </Form.Group></Col>
+            </Form.Group>
             {!editing && (
-              <Col><Form.Group className="mb-3">
+              <Form.Group className="mb-4">
                 <Form.Label>{reusable ? 'Units owned' : 'Opening qty'}</Form.Label>
                 <Form.Control type="number" min={0} value={form.quantity} onChange={set('quantity')} />
-              </Form.Group></Col>
+              </Form.Group>
             )}
-          </Row>
+          </div>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -517,13 +517,13 @@ function MoveModal({ propertyId, target, onClose, onSaved }) {
         </Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <p className="text-muted small">
+          <p className="text-sm text-muted">
             {reusable
               ? `Available: ${available} · In use: ${inUse} · Total owned: ${total}.`
               : `On hand: ${available} ${item.unit}.`}{' '}
             This movement is recorded against you.
           </p>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Quantity</Form.Label>
             <Form.Control
               type="number" min={1} value={quantity}
@@ -531,8 +531,8 @@ function MoveModal({ propertyId, target, onClose, onSaved }) {
             />
           </Form.Group>
           {isAddingStock && (
-            <Form.Group className="mb-3">
-              <Form.Label>Details of what was added <span className="text-muted">(optional)</span></Form.Label>
+            <Form.Group className="mb-4">
+              <Form.Label>Details of what was added <span className="font-normal text-muted">(optional)</span></Form.Label>
               <Form.Control
                 value={note} onChange={(e) => setNote(e.target.value)}
                 placeholder="e.g. hotdog, chorizo — 2 packs each"

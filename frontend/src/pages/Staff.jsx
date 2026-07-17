@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Card, Table, Button, Badge, Modal, Form, Alert, Spinner,
-} from 'react-bootstrap'
+} from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
@@ -61,9 +61,9 @@ export default function Staff() {
 
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="h3 fw-bold mb-0">Staff</h1>
+          <h1 className="mb-0 text-2xl font-bold">Staff</h1>
           <small className="text-muted">
             {role === 'owner'
               ? 'Add admins and receptionists for the selected property.'
@@ -79,20 +79,20 @@ export default function Staff() {
         <SkeletonTable rows={5} />
       ) : (
         <Card className="shadow-sm">
-          <Table responsive hover className="mb-0 align-middle">
+          <Table hover>
             <thead>
               <tr>
                 <th>Name</th><th>Email</th><th>Role</th><th>Status</th>
-                <th className="text-end">Actions</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {staff.length === 0 && (
-                <tr><td colSpan={5} className="text-center text-muted py-4">No staff yet.</td></tr>
+                <tr><td colSpan={5} className="py-6 text-center text-muted">No staff yet.</td></tr>
               )}
               {staff.map((u) => (
                 <tr key={u.id} className={u.is_active ? '' : 'text-muted'}>
-                  <td className="fw-semibold">{u.name}</td>
+                  <td className="font-semibold">{u.name}</td>
                   <td>{u.email}</td>
                   <td><Badge bg={ROLE_VARIANT[u.role] ?? 'secondary'}>{u.role}</Badge></td>
                   <td>
@@ -100,9 +100,9 @@ export default function Staff() {
                       ? <Badge bg="success">active</Badge>
                       : <Badge bg="secondary">inactive</Badge>}
                   </td>
-                  <td className="text-end">
+                  <td className="whitespace-nowrap text-right">
                     {canSetPassword(u) && (
-                      <Button size="sm" variant="outline-secondary" className="me-2"
+                      <Button size="sm" variant="outline-secondary" className="mr-2"
                         onClick={() => setModal({ type: 'reset', user: u, self: u.id === user?.id })}>
                         {u.id === user?.id ? 'Change password' : 'Reset password'}
                       </Button>
@@ -162,17 +162,17 @@ function AddStaffModal({ role, propertyId, onClose, onSaved }) {
         <Modal.Header closeButton><Modal.Title>Add staff</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Role</Form.Label>
             <Form.Select value={form.role} onChange={set('role')} disabled={allowedRoles.length === 1}>
               {allowedRoles.map((r) => <option key={r} value={r}>{r}</option>)}
             </Form.Select>
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus />
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Email</Form.Label>
             <Form.Control type="email" value={form.email} onChange={set('email')} required />
           </Form.Group>

@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Row, Col, Card, Table, Button, Badge, Modal, Form, InputGroup, Alert, Spinner, ListGroup,
-} from 'react-bootstrap'
+  Card, Table, Button, Badge, Modal, Form, InputGroup, Alert, Spinner, ListGroup,
+} from '../components/ui'
 import { useProperty } from '../context/PropertyContext'
 import { listGuests, guestStats, getGuest, createGuest, updateGuest, matchGuests } from '../api/guests'
 import { SkeletonTable, Skeleton } from '../components/Skeleton'
 
 const TYPE_VARIANT = { local: 'info', foreign: 'warning' }
+// Stat-card number tint per card variant.
+const VALUE_COLOR = {
+  dark: 'text-gray-900',
+  info: 'text-sky-600',
+  warning: 'text-amber-600',
+  success: 'text-emerald-600',
+}
 
 export default function Guests() {
   const { propertyId } = useProperty()
@@ -53,23 +60,23 @@ export default function Guests() {
 
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h1 className="h3 fw-bold mb-0">Guests</h1>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="mb-0 text-2xl font-bold">Guests</h1>
         <Button onClick={() => setModal('add')}>Add guest</Button>
       </div>
 
       {error && <Alert variant="danger">{error}</Alert>}
 
       {/* total/local/foreign are today's registrations — they reset to 0 each day. */}
-      <Row className="g-3 mb-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total guests today" value={stats.total} variant="dark" />
         <StatCard label="Local today" value={stats.local} variant="info" />
         <StatCard label="Foreign today" value={stats.foreign} variant="warning" />
         <StatCard label="Currently in-house" value={stats.inHouse} variant="success" />
-      </Row>
+      </div>
 
       <Card className="shadow-sm">
-        <Card.Header className="d-flex gap-2 flex-wrap align-items-center">
+        <Card.Header className="flex flex-wrap items-center gap-2 px-4 py-3">
           <InputGroup style={{ maxWidth: 280 }}>
             <InputGroup.Text>Search</InputGroup.Text>
             <Form.Control value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Guest name" />
@@ -79,29 +86,29 @@ export default function Guests() {
             <option value="local">Local</option>
             <option value="foreign">Foreign</option>
           </Form.Select>
-          <span className="text-muted small ms-auto">{filtered.length} shown</span>
+          <span className="ml-auto text-sm font-normal text-muted">{filtered.length} shown</span>
         </Card.Header>
 
         {loading ? (
           <SkeletonTable rows={6} />
         ) : (
-          <Table responsive hover className="mb-0 align-middle">
+          <Table hover>
             <thead>
               <tr>
                 <th>Name</th><th>Type</th><th>Nationality</th><th>Contact</th>
-                <th className="text-end">Actions</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={5} className="text-center text-muted py-4">No guests found.</td></tr>
+                <tr><td colSpan={5} className="py-6 text-center text-muted">No guests found.</td></tr>
               )}
               {filtered.map((g) => (
                 <tr key={g.id}>
-                  <td className="fw-semibold">{g.full_name}</td>
+                  <td className="font-semibold">{g.full_name}</td>
                   <td><Badge bg={TYPE_VARIANT[g.guest_type]}>{g.guest_type}</Badge></td>
                   <td>{g.nationality ?? '—'}</td>
-                  <td className="small">
+                  <td className="text-xs">
                     {g.contact_number || g.email ? (
                       <>
                         {g.contact_number && <div>{g.contact_number}</div>}
@@ -109,8 +116,8 @@ export default function Guests() {
                       </>
                     ) : '—'}
                   </td>
-                  <td className="text-end text-nowrap">
-                    <Button size="sm" variant="outline-secondary" className="me-1"
+                  <td className="whitespace-nowrap text-right">
+                    <Button size="sm" variant="outline-secondary" className="mr-1"
                       onClick={() => setModal({ type: 'view', id: g.id })}>History</Button>
                     <Button size="sm" variant="outline-primary"
                       onClick={() => setModal({ type: 'edit', guest: g })}>Edit</Button>
@@ -139,14 +146,12 @@ export default function Guests() {
 
 function StatCard({ label, value, variant }) {
   return (
-    <Col xs={6} lg={3}>
-      <Card className="shadow-sm h-100">
-        <Card.Body>
-          <div className="text-muted small">{label}</div>
-          <div className={`fs-2 fw-bold text-${variant}`}>{value}</div>
-        </Card.Body>
-      </Card>
-    </Col>
+    <Card className="h-full shadow-sm">
+      <Card.Body>
+        <div className="text-sm text-muted">{label}</div>
+        <div className={`text-3xl font-bold ${VALUE_COLOR[variant] ?? ''}`}>{value}</div>
+      </Card.Body>
+    </Card>
   )
 }
 
@@ -195,19 +200,19 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
 
           {duplicates?.length > 0 && (
             <Alert variant="warning">
-              <div className="fw-semibold mb-1">A matching guest already exists</div>
-              <ListGroup variant="flush" className="mb-2">
+              <div className="mb-1 font-semibold">A matching guest already exists</div>
+              <ListGroup className="mb-2">
                 {duplicates.map((d) => (
-                  <ListGroup.Item key={d.id} className="px-0 py-1 bg-transparent">
+                  <ListGroup.Item key={d.id} className="bg-transparent px-0 py-1">
                     {d.full_name}
-                    <span className="text-muted small ms-2">
+                    <span className="ml-2 text-xs text-muted">
                       {[d.contact_number, d.email].filter(Boolean).join(' · ')}
                     </span>
                   </ListGroup.Item>
                 ))}
               </ListGroup>
-              <div className="small mb-2">Reuse the existing guest, or create a separate record anyway.</div>
-              <Button size="sm" variant="outline-secondary" className="me-2" onClick={onClose}>
+              <div className="mb-2 text-xs">Reuse the existing guest, or create a separate record anyway.</div>
+              <Button size="sm" variant="outline-secondary" className="mr-2" onClick={onClose}>
                 Keep existing
               </Button>
               <Button size="sm" variant="warning" disabled={busy} onClick={() => save(true)}>
@@ -216,33 +221,33 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
             </Alert>
           )}
 
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Full name</Form.Label>
             <Form.Control value={form.full_name} onChange={set('full_name')} required autoFocus />
           </Form.Group>
-          <Row>
-            <Col><Form.Group className="mb-3">
+          <div className="grid grid-cols-2 gap-x-6">
+            <Form.Group className="mb-4">
               <Form.Label>Type</Form.Label>
               <Form.Select value={form.guest_type} onChange={set('guest_type')}>
                 <option value="local">Local</option>
                 <option value="foreign">Foreign</option>
               </Form.Select>
-            </Form.Group></Col>
-            <Col><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4">
               <Form.Label>Nationality</Form.Label>
               <Form.Control value={form.nationality} onChange={set('nationality')} placeholder="Optional" />
-            </Form.Group></Col>
-          </Row>
-          <Row>
-            <Col md={6}><Form.Group className="mb-3">
+            </Form.Group>
+          </div>
+          <div className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+            <Form.Group className="mb-4">
               <Form.Label>Contact number</Form.Label>
               <Form.Control value={form.contact_number} onChange={set('contact_number')} placeholder="Optional" />
-            </Form.Group></Col>
-            <Col md={6}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4">
               <Form.Label>Email</Form.Label>
               <Form.Control type="email" value={form.email} onChange={set('email')} placeholder="Optional" />
-            </Form.Group></Col>
-          </Row>
+            </Form.Group>
+          </div>
           <Form.Group>
             <Form.Label>Address</Form.Label>
             <Form.Control value={form.address} onChange={set('address')} placeholder="Optional" />
@@ -281,15 +286,15 @@ function HistoryModal({ id, onClose }) {
           </div>
         )}
         {guest && guest.reservations.length === 0 && (
-          <p className="text-muted mb-0">No reservations on record.</p>
+          <p className="mb-0 text-muted">No reservations on record.</p>
         )}
         {guest && guest.reservations.length > 0 && (
-          <ListGroup variant="flush">
+          <ListGroup>
             {guest.reservations.map((r) => (
-              <ListGroup.Item key={r.id} className="d-flex justify-content-between">
+              <ListGroup.Item key={r.id} className="flex justify-between px-0 py-3">
                 <span>
                   Room {r.room?.room_number ?? '—'}
-                  <span className="text-muted small ms-2">{r.check_in} → {r.check_out}</span>
+                  <span className="ml-2 text-xs text-muted">{r.check_in} → {r.check_out}</span>
                 </span>
                 <Badge bg="secondary">{r.status.replace('_', ' ')}</Badge>
               </ListGroup.Item>

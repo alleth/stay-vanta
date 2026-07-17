@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Container, Card, Button } from 'react-bootstrap'
+import { Card, Button } from '../components/ui'
 
 // Public page (no auth) — see the /privacy route in App.jsx. Linked from the
 // login screen and the app footer.
@@ -10,8 +10,8 @@ const LAST_UPDATED = 'June 22, 2026'
 
 function Section({ title, children }) {
   return (
-    <section className="mb-4">
-      <h2 className="h5 fw-bold">{title}</h2>
+    <section className="mb-6">
+      <h2 className="mb-2 text-lg font-bold">{title}</h2>
       {children}
     </section>
   )
@@ -19,18 +19,18 @@ function Section({ title, children }) {
 
 export default function PrivacyPolicy() {
   return (
-    <Container className="py-5" style={{ maxWidth: 820 }}>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <Link to="/" className="sv-serif fw-bold fs-4 text-decoration-none">
+    <div className="mx-auto w-full max-w-[820px] px-4 py-12">
+      <div className="mb-6 flex items-center justify-between">
+        <Link to="/" className="sv-serif text-2xl font-bold text-body no-underline">
           Stay<span className="sv-accent">Vanta</span>
         </Link>
         <Button as={Link} to="/" variant="outline-secondary" size="sm">Back</Button>
       </div>
 
       <Card className="shadow-sm">
-        <Card.Body className="p-4 p-md-5">
-          <h1 className="h3 fw-bold mb-1">Privacy Policy</h1>
-          <p className="text-muted small mb-4">Last updated: {LAST_UPDATED}</p>
+        <Card.Body className="p-6 md:p-12">
+          <h1 className="mb-1 text-2xl font-bold">Privacy Policy</h1>
+          <p className="mb-6 text-sm text-muted">Last updated: {LAST_UPDATED}</p>
 
           <p>
             StayVanta is an all-in-one hotel &amp; resort management platform. This Privacy Policy
@@ -46,7 +46,7 @@ export default function PrivacyPolicy() {
           </p>
 
           <Section title="Information we handle">
-            <ul>
+            <ul className="mb-4 list-disc space-y-1 pl-5">
               <li>
                 <strong>Guest information</strong> entered by Property staff: name, nationality,
                 contact number, email address, postal address, and stay details (reservations,
@@ -76,7 +76,7 @@ export default function PrivacyPolicy() {
           </Section>
 
           <Section title="How information is used">
-            <ul className="mb-0">
+            <ul className="mb-0 list-disc space-y-1 pl-5">
               <li>To provide and operate the platform&rsquo;s features for the Property.</li>
               <li>To manage reservations, guest records, inventory, food orders, and invoicing.</li>
               <li>
@@ -90,7 +90,7 @@ export default function PrivacyPolicy() {
 
           <Section title="How information is shared">
             <p>We do not sell personal information. Information may be shared with:</p>
-            <ul className="mb-0">
+            <ul className="mb-0 list-disc space-y-1 pl-5">
               <li>
                 <strong>Authorized staff of the relevant Property</strong>, according to their role
                 and the Property they are assigned to.
@@ -171,9 +171,9 @@ export default function PrivacyPolicy() {
         </Card.Body>
       </Card>
 
-      <p className="text-center text-muted small mt-4 mb-0">
-        &copy; {new Date().getFullYear()} StayVanta · <Link to="/terms" className="text-decoration-none">Terms of Service</Link>
+      <p className="mt-6 mb-0 text-center text-sm text-muted">
+        &copy; {new Date().getFullYear()} StayVanta · <Link to="/terms" className="text-muted no-underline hover:text-body">Terms of Service</Link>
       </p>
-    </Container>
+    </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Row, Col, Alert, Spinner, ListGroup,
-} from 'react-bootstrap'
+  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ListGroup,
+} from '../components/ui'
 import { useProperty } from '../context/PropertyContext'
 import { useAuth } from '../context/AuthContext'
 import { useSubmit } from '../hooks/useSubmit'
@@ -58,6 +58,15 @@ function resolveBaseRate(rates, roomId) {
 const roomLabel = (r) => `Room ${r.room_number} — ${r.room_type ?? 'Room'}`
 const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning' }
 const RES_VARIANT = { booked: 'secondary', checked_in: 'primary', checked_out: 'success', cancelled: 'dark' }
+// Stat-card number tint per card variant.
+const VALUE_COLOR = {
+  success: 'text-emerald-600',
+  danger: 'text-red-600',
+  warning: 'text-amber-600',
+  primary: 'text-ink',
+  secondary: 'text-muted',
+  dark: 'text-gray-900',
+}
 
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : null)
 
@@ -284,7 +293,7 @@ export default function FrontDesk() {
 
   return (
     <div>
-      <h1 className="h3 fw-bold mb-3">Front Desk</h1>
+      <h1 className="mb-4 text-2xl font-bold">Front Desk</h1>
       {error && <Alert variant="danger" onClose={() => setError(null)} dismissible>{error}</Alert>}
 
       {loading ? (
@@ -294,21 +303,21 @@ export default function FrontDesk() {
         </>
       ) : (
         <>
-        <Row className="g-3 mb-3">
+        <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <SummaryCard label="Available rooms" value={counts.available} variant="success" />
           <SummaryCard label="Occupied rooms" value={counts.occupied} variant="danger" />
           <SummaryCard label="Maintenance" value={counts.maintenance} variant="warning" />
           <SummaryCard label="Reservations" value={counts.reservations} variant="primary" />
           <SummaryCard label="Checked out today" value={counts.checkedOutToday} variant="secondary" />
           <SummaryCard label="Cancelled today" value={counts.cancelledToday} variant="dark" />
-        </Row>
+        </div>
 
-        <Tabs defaultActiveKey="reservations" className="mb-3">
+        <Tabs defaultActiveKey="reservations" className="mb-4">
           {/* ---- Reservations ---- */}
           <Tab eventKey="reservations" title={`Reservations (${visibleReservations.length})`}>
-            <div className="d-flex justify-content-between align-items-center mb-2 gap-2 flex-wrap">
-              <Form.Group className="d-flex align-items-center gap-2 mb-0">
-                <Form.Label className="mb-0 small text-muted">Show</Form.Label>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <Form.Group className="mb-0 flex items-center gap-2">
+                <Form.Label className="mb-0 text-muted">Show</Form.Label>
                 <Form.Select size="sm" value={resFilter} style={{ width: 'auto' }}
                   onChange={(e) => setResFilter(e.target.value)}>
                   <option value="today">Today&apos;s activity</option>
@@ -321,57 +330,57 @@ export default function FrontDesk() {
               </Button>
             </div>
             <Card className="shadow-sm">
-              <Table responsive hover className="mb-0 align-middle">
+              <Table hover>
                 <thead>
                   <tr>
                     <th>Guest</th><th>Room</th><th>Dates</th><th>Source</th>
-                    <th className="text-end">Total</th><th>Status</th>
-                    <th>Logs</th><th>Last receptionist</th><th className="text-end">Actions</th>
+                    <th className="text-right">Total</th><th>Status</th>
+                    <th>Logs</th><th>Last receptionist</th><th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleReservations.length === 0 && (
-                    <tr><td colSpan={9} className="text-center text-muted py-4">No reservations to show.</td></tr>
+                    <tr><td colSpan={9} className="py-6 text-center text-muted">No reservations to show.</td></tr>
                   )}
                   {visibleReservations.map((r) => (
                     <tr key={r.id} className={r.status === 'cancelled' ? 'text-muted' : undefined}>
-                      <td className="fw-semibold">
+                      <td className="font-semibold">
                         {r.guest?.full_name ?? '—'}{' '}
                         {r.guest && (
-                          <Badge bg="light" text="dark" className="fw-normal">{r.guest.guest_type}</Badge>
+                          <Badge bg="light" className="font-normal">{r.guest.guest_type}</Badge>
                         )}
                       </td>
                       <td>{r.room?.room_number ?? '—'}</td>
-                      <td className="small">{r.check_in} → {r.check_out}</td>
-                      <td className="small">
+                      <td className="text-xs">{r.check_in} → {r.check_out}</td>
+                      <td className="text-xs">
                         {SOURCES.find((s) => s[0] === r.source)?.[1] ?? r.source}
                         {r.discount_type !== 'none' && (
-                          <Badge bg="info" className="ms-1">{r.discount_type}</Badge>
+                          <Badge bg="info" className="ml-1">{r.discount_type}</Badge>
                         )}
                       </td>
-                      <td className="text-end">
+                      <td className="text-right">
                         {formatMoney(r.quote?.total)}
                         {Number(r.downpayment) > 0 && (
-                          <div className="small text-muted text-nowrap">DP {formatMoney(r.downpayment)}</div>
+                          <div className="whitespace-nowrap text-xs text-muted">DP {formatMoney(r.downpayment)}</div>
                         )}
                       </td>
                       <td><Badge bg={RES_VARIANT[r.status]}>{r.status.replace('_', ' ')}</Badge></td>
-                      <td className="small text-muted" style={{ minWidth: 170 }}>
+                      <td className="min-w-[170px] text-xs text-muted">
                         <div>Booked: {fmtDateTime(r.created) ?? '—'}</div>
                         {r.checked_in_at && <div>In: {fmtDateTime(r.checked_in_at)}</div>}
                         {r.checked_out_at && <div>Out: {fmtDateTime(r.checked_out_at)}</div>}
                       </td>
-                      <td className="small text-muted">{r.receptionist?.name ?? '—'}</td>
-                      <td className="text-end text-nowrap">
+                      <td className="text-xs text-muted">{r.receptionist?.name ?? '—'}</td>
+                      <td className="whitespace-nowrap text-right">
                         {r.status === 'booked' && (
-                          <Button size="sm" variant="outline-primary" className="me-1"
+                          <Button size="sm" variant="outline-primary" className="mr-1"
                             disabled={pending !== null}
                             onClick={() => onTransition(r, 'check-in')}>
                             {pending === `check-in-${r.id}` ? <Spinner size="sm" /> : 'Check in'}
                           </Button>
                         )}
                         {r.status === 'checked_in' && (
-                          <Button size="sm" variant="outline-success" className="me-1"
+                          <Button size="sm" variant="outline-success" className="mr-1"
                             disabled={pending !== null}
                             onClick={() => onTransition(r, 'check-out')}>
                             {pending === `check-out-${r.id}` ? <Spinner size="sm" /> : 'Check out'}
@@ -395,71 +404,69 @@ export default function FrontDesk() {
           {/* ---- Rooms ---- */}
           <Tab eventKey="rooms" title={`Rooms (${rooms.length})`}>
             {canManageRooms && (
-              <div className="d-flex justify-content-end mb-2">
+              <div className="mb-2 flex justify-end">
                 <Button onClick={() => setModal('room')}>Add room</Button>
               </div>
             )}
-            <Row className="g-3">
-              {rooms.length === 0 && <Col><p className="text-muted">No rooms yet.</p></Col>}
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+              {rooms.length === 0 && <p className="text-muted">No rooms yet.</p>}
               {rooms.map((room) => (
-                <Col key={room.id} xs={6} md={4} lg={3}>
-                  <Card className="shadow-sm h-100">
-                    <Card.Body>
-                      <div className="d-flex justify-content-between align-items-start">
-                        <div className="fs-4 fw-bold">{room.room_number}</div>
-                        <Badge bg={ROOM_VARIANT[room.status]}>{room.status}</Badge>
-                      </div>
-                      <div className="text-muted small mb-2">{room.room_type ?? 'Room'}</div>
-                      <Form.Select size="sm" value={room.status} disabled={pending !== null}
-                        onChange={(e) => onRoomStatusPick(room, e.target.value)}>
-                        {statusOptions(room.status).map((s) => (
-                          <option key={s} value={s}>
-                            {s === 'occupied' && room.status === 'available' ? 'occupied → new booking' : s}
-                          </option>
-                        ))}
-                      </Form.Select>
-                      {canManageRooms && (
-                        <Button size="sm" variant="outline-danger" className="w-100 mt-2"
-                          disabled={pending !== null}
-                          onClick={() => doDeleteRoom(room)}>
-                          {pending === `room-${room.id}` ? <Spinner size="sm" /> : 'Delete room'}
-                        </Button>
-                      )}
-                    </Card.Body>
-                  </Card>
-                </Col>
+                <Card key={room.id} className="h-full shadow-sm">
+                  <Card.Body>
+                    <div className="flex items-start justify-between">
+                      <div className="text-2xl font-bold">{room.room_number}</div>
+                      <Badge bg={ROOM_VARIANT[room.status]}>{room.status}</Badge>
+                    </div>
+                    <div className="mb-2 text-sm text-muted">{room.room_type ?? 'Room'}</div>
+                    <Form.Select size="sm" value={room.status} disabled={pending !== null}
+                      onChange={(e) => onRoomStatusPick(room, e.target.value)}>
+                      {statusOptions(room.status).map((s) => (
+                        <option key={s} value={s}>
+                          {s === 'occupied' && room.status === 'available' ? 'occupied → new booking' : s}
+                        </option>
+                      ))}
+                    </Form.Select>
+                    {canManageRooms && (
+                      <Button size="sm" variant="outline-danger" className="mt-2 w-full"
+                        disabled={pending !== null}
+                        onClick={() => doDeleteRoom(room)}>
+                        {pending === `room-${room.id}` ? <Spinner size="sm" /> : 'Delete room'}
+                      </Button>
+                    )}
+                  </Card.Body>
+                </Card>
               ))}
-            </Row>
+            </div>
           </Tab>
 
           {/* ---- Rates ---- */}
           <Tab eventKey="rates" title={`Rates (${rates.length})`}>
             {canManageRooms && (
-              <div className="d-flex justify-content-end mb-2">
+              <div className="mb-2 flex justify-end">
                 <Button onClick={() => setModal({ type: 'rate' })}>Add rate</Button>
               </div>
             )}
             <Card className="shadow-sm">
-              <Table responsive hover className="mb-0 align-middle">
+              <Table hover>
                 <thead>
                   <tr>
                     <th>Name</th><th>Amenities &amp; bed</th><th>Applies to</th>
-                    <th className="text-end">Nightly rate</th>
-                    {canManageRooms && <th className="text-end">Actions</th>}
+                    <th className="text-right">Nightly rate</th>
+                    {canManageRooms && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rates.length === 0 && (
-                    <tr><td colSpan={canManageRooms ? 5 : 4} className="text-center text-muted py-4">No rates yet.</td></tr>
+                    <tr><td colSpan={canManageRooms ? 5 : 4} className="py-6 text-center text-muted">No rates yet.</td></tr>
                   )}
                   {rates.map((rt) => (
                     <tr key={rt.id}>
-                      <td className="fw-semibold">{rt.name}</td>
-                      <td className="small text-muted" style={{ maxWidth: 320 }}>{rt.description || '—'}</td>
+                      <td className="font-semibold">{rt.name}</td>
+                      <td className="max-w-[320px] text-xs text-muted">{rt.description || '—'}</td>
                       <td>{rt.room ? `Room ${rt.room.room_number}` : 'All rooms'}</td>
-                      <td className="text-end">{formatMoney(rt.base_rate)}</td>
+                      <td className="text-right">{formatMoney(rt.base_rate)}</td>
                       {canManageRooms && (
-                        <td className="text-end">
+                        <td className="text-right">
                           <Button size="sm" variant="outline-primary"
                             onClick={() => setModal({ type: 'rate', rate: rt })}>Edit</Button>
                         </td>
@@ -474,30 +481,30 @@ export default function FrontDesk() {
           {/* ---- Promo Rates (OTA nightly prices; auto-fill the booking form) ---- */}
           <Tab eventKey="promo-rates" title={`Promo Rates (${promoRates.length})`}>
             {canManageRooms && (
-              <div className="d-flex justify-content-end mb-2">
+              <div className="mb-2 flex justify-end">
                 <Button onClick={() => setModal({ type: 'promo' })}>Add promo rate</Button>
               </div>
             )}
             <Card className="shadow-sm">
-              <Table responsive hover className="mb-0 align-middle">
+              <Table hover>
                 <thead>
                   <tr>
-                    <th>Source</th><th>Applies to</th><th className="text-end">Rate multiplier</th>
-                    {canManageRooms && <th className="text-end">Actions</th>}
+                    <th>Source</th><th>Applies to</th><th className="text-right">Rate multiplier</th>
+                    {canManageRooms && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {promoRates.length === 0 && (
-                    <tr><td colSpan={canManageRooms ? 4 : 3} className="text-center text-muted py-4">No promo rates yet.</td></tr>
+                    <tr><td colSpan={canManageRooms ? 4 : 3} className="py-6 text-center text-muted">No promo rates yet.</td></tr>
                   )}
                   {promoRates.map((pr) => (
                     <tr key={pr.id}>
-                      <td className="fw-semibold">{sourceLabel(pr.source)}</td>
+                      <td className="font-semibold">{sourceLabel(pr.source)}</td>
                       <td>{pr.room ? roomLabel(pr.room) : 'All rooms'}</td>
-                      <td className="text-end">×{Number(pr.multiplier)}</td>
+                      <td className="text-right">×{Number(pr.multiplier)}</td>
                       {canManageRooms && (
-                        <td className="text-end text-nowrap">
-                          <Button size="sm" variant="outline-primary" className="me-1"
+                        <td className="whitespace-nowrap text-right">
+                          <Button size="sm" variant="outline-primary" className="mr-1"
                             disabled={pending !== null}
                             onClick={() => setModal({ type: 'promo', promoRate: pr })}>Edit</Button>
                           <Button size="sm" variant="outline-danger"
@@ -512,7 +519,7 @@ export default function FrontDesk() {
                 </tbody>
               </Table>
             </Card>
-            <p className="text-muted small mt-2 mb-0">
+            <p className="mt-2 mb-0 text-sm text-muted">
               A promo rate is a <strong>multiple of the room&apos;s original rate</strong> — e.g. ×2
               doubles the nightly price for that OTA. When a reservation&apos;s <strong>Source</strong> is
               an OTA, the booking form computes original rate × multiplier automatically (a
@@ -523,31 +530,31 @@ export default function FrontDesk() {
 
           {/* ---- Calendar / availability by date ---- */}
           <Tab eventKey="calendar" title="Calendar">
-            <Card className="shadow-sm mb-3">
-              <Card.Body className="d-flex align-items-center gap-3 flex-wrap">
-                <Form.Group className="d-flex align-items-center gap-2 mb-0">
-                  <Form.Label className="mb-0 fw-semibold">Date</Form.Label>
+            <Card className="mb-4 shadow-sm">
+              <Card.Body className="flex flex-wrap items-center gap-4 p-4">
+                <Form.Group className="mb-0 flex items-center gap-2">
+                  <Form.Label className="mb-0 font-semibold">Date</Form.Label>
                   <Form.Control type="date" value={calDate} style={{ maxWidth: 190 }}
                     onChange={(e) => setCalDate(e.target.value)} />
                 </Form.Group>
-                <span className="text-muted small">
+                <span className="text-sm text-muted">
                   {availableOnDate.length} room(s) free · {reservationsOnDate.length} reservation(s) on this date
                 </span>
               </Card.Body>
             </Card>
-            <Row className="g-3">
-              <Col lg={5}>
-                <Card className="shadow-sm h-100">
-                  <Card.Header className="fw-semibold">Available rooms</Card.Header>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+              <div className="lg:col-span-5">
+                <Card className="h-full shadow-sm">
+                  <Card.Header>Available rooms</Card.Header>
                   {availableOnDate.length === 0 ? (
-                    <Card.Body><p className="text-muted mb-0">No rooms free on this date.</p></Card.Body>
+                    <Card.Body><p className="mb-0 text-muted">No rooms free on this date.</p></Card.Body>
                   ) : (
-                    <ListGroup variant="flush">
+                    <ListGroup>
                       {availableOnDate.map((r) => (
-                        <ListGroup.Item key={r.id} className="d-flex justify-content-between align-items-center">
+                        <ListGroup.Item key={r.id} className="flex items-center justify-between px-4 py-3">
                           <span>
-                            <span className="fw-semibold">{r.room_number}</span>
-                            <span className="text-muted small ms-2">{r.room_type ?? 'Room'}</span>
+                            <span className="font-semibold">{r.room_number}</span>
+                            <span className="ml-2 text-xs text-muted">{r.room_type ?? 'Room'}</span>
                           </span>
                           {calDate >= today && (
                             <Button size="sm" variant="outline-primary"
@@ -558,61 +565,61 @@ export default function FrontDesk() {
                     </ListGroup>
                   )}
                 </Card>
-              </Col>
-              <Col lg={7}>
-                <Card className="shadow-sm h-100">
-                  <Card.Header className="fw-semibold">Reservations on this date</Card.Header>
-                  <Table responsive hover className="mb-0 align-middle">
+              </div>
+              <div className="lg:col-span-7">
+                <Card className="h-full shadow-sm">
+                  <Card.Header>Reservations on this date</Card.Header>
+                  <Table hover>
                     <thead>
                       <tr><th>Guest</th><th>Room</th><th>Dates</th><th>Status</th></tr>
                     </thead>
                     <tbody>
                       {reservationsOnDate.length === 0 && (
-                        <tr><td colSpan={4} className="text-center text-muted py-4">No reservations on this date.</td></tr>
+                        <tr><td colSpan={4} className="py-6 text-center text-muted">No reservations on this date.</td></tr>
                       )}
                       {reservationsOnDate.map((r) => (
                         <tr key={r.id}>
-                          <td className="fw-semibold">{r.guest?.full_name ?? '—'}</td>
+                          <td className="font-semibold">{r.guest?.full_name ?? '—'}</td>
                           <td>{r.room?.room_number ?? '—'}</td>
-                          <td className="small">{r.check_in} → {r.check_out}</td>
+                          <td className="text-xs">{r.check_in} → {r.check_out}</td>
                           <td><Badge bg={RES_VARIANT[r.status]}>{r.status.replace('_', ' ')}</Badge></td>
                         </tr>
                       ))}
                     </tbody>
                   </Table>
                 </Card>
-              </Col>
-            </Row>
+              </div>
+            </div>
           </Tab>
 
           {/* ---- Extra Charges (admin/owner only) ---- */}
           {canManageRooms && (
             <Tab eventKey="charges" title="Extra Charges">
-              <div className="d-flex justify-content-end mb-2">
+              <div className="mb-2 flex justify-end">
                 <Button onClick={() => setModal({ type: 'charge' })}>Add charge</Button>
               </div>
               <Card className="shadow-sm">
-                <Table responsive hover className="mb-0 align-middle">
+                <Table hover>
                   <thead>
                     <tr>
-                      <th>Charge</th><th className="text-end">Amount</th><th>Status</th>
-                      <th className="text-end">Actions</th>
+                      <th>Charge</th><th className="text-right">Amount</th><th>Status</th>
+                      <th className="text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {extraCharges.length === 0 && (
-                      <tr><td colSpan={4} className="text-center text-muted py-4">No extra charges yet.</td></tr>
+                      <tr><td colSpan={4} className="py-6 text-center text-muted">No extra charges yet.</td></tr>
                     )}
                     {extraCharges.map((c) => (
                       <tr key={c.id}>
-                        <td className="fw-semibold">
+                        <td className="font-semibold">
                           {c.name}
-                          {c.code && <Badge bg="info" className="ms-2 fw-normal">built-in</Badge>}
+                          {c.code && <Badge bg="info" className="ml-2 font-normal">built-in</Badge>}
                         </td>
-                        <td className="text-end">{formatMoney(c.amount)}</td>
+                        <td className="text-right">{formatMoney(c.amount)}</td>
                         <td><Badge bg={c.is_active ? 'success' : 'secondary'}>{c.is_active ? 'active' : 'inactive'}</Badge></td>
-                        <td className="text-end text-nowrap">
-                          <Button size="sm" variant="outline-primary" className="me-1"
+                        <td className="whitespace-nowrap text-right">
+                          <Button size="sm" variant="outline-primary" className="mr-1"
                             disabled={pending !== null}
                             onClick={() => setModal({ type: 'charge', charge: c })}>Edit</Button>
                           {!c.code && (
@@ -628,7 +635,7 @@ export default function FrontDesk() {
                   </tbody>
                 </Table>
               </Card>
-              <p className="text-muted small mt-2 mb-0">
+              <p className="mt-2 mb-0 text-sm text-muted">
                 The <strong>Early check-in</strong> fee is billed automatically to the guest&apos;s invoice
                 when a receptionist checks them in before noon. Set it to 0 to disable.
               </p>
@@ -702,14 +709,12 @@ export default function FrontDesk() {
 
 function SummaryCard({ label, value, variant }) {
   return (
-    <Col xs={6} md={4} lg={2}>
-      <Card className="shadow-sm h-100">
-        <Card.Body>
-          <div className="text-muted small">{label}</div>
-          <div className={`fs-2 fw-bold text-${variant}`}>{value}</div>
-        </Card.Body>
-      </Card>
-    </Col>
+    <Card className="h-full shadow-sm">
+      <Card.Body>
+        <div className="text-sm text-muted">{label}</div>
+        <div className={`text-3xl font-bold ${VALUE_COLOR[variant] ?? ''}`}>{value}</div>
+      </Card.Body>
+    </Card>
   )
 }
 
@@ -815,8 +820,8 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
         <Modal.Header closeButton><Modal.Title>New reservation</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Row>
-            <Col md={6}><Form.Group className="mb-3">
+          <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
+            <Form.Group className="mb-4 md:col-span-6">
               <Form.Label>Room</Form.Label>
               <Form.Select value={form.room_id} onChange={set('room_id')} required>
                 {rooms.map((r) => (
@@ -826,61 +831,61 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
                   </option>
                 ))}
               </Form.Select>
-            </Form.Group></Col>
-            <Col md={3}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-3">
               <Form.Label>Check-in</Form.Label>
               <Form.Control type="date" value={form.check_in} onChange={set('check_in')}
                 min={todayStr()} required />
-            </Form.Group></Col>
-            <Col md={3}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-3">
               <Form.Label>Check-out</Form.Label>
               <Form.Control type="date" value={form.check_out} onChange={set('check_out')}
                 min={form.check_in || todayStr()} required />
-            </Form.Group></Col>
-          </Row>
-          <Row>
-            <Col md={4}><Form.Group className="mb-3">
+            </Form.Group>
+          </div>
+          <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
+            <Form.Group className="mb-4 md:col-span-4">
               <Form.Label>Source</Form.Label>
               <Form.Select value={form.source} onChange={set('source')}>
                 {SOURCES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
               </Form.Select>
-            </Form.Group></Col>
-            <Col md={4}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-4">
               <Form.Label>Discount</Form.Label>
               <Form.Select value={form.discount_type} onChange={set('discount_type')}>
                 <option value="none">None</option>
                 <option value="senior">Senior citizen (20%)</option>
                 <option value="pwd">PWD (20%)</option>
               </Form.Select>
-            </Form.Group></Col>
-            <Col md={2}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-2">
               <Form.Label>Promo rate</Form.Label>
               <Form.Control value={promoRate !== null ? formatMoney(promoRate) : ''}
                 disabled readOnly
                 placeholder={form.source === 'walk_in' ? '—' : 'Not set'} />
               {promoRate !== null && (
-                <Form.Text className="text-muted">
+                <Form.Text muted>
                   ×{multiplier} of {formatMoney(baseRate)} original rate
                 </Form.Text>
               )}
               {form.source !== 'walk_in' && multiplier === null && (
-                <Form.Text className="text-muted">
+                <Form.Text muted>
                   No {sourceLabel(form.source)} multiplier is set — the original room rate applies.
                 </Form.Text>
               )}
               {form.source !== 'walk_in' && multiplier !== null && baseRate <= 0 && (
-                <Form.Text className="text-muted">
+                <Form.Text muted>
                   This room has no rate yet — add one on the Rates tab first.
                 </Form.Text>
               )}
-            </Form.Group></Col>
-            <Col md={2}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-2">
               <Form.Label>Extra beds</Form.Label>
               <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
-            </Form.Group></Col>
-          </Row>
+            </Form.Group>
+          </div>
           {downpayment > 0 && (
-            <Alert variant="info" className="py-2 mb-3">
+            <Alert variant="info" className="mb-4 px-4 py-2">
               <strong>Advance booking</strong> — collect a downpayment of{' '}
               <strong>{formatMoney(downpayment)}</strong> (50% of the {formatMoney(estTotal)} total,
               promo rate and discount included). If the booking is later cancelled, 10% of the
@@ -888,8 +893,8 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
             </Alert>
           )}
           <hr />
-          <div className="d-flex justify-content-between align-items-center mb-2">
-            <span className="fw-semibold">Guest details</span>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-semibold">Guest details</span>
             {guestId && (
               <Badge bg="success">Using existing guest</Badge>
             )}
@@ -897,13 +902,13 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
 
           {duplicates?.length > 0 && (
             <Alert variant="warning">
-              <div className="fw-semibold mb-1">A matching guest already exists</div>
-              <ListGroup variant="flush" className="mb-2">
+              <div className="mb-1 font-semibold">A matching guest already exists</div>
+              <ListGroup className="mb-2">
                 {duplicates.map((d) => (
-                  <ListGroup.Item key={d.id} className="px-0 py-1 bg-transparent d-flex justify-content-between align-items-center">
+                  <ListGroup.Item key={d.id} className="flex items-center justify-between bg-transparent px-0 py-1">
                     <span>
                       {d.full_name}
-                      <span className="text-muted small ms-2">
+                      <span className="ml-2 text-xs text-muted">
                         {[d.contact_number, d.email].filter(Boolean).join(' · ')}
                       </span>
                     </span>
@@ -917,25 +922,24 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
             </Alert>
           )}
 
-          <Row>
-            <Col md={5}><Form.Group className="mb-3">
+          <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
+            <Form.Group className="mb-4 md:col-span-5">
               <Form.Label>Guest name</Form.Label>
-              <div className="position-relative">
+              <div className="relative">
                 <Form.Control value={form.guest_name} autoComplete="off"
                   onChange={(e) => { setGuestId(null); setShowSug(true); set('guest_name')(e) }}
                   onFocus={() => setShowSug(true)}
                   onBlur={() => setTimeout(() => setShowSug(false), 150)}
                   placeholder="Search a returning guest, or type a new name" />
                 {showSug && !guestId && suggestions.length > 0 && (
-                  <div className="position-absolute w-100 bg-white border rounded shadow-sm mt-1"
-                    style={{ zIndex: 5, maxHeight: 220, overflowY: 'auto' }}
+                  <div className="absolute z-10 mt-1 max-h-[220px] w-full overflow-y-auto rounded-lg border border-line bg-surface shadow-md"
                     onMouseDown={(e) => e.preventDefault()}>
                     {suggestions.map((g) => (
                       <button type="button" key={g.id}
-                        className="d-flex flex-column w-100 border-0 bg-transparent text-start px-3 py-2"
+                        className="flex w-full flex-col px-3 py-2 text-left hover:bg-subtle"
                         onClick={() => pickGuest(g)}>
-                        <span className="fw-semibold small">{g.full_name}</span>
-                        <span className="text-muted small">
+                        <span className="text-sm font-semibold">{g.full_name}</span>
+                        <span className="text-xs text-muted">
                           {[g.contact_number, g.email].filter(Boolean).join(' · ') || 'No contact on file'}
                         </span>
                       </button>
@@ -944,37 +948,37 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
                 )}
               </div>
               {guestId && (
-                <Form.Text className="text-muted">
+                <Form.Text muted>
                   Filling any blank field below completes this guest&apos;s record.
                 </Form.Text>
               )}
-            </Form.Group></Col>
-            <Col md={3}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-3">
               <Form.Label>Guest type</Form.Label>
               <Form.Select value={form.guest_type} onChange={set('guest_type')}>
                 <option value="local">Local</option>
                 <option value="foreign">Foreign</option>
               </Form.Select>
-            </Form.Group></Col>
-            <Col md={4}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-4">
               <Form.Label>Nationality</Form.Label>
               <Form.Control value={form.nationality} onChange={set('nationality')} placeholder="Optional" />
-            </Form.Group></Col>
-          </Row>
-          <Row>
-            <Col md={4}><Form.Group className="mb-3">
+            </Form.Group>
+          </div>
+          <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
+            <Form.Group className="mb-4 md:col-span-4">
               <Form.Label>Contact number</Form.Label>
               <Form.Control value={form.contact_number} onChange={set('contact_number')} placeholder="Optional" />
-            </Form.Group></Col>
-            <Col md={4}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-4">
               <Form.Label>Email</Form.Label>
               <Form.Control type="email" value={form.email} onChange={set('email')} placeholder="Optional" />
-            </Form.Group></Col>
-            <Col md={4}><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4 md:col-span-4">
               <Form.Label>Address</Form.Label>
               <Form.Control value={form.address} onChange={set('address')} placeholder="Optional" />
-            </Form.Group></Col>
-          </Row>
+            </Form.Group>
+          </div>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -998,7 +1002,7 @@ function RoomModal({ propertyId, onClose, onSaved }) {
         <Modal.Header closeButton><Modal.Title>Add room</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Room number</Form.Label>
             <Form.Control value={form.room_number} onChange={set('room_number')} required autoFocus />
           </Form.Group>
@@ -1040,17 +1044,17 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
         <Modal.Header closeButton><Modal.Title>{editing ? 'Edit rate' : 'Add rate'}</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus placeholder="e.g. Deluxe Standard" />
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Amenities &amp; bed type</Form.Label>
             <Form.Control as="textarea" rows={2} maxLength={255}
               value={form.description} onChange={set('description')}
               placeholder="What the guest gets — e.g. Queen bed, A/C, hot shower, free breakfast for 2" />
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Nightly rate</Form.Label>
             <Form.Control type="number" min={0} step="0.01" value={form.base_rate} onChange={set('base_rate')} required />
           </Form.Group>
@@ -1093,17 +1097,17 @@ function PromoRateModal({ rooms, propertyId, promoRate, onClose, onSaved }) {
         </Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Booking source</Form.Label>
             <Form.Select value={form.source} onChange={set('source')} autoFocus>
               {OTA_SOURCES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
             </Form.Select>
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Rate multiplier</Form.Label>
             <Form.Control type="number" min={1} step="0.1" value={form.multiplier}
               onChange={set('multiplier')} required placeholder="e.g. 2 = ×2 the room's original rate" />
-            <Form.Text className="text-muted">
+            <Form.Text muted>
               The promo price is the room&apos;s original rate × this — e.g. ×2 makes a ₱1,500 room ₱3,000.
             </Form.Text>
           </Form.Group>
@@ -1147,28 +1151,28 @@ function ChargeModal({ charge, propertyId, onClose, onSaved }) {
         </Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
               required autoFocus={!builtIn} disabled={builtIn}
               placeholder="e.g. Late check-out, Extra towel" />
-            {builtIn && <Form.Text className="text-muted">This is a built-in charge; its name is fixed.</Form.Text>}
+            {builtIn && <Form.Text muted>This is a built-in charge; its name is fixed.</Form.Text>}
           </Form.Group>
-          <Row>
-            <Col><Form.Group className="mb-3">
+          <div className="grid grid-cols-2 gap-x-6">
+            <Form.Group className="mb-4">
               <Form.Label>Amount</Form.Label>
               <Form.Control type="number" min={0} step="0.01" value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })} required autoFocus={builtIn} />
-            </Form.Group></Col>
-            <Col><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4">
               <Form.Label>Status</Form.Label>
               <Form.Select value={form.is_active ? '1' : '0'}
                 onChange={(e) => setForm({ ...form, is_active: e.target.value === '1' })}>
                 <option value="1">Active</option>
                 <option value="0">Inactive</option>
               </Form.Select>
-            </Form.Group></Col>
-          </Row>
+            </Form.Group>
+          </div>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>

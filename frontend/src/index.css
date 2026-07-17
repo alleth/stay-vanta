@@ -1,159 +1,82 @@
-/* --- Cascade layer order (this is the fix that makes Tailwind actually work) ---
-   Tailwind v4 emits its utilities into @layer utilities. Bootstrap, imported as
-   plain CSS, is UNLAYERED and therefore always beats anything in a layer — so
-   Tailwind classes were being silently overridden. By importing Bootstrap into a
-   layer declared *before* `utilities`, Tailwind utilities now win conflicts, while
-   React-Bootstrap components still get their component styling (Bootstrap sits
-   after Tailwind's `base`/preflight). `app` holds our minimalist theme overrides. */
-@layer theme, base, bootstrap, app, components, utilities;
+/* Pure Tailwind v4 — Bootstrap is gone. Design tokens live in @theme so they
+   double as utility classes: bg-canvas, bg-surface, bg-subtle, border-line,
+   text-body, text-muted, bg-ink / text-ink, text-accent, bg-accent-soft… */
+@import 'tailwindcss';
 
-@import 'tailwindcss/theme.css' layer(theme);
-@import 'tailwindcss/preflight.css' layer(base);
-@import 'bootstrap/dist/css/bootstrap.min.css' layer(bootstrap);
-@import 'tailwindcss/utilities.css' layer(utilities);
-
-/* --- Design tokens: monochrome, crisp, with a single amber accent --- */
-:root {
-  --sv-bg: #f7f7f8;          /* neutral off-white canvas */
-  --sv-surface: #ffffff;
-  --sv-border: #e8e8ec;      /* neutral gray hairline */
-  --sv-subtle: #f1f1f3;      /* quiet fill for chips / active nav */
-  --sv-text: #1a1a1e;        /* near-black */
-  --sv-muted: #6b7280;       /* gray */
-  --sv-ink: #1f2430;         /* near-black primary actions */
-  --sv-ink-hover: #2c3242;
-  --sv-accent: #d99211;      /* amber — the one accent */
-  --sv-accent-soft: #fdf3e0; /* amber tint */
-
-  --sv-radius: 0.75rem;
-  --sv-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
-
-  /* Map Bootstrap's body tokens onto the palette. */
-  --bs-body-bg: var(--sv-bg);
-  --bs-body-color: var(--sv-text);
-  --bs-border-color: var(--sv-border);
-  --bs-link-color: var(--sv-ink);
-  --bs-link-hover-color: var(--sv-accent);
+@theme {
+  --color-canvas: #f7f7f8;      /* neutral off-white app background */
+  --color-surface: #ffffff;
+  --color-line: #e8e8ec;        /* neutral gray hairline borders */
+  --color-subtle: #f1f1f3;      /* quiet fill for chips / active nav */
+  --color-body: #1a1a1e;        /* near-black text */
+  --color-muted: #6b7280;       /* gray */
+  --color-ink: #1f2430;         /* near-black primary actions */
+  --color-ink-hover: #2c3242;
+  --color-accent: #d99211;      /* amber — the one accent */
+  --color-accent-soft: #fdf3e0; /* amber tint */
 }
 
-body {
-  margin: 0;
-  background-color: var(--sv-bg);
-  color: var(--sv-text);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+@layer base {
+  body {
+    margin: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-body);
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3 { letter-spacing: -0.01em; }
+
+  /* Preflight zeroes these; restore quiet document defaults (utility classes
+     like mb-0 still win — utilities layer after base). */
+  p { margin-bottom: 1rem; }
+  hr { border-color: var(--color-line); margin: 1rem 0; }
+  a:not([class]) { text-decoration: underline; text-underline-offset: 2px; }
 }
 
-/* Minimalist component refinements. Kept in @layer app so any Tailwind utility
-   you add in markup still overrides these. */
-@layer app {
-  /* Crisp display headings — tight-tracked sans rather than a serif. */
-  .sv-serif {
-    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
-  .sv-accent { color: var(--sv-accent); }
+@layer components {
+  /* Crisp display headings — tight-tracked sans. */
+  .sv-serif { font-weight: 700; letter-spacing: -0.02em; }
+  .sv-accent { color: var(--color-accent); }
 
-  h1, h2, h3, .h1, .h2, .h3 { color: var(--sv-text); letter-spacing: -0.01em; }
-
-  /* Cards — flat, thin border, gentle radius, whisper of shadow. */
-  .card {
-    border: 1px solid var(--sv-border);
-    border-radius: var(--sv-radius);
-    box-shadow: none;
-    background-color: var(--sv-surface);
+  /* Tables (see <Table> in components/ui.jsx) — airy rows, light rules,
+     quiet uppercase headers. */
+  .sv-table {
+    width: 100%;
+    font-size: 0.875rem;
+    border-collapse: collapse;
+    text-align: left;
   }
-  .card.shadow-sm { box-shadow: var(--sv-shadow) !important; }
-  .card-header {
-    background-color: transparent;
-    border-bottom: 1px solid var(--sv-border);
-    font-weight: 600;
+  .sv-table th,
+  .sv-table td {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--color-line);
   }
-
-  /* Buttons — calm, minimal, no gradients. */
-  .btn { border-radius: 0.5rem; font-weight: 500; }
-  .btn-primary {
-    --bs-btn-bg: var(--sv-ink);
-    --bs-btn-border-color: var(--sv-ink);
-    --bs-btn-hover-bg: var(--sv-ink-hover);
-    --bs-btn-hover-border-color: var(--sv-ink-hover);
-    --bs-btn-active-bg: #161a23;
-    --bs-btn-active-border-color: #161a23;
-    --bs-btn-disabled-bg: var(--sv-ink);
-    --bs-btn-disabled-border-color: var(--sv-ink);
-  }
-  .btn-outline-secondary {
-    --bs-btn-color: var(--sv-text);
-    --bs-btn-border-color: var(--sv-border);
-    --bs-btn-hover-bg: var(--sv-subtle);
-    --bs-btn-hover-border-color: var(--sv-border);
-    --bs-btn-hover-color: var(--sv-text);
-  }
-  .btn-warning {
-    --bs-btn-bg: var(--sv-accent);
-    --bs-btn-border-color: var(--sv-accent);
-    --bs-btn-color: #fff;
-    --bs-btn-hover-bg: #c0800c;
-    --bs-btn-hover-border-color: #c0800c;
-    --bs-btn-hover-color: #fff;
-  }
-
-  /* Forms — quiet borders, soft focus ring in the accent tone. */
-  .form-control, .form-select {
-    border-color: var(--sv-border);
-    border-radius: 0.5rem;
-    color: var(--sv-text);
-  }
-  .form-control:focus, .form-select:focus {
-    border-color: var(--sv-accent);
-    box-shadow: 0 0 0 3px rgba(217, 146, 17, 0.15);
-  }
-  .form-label { font-weight: 500; font-size: 0.875rem; color: var(--sv-text); }
-
-  /* Tables — airy, light rules, quiet uppercase headers. */
-  .table {
-    --bs-table-border-color: var(--sv-border);
-    --bs-table-bg: transparent;
-    margin-bottom: 0;
-  }
-  .table > :not(caption) > * > * { padding: 0.75rem 1rem; }
-  .table > thead th {
+  .sv-table thead th {
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     font-weight: 600;
-    color: var(--sv-muted);
-    border-bottom: 1px solid var(--sv-border);
-    background: transparent;
+    color: var(--color-muted);
   }
+  .sv-table tbody tr:last-child > td { border-bottom: 0; }
+  .sv-table-hover tbody tr:hover > td { background-color: rgb(241 241 243 / 0.55); }
 
-  /* Navbar — light, minimal, single hairline border. */
-  .sv-navbar {
-    background-color: var(--sv-surface);
-    border-bottom: 1px solid var(--sv-border);
+  /* Seamed control groups (input groups / button groups): collapse inner
+     radii and overlap the shared 1px borders. Doubled class beats the
+     children's own rounded-* utilities. */
+  .sv-group { display: flex; align-items: stretch; }
+  .sv-group.sv-group > * { border-radius: 0; }
+  .sv-group.sv-group > *:not(:first-child) { margin-left: -1px; }
+  .sv-group.sv-group > *:first-child {
+    border-top-left-radius: 0.5rem;
+    border-bottom-left-radius: 0.5rem;
   }
-  .sv-nav .nav-link {
-    color: var(--sv-muted);
-    font-weight: 500;
-    border-radius: 0.5rem;
-    padding: 0.4rem 0.75rem;
-    transition: color 0.15s ease, background-color 0.15s ease;
+  .sv-group.sv-group > *:last-child {
+    border-top-right-radius: 0.5rem;
+    border-bottom-right-radius: 0.5rem;
   }
-  .sv-nav .nav-link:hover { color: var(--sv-text); }
-  .sv-nav .nav-link.active {
-    color: var(--sv-text);
-    background-color: var(--sv-subtle);
-  }
-}
-
-/* Badges — soft, neutral chips. Bootstrap sets `.bg-secondary`'s background
-   with `!important` (which a layered override can't beat), so instead we feed
-   that rule a light value through the variable it reads — `--bs-secondary-rgb`
-   — and only restyle the text. Result: a light chip with readable dark text. */
-.badge.bg-secondary {
-  --bs-secondary-rgb: 241, 241, 243;
-  color: #5b6270 !important;
-  font-weight: 500;
+  .sv-group > *:focus { position: relative; z-index: 1; }
 }

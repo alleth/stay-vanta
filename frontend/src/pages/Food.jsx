@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Row, Col, Alert, Spinner, InputGroup,
+  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, InputGroup,
   Pagination,
-} from 'react-bootstrap'
+} from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
@@ -165,19 +165,19 @@ export default function Food() {
 
   return (
     <div>
-      <h1 className="h3 fw-bold mb-3">Food &amp; Orders</h1>
+      <h1 className="mb-4 text-2xl font-bold">Food &amp; Orders</h1>
       {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
 
       {loading ? (
         <SkeletonTable rows={6} />
       ) : (
-        <Tabs defaultActiveKey="orders" className="mb-3">
+        <Tabs defaultActiveKey="orders" className="mb-4">
           {/* ---- Orders ---- */}
           <Tab eventKey="orders" title={`Orders (${ordersTotal})`}>
-            <Card className="shadow-sm mb-2">
-              <Card.Body className="d-flex flex-wrap align-items-end gap-3">
+            <Card className="mb-2 shadow-sm">
+              <Card.Body className="flex flex-wrap items-end gap-4 p-4">
                 <Form.Group>
-                  <Form.Label className="small text-muted mb-1">Status</Form.Label>
+                  <Form.Label className="mb-1 text-muted">Status</Form.Label>
                   <Form.Select size="sm" value={orderStatus} style={{ width: 'auto' }}
                     onChange={(e) => { setOrderStatus(e.target.value); setOrderPage(1) }}>
                     <option value="all">All statuses</option>
@@ -187,46 +187,46 @@ export default function Food() {
                   </Form.Select>
                 </Form.Group>
                 <Form.Group>
-                  <Form.Label className="small text-muted mb-1">Date</Form.Label>
+                  <Form.Label className="mb-1 text-muted">Date</Form.Label>
                   <Form.Control type="date" size="sm" value={orderDate} disabled={orderAll} style={{ width: 'auto' }}
                     onChange={(e) => { setOrderDate(e.target.value); setOrderPage(1) }} />
                 </Form.Group>
                 <Form.Check type="checkbox" label="All dates" className="mb-1" checked={orderAll}
                   onChange={(e) => { setOrderAll(e.target.checked); setOrderPage(1) }} />
-                <div className="ms-auto">
+                <div className="ml-auto">
                   <Button onClick={() => setModal('order')} disabled={menu.length === 0}>New order</Button>
                 </div>
               </Card.Body>
             </Card>
             <Card className="shadow-sm">
-              <Table responsive hover className="mb-0 align-middle">
+              <Table hover>
                 <thead>
                   <tr>
-                    <th>#</th><th>Date</th><th>Items</th><th>Guest</th><th className="text-end">Total</th>
-                    <th>Payment</th><th>Status</th><th>Receptionist</th><th className="text-end">Actions</th>
+                    <th>#</th><th>Date</th><th>Items</th><th>Guest</th><th className="text-right">Total</th>
+                    <th>Payment</th><th>Status</th><th>Receptionist</th><th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ordersLoading && <SkeletonTableRows rows={5} cols={9} />}
                   {!ordersLoading && orders.length === 0 && (
-                    <tr><td colSpan={9} className="text-center text-muted py-4">No orders to show.</td></tr>
+                    <tr><td colSpan={9} className="py-6 text-center text-muted">No orders to show.</td></tr>
                   )}
                   {!ordersLoading && orders.map((o) => (
                     <tr key={o.id}>
                       <td>{o.id}</td>
-                      <td className="small text-muted text-nowrap">{fmtDateTime(o.created)}</td>
-                      <td className="small">
+                      <td className="whitespace-nowrap text-xs text-muted">{fmtDateTime(o.created)}</td>
+                      <td className="text-xs">
                         {o.food_order_items?.map((it) =>
                           `${it.quantity}× ${it.food_menu_item?.name ?? 'item'}`).join(', ')}
                       </td>
                       <td>{o.guest?.full_name ?? '—'}{o.room ? ` (Rm ${o.room.room_number})` : ''}</td>
-                      <td className="text-end">{formatMoney(o.total)}</td>
+                      <td className="text-right">{formatMoney(o.total)}</td>
                       <td><Badge bg={PAY_VARIANT[o.payment_status]}>{o.payment_status.replace('_', ' ')}</Badge></td>
                       <td><Badge bg={ORDER_VARIANT[o.status]}>{o.status}</Badge></td>
-                      <td className="small text-muted">{o.receptionist?.name ?? '—'}</td>
-                      <td className="text-end text-nowrap">
+                      <td className="text-xs text-muted">{o.receptionist?.name ?? '—'}</td>
+                      <td className="whitespace-nowrap text-right">
                         {o.status === 'open' && (
-                          <Button size="sm" variant="outline-success" className="me-1"
+                          <Button size="sm" variant="outline-success" className="mr-1"
                             disabled={pending !== null}
                             onClick={() => act(`serve-${o.id}`, serveOrder, o.id)}>
                             {pending === `serve-${o.id}` ? <Spinner size="sm" /> : 'Serve'}
@@ -246,11 +246,11 @@ export default function Food() {
                 </tbody>
               </Table>
               {totalPages > 1 && (
-                <Card.Footer className="d-flex justify-content-between align-items-center">
-                  <span className="small text-muted">
+                <Card.Footer className="flex items-center justify-between px-4 py-3">
+                  <span className="text-sm text-muted">
                     Page {orderPage} of {totalPages} · {ordersTotal} order(s)
                   </span>
-                  <Pagination size="sm" className="mb-0">
+                  <Pagination>
                     <Pagination.Prev disabled={orderPage <= 1 || ordersLoading}
                       onClick={() => setOrderPage((p) => Math.max(1, p - 1))} />
                     <Pagination.Next disabled={orderPage >= totalPages || ordersLoading}
@@ -263,15 +263,15 @@ export default function Food() {
 
           {/* ---- Menu ---- */}
           <Tab eventKey="menu" title={`Menu (${menu.length})`}>
-            <Card className="shadow-sm mb-2">
-              <Card.Body className="d-flex flex-wrap align-items-end gap-3">
+            <Card className="mb-2 shadow-sm">
+              <Card.Body className="flex flex-wrap items-end gap-4 p-4">
                 <Form.Group>
-                  <Form.Label className="small text-muted mb-1">Search</Form.Label>
+                  <Form.Label className="mb-1 text-muted">Search</Form.Label>
                   <Form.Control size="sm" value={menuSearch} placeholder="Item name" style={{ width: 200 }}
                     onChange={(e) => setMenuSearch(e.target.value)} />
                 </Form.Group>
                 <Form.Group>
-                  <Form.Label className="small text-muted mb-1">Linked stock</Form.Label>
+                  <Form.Label className="mb-1 text-muted">Linked stock</Form.Label>
                   <Form.Select size="sm" value={menuStock} style={{ width: 'auto' }}
                     onChange={(e) => setMenuStock(e.target.value)}>
                     <option value="all">All</option>
@@ -279,44 +279,44 @@ export default function Food() {
                     {stockOptions.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
                   </Form.Select>
                 </Form.Group>
-                <span className="text-muted small">{filteredMenu.length} shown</span>
+                <span className="mb-1 text-sm text-muted">{filteredMenu.length} shown</span>
                 {canManageMenu && (
-                  <div className="ms-auto"><Button onClick={() => setModal('menu')}>Add menu item</Button></div>
+                  <div className="ml-auto"><Button onClick={() => setModal('menu')}>Add menu item</Button></div>
                 )}
               </Card.Body>
             </Card>
             <Card className="shadow-sm">
-              <Table responsive hover className="mb-0 align-middle">
+              <Table hover>
                 <thead>
                   <tr>
-                    <th>Item</th><th className="text-end">Price</th><th>Linked stock</th>
+                    <th>Item</th><th className="text-right">Price</th><th>Linked stock</th>
                     <th>Available</th>{canManageMenu && <th></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredMenu.length === 0 && (
-                    <tr><td colSpan={canManageMenu ? 5 : 4} className="text-center text-muted py-4">No menu items.</td></tr>
+                    <tr><td colSpan={canManageMenu ? 5 : 4} className="py-6 text-center text-muted">No menu items.</td></tr>
                   )}
                   {menuGroups.map(([category, items]) => (
                     <Fragment key={category}>
-                      <tr className="table-light">
-                        <td colSpan={canManageMenu ? 5 : 4} className="fw-semibold small text-uppercase text-muted">
+                      <tr className="bg-subtle">
+                        <td colSpan={canManageMenu ? 5 : 4} className="text-xs font-semibold uppercase text-muted">
                           {category}
                         </td>
                       </tr>
                       {items.map((m) => (
                         <tr key={m.id}>
-                          <td className="fw-semibold">{m.name}</td>
-                          <td className="text-end">{formatMoney(m.price)}</td>
-                          <td className="small">{m.inventory_item?.name ?? <span className="text-muted">—</span>}</td>
+                          <td className="font-semibold">{m.name}</td>
+                          <td className="text-right">{formatMoney(m.price)}</td>
+                          <td className="text-xs">{m.inventory_item?.name ?? <span className="text-muted">—</span>}</td>
                           <td>
                             {m.is_available
                               ? <Badge bg="success">yes</Badge>
                               : <Badge bg="secondary">no</Badge>}
                           </td>
                           {canManageMenu && (
-                            <td className="text-end text-nowrap">
-                              <Button size="sm" variant="outline-primary" className="me-1"
+                            <td className="whitespace-nowrap text-right">
+                              <Button size="sm" variant="outline-primary" className="mr-1"
                                 disabled={pending !== null}
                                 onClick={() => setModal({ type: 'menu', item: m })}>Edit</Button>
                               <Button size="sm" variant="outline-danger"
@@ -337,55 +337,55 @@ export default function Food() {
 
           {/* ---- Invoices ---- */}
           <Tab eventKey="invoices" title={`Invoices (${invoices.length})`}>
-            <Card className="shadow-sm mb-2">
-              <Card.Body className="d-flex flex-wrap align-items-end gap-3">
+            <Card className="mb-2 shadow-sm">
+              <Card.Body className="flex flex-wrap items-end gap-4 p-4">
                 <Form.Group>
-                  <Form.Label className="small text-muted mb-1">Date</Form.Label>
+                  <Form.Label className="mb-1 text-muted">Date</Form.Label>
                   <Form.Control type="date" size="sm" value={invoiceDate} disabled={invoiceAll} style={{ width: 'auto' }}
                     onChange={(e) => setInvoiceDate(e.target.value)} />
                 </Form.Group>
                 <Form.Check type="checkbox" label="All dates" className="mb-1" checked={invoiceAll}
                   onChange={(e) => setInvoiceAll(e.target.checked)} />
-                <span className="text-muted small">Open tabs always show.</span>
+                <span className="mb-1 text-sm text-muted">Open tabs always show.</span>
               </Card.Body>
             </Card>
             <Card className="shadow-sm">
-              <Table responsive hover className="mb-0 align-middle">
+              <Table hover>
                 <thead>
                   <tr>
                     <th>#</th><th>Guest</th><th>Opened</th><th>Charges</th>
-                    <th className="text-end">Total</th><th>Status</th>
-                    <th className="text-end">Actions</th>
+                    <th className="text-right">Total</th><th>Status</th>
+                    <th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {invoicesLoading && <SkeletonTableRows rows={4} cols={7} />}
                   {!invoicesLoading && invoices.length === 0 && (
-                    <tr><td colSpan={7} className="text-center text-muted py-4">No invoices to show.</td></tr>
+                    <tr><td colSpan={7} className="py-6 text-center text-muted">No invoices to show.</td></tr>
                   )}
                   {!invoicesLoading && invoices.map((inv) => (
                     <tr key={inv.id}>
-                      <td className="text-[color:var(--sv-muted)]">{String(inv.id).padStart(4, '0')}</td>
-                      <td className="fw-semibold">{inv.guest?.full_name ?? '—'}</td>
-                      <td className="small text-muted text-nowrap">{fmtDateTime(inv.created)}</td>
+                      <td className="text-muted">{String(inv.id).padStart(4, '0')}</td>
+                      <td className="font-semibold">{inv.guest?.full_name ?? '—'}</td>
+                      <td className="whitespace-nowrap text-xs text-muted">{fmtDateTime(inv.created)}</td>
                       <td className="max-w-[260px]">
-                        <span className="block truncate text-xs text-[color:var(--sv-muted)]">
+                        <span className="block truncate text-xs text-muted">
                           {inv.invoice_lines?.length
                             ? `${inv.invoice_lines.length} line(s) · ${inv.invoice_lines.map((l) => l.description).join(', ')}`
                             : 'No charges yet'}
                         </span>
                       </td>
-                      <td className="text-end fw-semibold">{formatMoney(inv.total)}</td>
+                      <td className="text-right font-semibold">{formatMoney(inv.total)}</td>
                       <td>
                         <Badge bg={inv.status === 'open' ? 'warning' : 'success'}>{inv.status}</Badge>
                         {inv.settled_at && (
-                          <div className="text-[11px] text-[color:var(--sv-muted)] mt-0.5 whitespace-nowrap">
+                          <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted">
                             {fmtDateTime(inv.settled_at)}
                           </div>
                         )}
                       </td>
-                      <td className="text-end text-nowrap">
-                        <Button size="sm" variant="outline-secondary" className="me-1"
+                      <td className="whitespace-nowrap text-right">
+                        <Button size="sm" variant="outline-secondary" className="mr-1"
                           onClick={() => setModal({ type: 'invoice', id: inv.id })}>View</Button>
                         {inv.status === 'open' && (
                           <Button size="sm" variant="outline-success"
@@ -460,8 +460,8 @@ function InvoiceModal({ id, onClose }) {
 
   return (
     <Modal show onHide={onClose} centered size="lg">
-      <Modal.Header closeButton className="border-0 pb-0" />
-      <Modal.Body className="pt-0 px-4 pb-4">
+      <Modal.Header closeButton className="border-0 px-6 pt-4 pb-0" />
+      <Modal.Body className="px-6 pt-0 pb-6">
         {error && <Alert variant="danger">{error}</Alert>}
         {!invoice && !error && (
           <div className="space-y-3">
@@ -477,7 +477,7 @@ function InvoiceModal({ id, onClose }) {
             {/* ---- Heading: number + status ---- */}
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--sv-muted)]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
                   Invoice
                 </div>
                 <div className="text-2xl font-bold tracking-tight">
@@ -487,55 +487,55 @@ function InvoiceModal({ id, onClose }) {
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
                 settled
                   ? 'bg-emerald-50 text-emerald-700'
-                  : 'bg-[color:var(--sv-accent-soft)] text-[color:var(--sv-accent)]'
+                  : 'bg-accent-soft text-accent'
               }`}>
                 {settled ? 'Settled' : 'Open tab'}
               </span>
             </div>
 
             {/* ---- Meta: billed to + dates ---- */}
-            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3 rounded-xl border border-[color:var(--sv-border)] bg-[color:var(--sv-subtle)] p-3">
+            <div className="mt-6 grid grid-cols-1 gap-4 rounded-xl border border-line bg-subtle p-4 sm:grid-cols-3">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--sv-muted)]">Billed to</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Billed to</div>
                 <div className="mt-0.5 text-sm font-semibold">{invoice.guest?.full_name ?? 'Walk-in guest'}</div>
                 {(invoice.guest?.contact_number || invoice.guest?.email) && (
-                  <div className="text-xs text-[color:var(--sv-muted)]">
+                  <div className="text-xs text-muted">
                     {[invoice.guest.contact_number, invoice.guest.email].filter(Boolean).join(' · ')}
                   </div>
                 )}
               </div>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--sv-muted)]">Opened</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Opened</div>
                 <div className="mt-0.5 text-sm">{fmtDateTime(invoice.created)}</div>
               </div>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--sv-muted)]">Settled</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Settled</div>
                 <div className="mt-0.5 text-sm">{invoice.settled_at ? fmtDateTime(invoice.settled_at) : '—'}</div>
               </div>
             </div>
 
             {/* ---- Charges, grouped ---- */}
             {groups.length === 0 && (
-              <p className="mt-4 mb-0 text-sm text-[color:var(--sv-muted)]">No charges on this invoice yet.</p>
+              <p className="mt-6 mb-0 text-sm text-muted">No charges on this invoice yet.</p>
             )}
             {groups.map((g) => (
-              <div key={g.key} className="mt-4">
-                <div className="flex items-baseline justify-between border-b border-[color:var(--sv-border)] pb-1">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--sv-muted)]">
+              <div key={g.key} className="mt-6">
+                <div className="flex items-baseline justify-between border-b border-line pb-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                     {g.label}
                   </span>
-                  <span className="text-xs text-[color:var(--sv-muted)]">{g.rows.length} item(s)</span>
+                  <span className="text-xs text-muted">{g.rows.length} item(s)</span>
                 </div>
                 {g.rows.map((l) => (
-                  <div key={l.id} className="flex items-center justify-between gap-3 border-b border-dashed border-[color:var(--sv-border)] py-2">
+                  <div key={l.id} className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2">
                     <div className="min-w-0">
                       <div className="text-sm">{l.description}</div>
-                      <div className="text-[11px] text-[color:var(--sv-muted)]">{fmtDateTime(l.created)}</div>
+                      <div className="text-[11px] text-muted">{fmtDateTime(l.created)}</div>
                     </div>
                     <div className="shrink-0 text-sm tabular-nums">{formatMoney(l.amount)}</div>
                   </div>
                 ))}
-                <div className="flex justify-between pt-1.5 text-xs text-[color:var(--sv-muted)]">
+                <div className="flex justify-between pt-1.5 text-xs text-muted">
                   <span>Subtotal — {g.label}</span>
                   <span className="tabular-nums">{formatMoney(g.subtotal)}</span>
                 </div>
@@ -543,19 +543,19 @@ function InvoiceModal({ id, onClose }) {
             ))}
 
             {/* ---- Grand total ---- */}
-            <div className="mt-4 flex items-center justify-between rounded-xl bg-[color:var(--sv-ink)] px-4 py-3 text-white">
+            <div className="mt-6 flex items-center justify-between rounded-xl bg-ink px-4 py-3 text-white">
               <span className="text-sm font-medium opacity-80">Total due</span>
               <span className="text-xl font-bold tabular-nums">{formatMoney(invoice.total)}</span>
             </div>
             {settled && (
-              <p className="mt-2 mb-0 text-center text-xs text-[color:var(--sv-muted)]">
+              <p className="mt-2 mb-0 text-center text-xs text-muted">
                 Paid in full · settled {fmtDateTime(invoice.settled_at)}
               </p>
             )}
           </div>
         )}
       </Modal.Body>
-      <Modal.Footer className="border-0 pt-0">
+      <Modal.Footer className="border-0 px-6 pt-0 pb-6">
         <Button variant="secondary" onClick={onClose}>Close</Button>
       </Modal.Footer>
     </Modal>
@@ -600,29 +600,29 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
         <Modal.Header closeButton><Modal.Title>New order</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Row className="g-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
             {/* ---- Menu (searchable) ---- */}
-            <Col md={7}>
+            <div className="md:col-span-7">
               <Form.Control size="sm" className="mb-2" value={search} placeholder="Search the menu…"
                 onChange={(e) => setSearch(e.target.value)} />
-              <div style={{ height: 380, overflowY: 'auto' }} className="border rounded">
+              <div className="h-[380px] overflow-y-auto rounded-lg border border-line">
                 {filteredMenu.length === 0 && (
-                  <div className="text-muted small text-center py-4">No menu items match.</div>
+                  <div className="py-6 text-center text-sm text-muted">No menu items match.</div>
                 )}
                 {filteredMenu.map((m) => {
                   const qty = cart[m.id] ?? 0
                   return (
-                    <div key={m.id} className="d-flex align-items-center gap-2 px-2 py-1 border-bottom">
-                      <div className="flex-grow-1">
-                        <div className="fw-semibold small">{m.name}</div>
-                        <div className="text-muted small">{formatMoney(m.price)}</div>
+                    <div key={m.id} className="flex items-center gap-2 border-b border-line px-2 py-1 last:border-b-0">
+                      <div className="min-w-0 grow">
+                        <div className="text-sm font-semibold">{m.name}</div>
+                        <div className="text-sm text-muted">{formatMoney(m.price)}</div>
                       </div>
                       {qty > 0 ? (
-                        <InputGroup size="sm" style={{ width: 116 }}>
-                          <Button variant="outline-secondary" onClick={() => setQty(m.id, qty - 1)}>−</Button>
-                          <Form.Control className="text-center" value={qty}
+                        <InputGroup style={{ width: 116 }}>
+                          <Button size="sm" variant="outline-secondary" onClick={() => setQty(m.id, qty - 1)}>−</Button>
+                          <Form.Control size="sm" className="text-center" value={qty}
                             onChange={(e) => setQty(m.id, parseInt(e.target.value, 10) || 0)} />
-                          <Button variant="outline-secondary" onClick={() => setQty(m.id, qty + 1)}>+</Button>
+                          <Button size="sm" variant="outline-secondary" onClick={() => setQty(m.id, qty + 1)}>+</Button>
                         </InputGroup>
                       ) : (
                         <Button size="sm" variant="outline-primary" onClick={() => setQty(m.id, 1)}>Add</Button>
@@ -631,41 +631,41 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                   )
                 })}
               </div>
-            </Col>
+            </div>
 
             {/* ---- Order (cart) side pane ---- */}
-            <Col md={5}>
-              <div className="d-flex flex-column h-100">
-                <div className="fw-semibold mb-2">
-                  Order {count > 0 && <Badge bg="primary" className="ms-1">{count}</Badge>}
+            <div className="md:col-span-5">
+              <div className="flex h-full flex-col">
+                <div className="mb-2 font-semibold">
+                  Order {count > 0 && <Badge bg="primary" className="ml-1">{count}</Badge>}
                 </div>
-                <div style={{ minHeight: 150, maxHeight: 230, overflowY: 'auto' }} className="border rounded mb-2">
+                <div className="mb-2 max-h-[230px] min-h-[150px] overflow-y-auto rounded-lg border border-line">
                   {lines.length === 0 ? (
-                    <div className="text-muted small text-center py-4">No items yet — add from the menu.</div>
+                    <div className="py-6 text-center text-sm text-muted">No items yet — add from the menu.</div>
                   ) : lines.map((l) => (
-                    <div key={l.menu.id} className="d-flex align-items-center gap-2 px-2 py-1 border-bottom">
-                      <div className="flex-grow-1">
-                        <div className="small fw-semibold">{l.menu.name}</div>
-                        <div className="text-muted small">
+                    <div key={l.menu.id} className="flex items-center gap-2 border-b border-line px-2 py-1 last:border-b-0">
+                      <div className="min-w-0 grow">
+                        <div className="text-sm font-semibold">{l.menu.name}</div>
+                        <div className="text-sm text-muted">
                           {l.qty} × {formatMoney(l.menu.price)} = {formatMoney(Number(l.menu.price) * l.qty)}
                         </div>
                       </div>
-                      <InputGroup size="sm" style={{ width: 104 }}>
-                        <Button variant="outline-secondary" onClick={() => setQty(l.menu.id, l.qty - 1)}>−</Button>
-                        <Form.Control className="text-center" value={l.qty}
+                      <InputGroup style={{ width: 104 }}>
+                        <Button size="sm" variant="outline-secondary" onClick={() => setQty(l.menu.id, l.qty - 1)}>−</Button>
+                        <Form.Control size="sm" className="text-center" value={l.qty}
                           onChange={(e) => setQty(l.menu.id, parseInt(e.target.value, 10) || 0)} />
-                        <Button variant="outline-secondary" onClick={() => setQty(l.menu.id, l.qty + 1)}>+</Button>
+                        <Button size="sm" variant="outline-secondary" onClick={() => setQty(l.menu.id, l.qty + 1)}>+</Button>
                       </InputGroup>
-                      <Button variant="link" className="text-danger p-0 px-1" title="Remove"
-                        onClick={() => setQty(l.menu.id, 0)}>×</Button>
+                      <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                        onClick={() => setQty(l.menu.id, 0)}>×</button>
                     </div>
                   ))}
                 </div>
-                <div className="d-flex justify-content-between fw-bold border-top pt-2 mb-3">
-                  <span>Total</span><span className="fs-5">{formatMoney(total)}</span>
+                <div className="mb-4 flex items-center justify-between border-t border-line pt-2 font-bold">
+                  <span>Total</span><span className="text-xl">{formatMoney(total)}</span>
                 </div>
                 <Form.Group className="mb-2">
-                  <Form.Label className="small mb-1">Payment</Form.Label>
+                  <Form.Label className="mb-1">Payment</Form.Label>
                   <Form.Select size="sm" value={payment} onChange={(e) => setPayment(e.target.value)}>
                     <option value="paid">Paid now</option>
                     <option value="charge_to_room">Charge to room</option>
@@ -673,15 +673,15 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                   </Form.Select>
                 </Form.Group>
                 <Form.Group>
-                  <Form.Label className="small mb-1">
-                    Guest {needGuest ? <span className="text-danger">*</span> : <span className="text-muted">(optional)</span>}
+                  <Form.Label className="mb-1">
+                    Guest {needGuest ? <span className="text-red-600">*</span> : <span className="font-normal text-muted">(optional)</span>}
                   </Form.Label>
                   <GuestPicker guests={guests} roomByGuest={roomByGuest} value={guestId}
                     onChange={setGuestId} required={needGuest} propertyId={propertyId} />
                 </Form.Group>
               </div>
-            </Col>
-          </Row>
+            </div>
+          </div>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -734,9 +734,10 @@ function GuestPicker({ guests, roomByGuest, value, onChange, required, propertyI
   }
 
   return (
-    <div className="position-relative">
-      <InputGroup size="sm">
+    <div className="relative">
+      <InputGroup>
         <Form.Control
+          size="sm"
           placeholder="Search name or room #…"
           value={open ? q : (selected ? selected.full_name : '')}
           onChange={(e) => { setQ(e.target.value); setOpen(true) }}
@@ -744,7 +745,7 @@ function GuestPicker({ guests, roomByGuest, value, onChange, required, propertyI
           onBlur={() => setTimeout(() => setOpen(false), 120)}
           required={required && !selected} />
         {selected && (
-          <Button variant="outline-secondary" title="Clear"
+          <Button size="sm" variant="outline-secondary" title="Clear"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { onChange(''); setQ('') }}>×</Button>
         )}
@@ -755,17 +756,16 @@ function GuestPicker({ guests, roomByGuest, value, onChange, required, propertyI
         </div>
       )}
       {open && (
-        <div className="position-absolute w-100 bg-white border rounded shadow-sm mt-1"
-          style={{ zIndex: 5, maxHeight: 220, overflowY: 'auto' }}
+        <div className="absolute z-10 mt-1 max-h-[220px] w-full overflow-y-auto rounded-lg border border-line bg-surface shadow-md"
           onMouseDown={(e) => e.preventDefault()}>
-          {options.length === 0 && <div className="text-muted small px-3 py-2">No guests found.</div>}
+          {options.length === 0 && <div className="px-3 py-2 text-sm text-muted">No guests found.</div>}
           {options.map((g, i) => (
             <button type="button" key={g.id}
-              className="d-flex w-100 align-items-center gap-2 border-0 bg-transparent text-start px-3 py-2"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-subtle"
               onClick={() => pick(g)}>
-              <span className="flex-grow-1 small">
+              <span className="min-w-0 grow text-sm">
                 {g.full_name}
-                {!q.trim() && i < recent.length && <span className="text-muted ms-2">· recent</span>}
+                {!q.trim() && i < recent.length && <span className="ml-2 text-muted">· recent</span>}
               </span>
               <Badge bg={rooms(g).length ? 'info' : 'secondary'}>{label(g)}</Badge>
             </button>
@@ -798,24 +798,24 @@ function MenuModal({ item, inventory, propertyId, onClose, onSaved }) {
         <Modal.Header closeButton><Modal.Title>{editing ? 'Edit menu item' : 'Add menu item'}</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus />
           </Form.Group>
-          <Row>
-            <Col><Form.Group className="mb-3">
+          <div className="grid grid-cols-2 gap-x-6">
+            <Form.Group className="mb-4">
               <Form.Label>Price</Form.Label>
               <Form.Control type="number" min={0} step="0.01" value={form.price} onChange={set('price')} required />
-            </Form.Group></Col>
-            <Col><Form.Group className="mb-3">
+            </Form.Group>
+            <Form.Group className="mb-4">
               <Form.Label>Availability</Form.Label>
               <Form.Select value={form.is_available ? '1' : '0'}
                 onChange={(e) => setForm({ ...form, is_available: e.target.value === '1' })}>
                 <option value="1">Available</option>
                 <option value="0">Unavailable</option>
               </Form.Select>
-            </Form.Group></Col>
-          </Row>
+            </Form.Group>
+          </div>
           <Form.Group>
             <Form.Label>Linked food stock (decrements on order)</Form.Label>
             <Form.Select value={form.inventory_item_id} onChange={set('inventory_item_id')}>

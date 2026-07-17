@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Navbar, Nav, Container, Button, Badge } from 'react-bootstrap'
+import { Button, Badge } from './ui'
 import { useAuth } from '../context/AuthContext'
 
 // Navigation items, scoped by role. Owner = platform operator (revenue +
@@ -15,9 +16,15 @@ const NAV = [
   { to: '/staff', label: 'Staff', roles: ['admin'] },
 ]
 
+const navLinkClass = ({ isActive }) =>
+  `rounded-lg px-3 py-1.5 text-sm font-medium no-underline transition-colors ${
+    isActive ? 'bg-subtle text-body' : 'text-muted hover:text-body'
+  }`
+
 export default function Layout() {
   const { user, logout, role } = useAuth()
   const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
 
   function handleLogout() {
     logout()
@@ -27,43 +34,53 @@ export default function Layout() {
   const items = NAV.filter((n) => !n.roles || n.roles.includes(role))
 
   return (
-    <div className="d-flex flex-column min-vh-100">
-      <Navbar expand="lg" className="sv-navbar px-3 px-lg-4 py-2">
-        <Navbar.Brand as={NavLink} to="/" className="sv-serif fw-bold fs-4 m-0">
-          Stay<span className="sv-accent">Vanta</span>
-        </Navbar.Brand>
-        <Navbar.Toggle />
-        <Navbar.Collapse>
-          <Nav className="sv-nav me-auto ms-lg-4 gap-1">
-            {items.map((n) => (
-              <Nav.Link key={n.to} as={NavLink} to={n.to} end={n.end}>
-                {n.label}
-              </Nav.Link>
-            ))}
-          </Nav>
-          <Nav className="align-items-lg-center gap-3">
-            <span className="small text-nowrap" style={{ color: 'var(--sv-text)' }}>
-              {user?.name} <Badge bg="secondary" className="ms-1">{role}</Badge>
-            </span>
-            <Button size="sm" variant="outline-secondary" onClick={handleLogout}>
-              Logout
-            </Button>
-          </Nav>
-        </Navbar.Collapse>
-      </Navbar>
+    <div className="flex min-h-screen flex-col">
+      <header className="border-b border-line bg-surface px-4 py-2 lg:px-6">
+        <nav className="flex flex-wrap items-center">
+          <NavLink to="/" className="sv-serif text-2xl font-bold text-body no-underline">
+            Stay<span className="sv-accent">Vanta</span>
+          </NavLink>
+          <button
+            type="button"
+            aria-label="Toggle navigation"
+            aria-expanded={open}
+            className="ml-auto rounded-lg border border-line px-3 py-1.5 text-sm lg:hidden"
+            onClick={() => setOpen((o) => !o)}
+          >
+            ☰
+          </button>
+          <div className={`${open ? 'flex' : 'hidden'} w-full flex-col gap-3 pt-3 lg:flex lg:w-auto lg:flex-1 lg:flex-row lg:items-center lg:pt-0`}>
+            <div className="flex flex-col gap-1 lg:mr-auto lg:ml-6 lg:flex-row">
+              {items.map((n) => (
+                <NavLink key={n.to} to={n.to} end={n.end} className={navLinkClass}>
+                  {n.label}
+                </NavLink>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="whitespace-nowrap text-sm">
+                {user?.name} <Badge bg="secondary" className="ml-1">{role}</Badge>
+              </span>
+              <Button size="sm" variant="outline-secondary" onClick={handleLogout}>
+                Logout
+              </Button>
+            </div>
+          </div>
+        </nav>
+      </header>
 
-      <Container className="py-4 py-lg-5 flex-grow-1" style={{ maxWidth: 1200 }}>
+      <main className="mx-auto w-full max-w-[1200px] grow px-4 py-6 lg:py-12">
         <Outlet />
-      </Container>
+      </main>
 
-      <footer className="py-3 text-center small" style={{ color: 'var(--sv-muted)' }}>
-        <span className="me-2">&copy; {new Date().getFullYear()} StayVanta</span>
+      <footer className="py-4 text-center text-sm text-muted">
+        <span className="mr-2">&copy; {new Date().getFullYear()} StayVanta</span>
         ·
-        <NavLink to="/privacy" className="mx-2 text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+        <NavLink to="/privacy" className="mx-2 text-muted no-underline hover:text-body">
           Privacy Policy
         </NavLink>
         ·
-        <NavLink to="/terms" className="ms-2 text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+        <NavLink to="/terms" className="ml-2 text-muted no-underline hover:text-body">
           Terms of Service
         </NavLink>
       </footer>

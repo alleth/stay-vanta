@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Card, Form, Button, Alert, Spinner } from 'react-bootstrap'
+import { Card, Form, Button, Alert, Spinner } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
@@ -26,18 +26,18 @@ export default function Login() {
   }
 
   return (
-    <div className="d-flex align-items-center justify-content-center min-vh-100 px-3">
-      <Card style={{ width: 400 }} className="shadow-sm">
-        <Card.Body className="p-5">
-          <h1 className="sv-serif text-center mb-1 fw-bold" style={{ fontSize: '2rem' }}>
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <Card className="w-full max-w-[400px] shadow-sm">
+        <Card.Body className="p-10">
+          <h1 className="sv-serif mb-1 text-center text-[2rem] font-bold">
             Stay<span className="sv-accent">Vanta</span>
           </h1>
-          <p className="text-center small mb-4" style={{ color: 'var(--sv-muted)' }}>
+          <p className="mb-6 text-center text-sm text-muted">
             All-in-One Hotel &amp; Resort Management
           </p>
           {error && <Alert variant="danger">{error}</Alert>}
           <Form onSubmit={handleSubmit}>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-4">
               <Form.Label>Email</Form.Label>
               <Form.Control
                 type="email"
@@ -47,7 +47,7 @@ export default function Login() {
                 autoFocus
               />
             </Form.Group>
-            <Form.Group className="mb-4">
+            <Form.Group className="mb-6">
               <Form.Label>Password</Form.Label>
               <Form.Control
                 type="password"
@@ -56,16 +56,16 @@ export default function Login() {
                 required
               />
             </Form.Group>
-            <Button type="submit" className="w-100" disabled={busy}>
+            <Button type="submit" className="w-full" disabled={busy}>
               {busy ? <Spinner size="sm" /> : 'Sign in'}
             </Button>
           </Form>
-          <p className="text-center small mt-4 mb-0" style={{ color: 'var(--sv-muted)' }}>
-            <Link to="/privacy" className="text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+          <p className="mt-6 mb-0 text-center text-sm text-muted">
+            <Link to="/privacy" className="text-muted no-underline hover:text-body">
               Privacy Policy
             </Link>
             <span className="mx-2">·</span>
-            <Link to="/terms" className="text-decoration-none" style={{ color: 'var(--sv-muted)' }}>
+            <Link to="/terms" className="text-muted no-underline hover:text-body">
               Terms of Service
             </Link>
           </p>

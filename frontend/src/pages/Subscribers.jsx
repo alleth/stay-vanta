@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card, Table, Badge, Button, Spinner, Alert, Row, Col, Form, Collapse } from 'react-bootstrap'
+import { Card, Table, Badge, Button, Spinner, Alert, Form } from '../components/ui'
 import {
   listSubscribers,
   createSubscriber,
@@ -93,97 +93,95 @@ export default function Subscribers() {
 
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-1">
-        <h1 className="sv-serif fw-bold m-0" style={{ fontSize: '2rem' }}>Subscribers</h1>
+      <div className="mb-1 flex items-center justify-between">
+        <h1 className="sv-serif m-0 text-[2rem] font-bold">Subscribers</h1>
         <Button variant="primary" size="sm" onClick={() => setShowForm((s) => !s)}>
           {showForm ? 'Cancel' : 'Add subscriber'}
         </Button>
       </div>
-      <p className="mb-4" style={{ color: 'var(--sv-muted)' }}>
+      <p className="mb-6 text-muted">
         Hotels &amp; resorts subscribed to the platform, each with its admin and monthly fee.
       </p>
 
-      <Collapse in={showForm}>
-        <div>
-          <Card className="mb-4">
-            <Card.Header>New subscriber</Card.Header>
-            <Card.Body>
-              {formError && <Alert variant="danger">{formError}</Alert>}
-              <Form onSubmit={submit}>
-                <Row className="g-3">
-                  <Col md={6}>
-                    <Form.Label>Hotel / resort name</Form.Label>
-                    <Form.Control value={form.name} onChange={set('name')} required />
-                  </Col>
-                  <Col md={3}>
-                    <Form.Label>Type</Form.Label>
-                    <Form.Select value={form.type} onChange={set('type')}>
-                      <option value="hotel">Hotel</option>
-                      <option value="resort">Resort</option>
-                    </Form.Select>
-                  </Col>
-                  <Col md={3}>
-                    <Form.Label>Monthly fee (₱)</Form.Label>
-                    <Form.Control
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.subscription_fee}
-                      onChange={set('subscription_fee')}
-                    />
-                  </Col>
-                  <Col md={12}>
-                    <Form.Label>Address</Form.Label>
-                    <Form.Control value={form.address} onChange={set('address')} />
-                  </Col>
-                  <Col md={12}>
-                    <hr className="my-1" />
-                    <div className="small text-uppercase" style={{ color: 'var(--sv-muted)', letterSpacing: '0.04em' }}>
-                      Admin (hotel/resort head)
-                    </div>
-                  </Col>
-                  <Col md={4}>
-                    <Form.Label>Admin name</Form.Label>
-                    <Form.Control value={form.admin_name} onChange={set('admin_name')} required />
-                  </Col>
-                  <Col md={4}>
-                    <Form.Label>Admin email</Form.Label>
-                    <Form.Control type="email" value={form.admin_email} onChange={set('admin_email')} required />
-                  </Col>
-                  <Col md={4}>
-                    <Form.Label>Temp password</Form.Label>
-                    <Form.Control type="text" value={form.admin_password} onChange={set('admin_password')} required />
-                  </Col>
-                </Row>
-                <div className="mt-3 text-end">
-                  <Button type="submit" variant="primary" disabled={saving}>
-                    {saving ? <Spinner size="sm" /> : 'Create subscriber'}
-                  </Button>
+      {showForm && (
+        <Card className="mb-6">
+          <Card.Header>New subscriber</Card.Header>
+          <Card.Body>
+            {formError && <Alert variant="danger">{formError}</Alert>}
+            <Form onSubmit={submit}>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+                <div className="md:col-span-6">
+                  <Form.Label>Hotel / resort name</Form.Label>
+                  <Form.Control value={form.name} onChange={set('name')} required />
                 </div>
-              </Form>
-            </Card.Body>
-          </Card>
-        </div>
-      </Collapse>
+                <div className="md:col-span-3">
+                  <Form.Label>Type</Form.Label>
+                  <Form.Select value={form.type} onChange={set('type')}>
+                    <option value="hotel">Hotel</option>
+                    <option value="resort">Resort</option>
+                  </Form.Select>
+                </div>
+                <div className="md:col-span-3">
+                  <Form.Label>Monthly fee (₱)</Form.Label>
+                  <Form.Control
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.subscription_fee}
+                    onChange={set('subscription_fee')}
+                  />
+                </div>
+                <div className="md:col-span-12">
+                  <Form.Label>Address</Form.Label>
+                  <Form.Control value={form.address} onChange={set('address')} />
+                </div>
+                <div className="md:col-span-12">
+                  <hr className="my-1" />
+                  <div className="text-sm uppercase tracking-[0.04em] text-muted">
+                    Admin (hotel/resort head)
+                  </div>
+                </div>
+                <div className="md:col-span-4">
+                  <Form.Label>Admin name</Form.Label>
+                  <Form.Control value={form.admin_name} onChange={set('admin_name')} required />
+                </div>
+                <div className="md:col-span-4">
+                  <Form.Label>Admin email</Form.Label>
+                  <Form.Control type="email" value={form.admin_email} onChange={set('admin_email')} required />
+                </div>
+                <div className="md:col-span-4">
+                  <Form.Label>Temp password</Form.Label>
+                  <Form.Control type="text" value={form.admin_password} onChange={set('admin_password')} required />
+                </div>
+              </div>
+              <div className="mt-4 text-right">
+                <Button type="submit" variant="primary" disabled={saving}>
+                  {saving ? <Spinner size="sm" /> : 'Create subscriber'}
+                </Button>
+              </div>
+            </Form>
+          </Card.Body>
+        </Card>
+      )}
 
       <Card>
         <Card.Header>Registered hotels &amp; resorts</Card.Header>
-        <Table responsive hover className="align-middle mb-0">
+        <Table hover>
           <thead>
             <tr>
               <th>Name</th>
               <th>Type</th>
               <th>Admin</th>
               <th>Subscription</th>
-              <th className="text-end">Monthly fee</th>
+              <th className="text-right">Monthly fee</th>
               <th>Expires</th>
-              <th className="text-end">Action</th>
+              <th className="text-right">Action</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center py-4" style={{ color: 'var(--sv-muted)' }}>
+                <td colSpan={7} className="py-6 text-center text-muted">
                   No subscribers yet.
                 </td>
               </tr>
@@ -192,16 +190,16 @@ export default function Subscribers() {
               const admin = (p.users || [])[0]
               return (
                 <tr key={p.id}>
-                  <td className="fw-medium">{p.name}</td>
-                  <td className="text-capitalize">{p.type}</td>
+                  <td className="font-medium">{p.name}</td>
+                  <td className="capitalize">{p.type}</td>
                   <td>
                     {admin ? (
                       <div>
                         <div>{admin.name}</div>
-                        <div className="small" style={{ color: 'var(--sv-muted)' }}>{admin.email}</div>
+                        <div className="text-xs text-muted">{admin.email}</div>
                       </div>
                     ) : (
-                      <span style={{ color: 'var(--sv-muted)' }}>— none —</span>
+                      <span className="text-muted">— none —</span>
                     )}
                   </td>
                   <td>
@@ -211,9 +209,9 @@ export default function Subscribers() {
                       <Badge bg="secondary">Inactive</Badge>
                     )}
                   </td>
-                  <td className="text-end">{formatMoney(p.subscription_fee)}</td>
-                  <td style={{ color: 'var(--sv-muted)' }}>{p.subscription_expires_at ?? '—'}</td>
-                  <td className="text-end">
+                  <td className="text-right">{formatMoney(p.subscription_fee)}</td>
+                  <td className="text-muted">{p.subscription_expires_at ?? '—'}</td>
+                  <td className="text-right">
                     <Button
                       size="sm"
                       variant="outline-secondary"

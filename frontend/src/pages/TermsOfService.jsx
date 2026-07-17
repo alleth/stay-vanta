@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Container, Card, Button } from 'react-bootstrap'
+import { Card, Button } from '../components/ui'
 
 // Public page (no auth) — see the /terms route in App.jsx. Linked from the
 // login screen and the app footer.
@@ -10,8 +10,8 @@ const LAST_UPDATED = 'June 22, 2026'
 
 function Section({ title, children }) {
   return (
-    <section className="mb-4">
-      <h2 className="h5 fw-bold">{title}</h2>
+    <section className="mb-6">
+      <h2 className="mb-2 text-lg font-bold">{title}</h2>
       {children}
     </section>
   )
@@ -19,18 +19,18 @@ function Section({ title, children }) {
 
 export default function TermsOfService() {
   return (
-    <Container className="py-5" style={{ maxWidth: 820 }}>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <Link to="/" className="sv-serif fw-bold fs-4 text-decoration-none">
+    <div className="mx-auto w-full max-w-[820px] px-4 py-12">
+      <div className="mb-6 flex items-center justify-between">
+        <Link to="/" className="sv-serif text-2xl font-bold text-body no-underline">
           Stay<span className="sv-accent">Vanta</span>
         </Link>
         <Button as={Link} to="/" variant="outline-secondary" size="sm">Back</Button>
       </div>
 
       <Card className="shadow-sm">
-        <Card.Body className="p-4 p-md-5">
-          <h1 className="h3 fw-bold mb-1">Terms of Service</h1>
-          <p className="text-muted small mb-4">Last updated: {LAST_UPDATED}</p>
+        <Card.Body className="p-6 md:p-12">
+          <h1 className="mb-1 text-2xl font-bold">Terms of Service</h1>
+          <p className="mb-6 text-sm text-muted">Last updated: {LAST_UPDATED}</p>
 
           <p>
             These Terms of Service (&ldquo;Terms&rdquo;) govern access to and use of StayVanta, an
@@ -51,7 +51,7 @@ export default function TermsOfService() {
           </Section>
 
           <Section title="Accounts &amp; eligibility">
-            <ul className="mb-0">
+            <ul className="mb-0 list-disc space-y-1 pl-5">
               <li>
                 Accounts are created for staff with a defined role (owner, admin, or receptionist).
                 You must provide accurate information and keep it current.
@@ -70,7 +70,7 @@ export default function TermsOfService() {
 
           <Section title="Acceptable use">
             <p>You agree not to:</p>
-            <ul className="mb-0">
+            <ul className="mb-0 list-disc space-y-1 pl-5">
               <li>use the Service unlawfully or in violation of these Terms;</li>
               <li>access data or accounts you are not authorized to access;</li>
               <li>
@@ -164,9 +164,9 @@ export default function TermsOfService() {
         </Card.Body>
       </Card>
 
-      <p className="text-center text-muted small mt-4 mb-0">
-        &copy; {new Date().getFullYear()} StayVanta · <Link to="/privacy" className="text-decoration-none">Privacy Policy</Link>
+      <p className="mt-6 mb-0 text-center text-sm text-muted">
+        &copy; {new Date().getFullYear()} StayVanta · <Link to="/privacy" className="text-muted no-underline hover:text-body">Privacy Policy</Link>
       </p>
-    </Container>
+    </div>
   )
 }

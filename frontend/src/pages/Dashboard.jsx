@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Row, Col, Card, Alert, Form } from 'react-bootstrap'
+import { Card, Alert, Form } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { ownerDashboard, adminDashboard, dailyCollection } from '../api/reports'
 import { formatMoney } from '../utils/format'
@@ -11,27 +11,22 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
-function Tiles({ tiles, cols = 3, money = false }) {
+function Tiles({ tiles, money = false }) {
   return (
-    <Row className="g-3 mb-4">
+    <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {tiles.map((t) => (
-        <Col key={t.label} sm={6} lg={cols}>
-          <Card className="h-100">
-            <Card.Body className="p-4">
-              <div
-                className="small text-uppercase"
-                style={{ color: 'var(--sv-muted)', letterSpacing: '0.04em' }}
-              >
-                {t.label}
-              </div>
-              <div className="sv-serif fw-bold mt-2" style={{ fontSize: money ? '1.75rem' : '2.25rem' }}>
-                {money ? formatMoney(t.value) : t.value}
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
+        <Card key={t.label} className="h-full">
+          <Card.Body className="p-6">
+            <div className="text-sm uppercase tracking-[0.04em] text-muted">
+              {t.label}
+            </div>
+            <div className={`sv-serif mt-2 font-bold ${money ? 'text-[1.75rem]' : 'text-[2.25rem]'}`}>
+              {money ? formatMoney(t.value) : t.value}
+            </div>
+          </Card.Body>
+        </Card>
       ))}
-    </Row>
+    </div>
   )
 }
 
@@ -54,7 +49,7 @@ function dashboardError(err) {
 
 function SectionTitle({ children }) {
   return (
-    <h2 className="h6 text-uppercase mb-3" style={{ color: 'var(--sv-muted)', letterSpacing: '0.04em' }}>
+    <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.04em] text-muted">
       {children}
     </h2>
   )
@@ -90,8 +85,8 @@ function CollectionReport({ allowMonthly }) {
 
   return (
     <>
-      <Card className="mb-3">
-        <Card.Body className="d-flex align-items-center gap-3 flex-wrap py-3">
+      <Card className="mb-4">
+        <Card.Body className="flex flex-wrap items-center gap-4 px-4 py-3">
           {allowMonthly && (
             <Form.Select size="sm" value={mode} style={{ width: 'auto' }}
               onChange={(e) => setMode(e.target.value)}>
@@ -115,7 +110,7 @@ function CollectionReport({ allowMonthly }) {
             </>
           )}
           {data && (
-            <span className="small ms-auto" style={{ color: 'var(--sv-muted)' }}>
+            <span className="ml-auto text-sm text-muted">
               {data.invoices.count} settled invoice(s) · {data.food_orders.count} paid food order(s)
             </span>
           )}
@@ -125,7 +120,6 @@ function CollectionReport({ allowMonthly }) {
       {!data && !error && <SkeletonCards count={3} />}
       {data && (
         <Tiles
-          cols={3}
           money
           tiles={[
             { label: 'Total collected', value: data.total },
@@ -142,8 +136,8 @@ function CollectionReport({ allowMonthly }) {
 function ReceptionistDashboard({ user }) {
   return (
     <div>
-      <h1 className="sv-serif fw-bold mb-1" style={{ fontSize: '2rem' }}>Dashboard</h1>
-      <p className="mb-4" style={{ color: 'var(--sv-muted)' }}>
+      <h1 className="sv-serif mb-1 text-[2rem] font-bold">Dashboard</h1>
+      <p className="mb-6 text-muted">
         Welcome back, {user?.name}. Money collected on the selected day.
       </p>
       <SectionTitle>Daily collection</SectionTitle>
@@ -166,14 +160,13 @@ function OwnerDashboard({ user }) {
 
   return (
     <div>
-      <h1 className="sv-serif fw-bold mb-1" style={{ fontSize: '2rem' }}>Dashboard</h1>
-      <p className="mb-4" style={{ color: 'var(--sv-muted)' }}>
+      <h1 className="sv-serif mb-1 text-[2rem] font-bold">Dashboard</h1>
+      <p className="mb-6 text-muted">
         Welcome back, {user?.name}. Platform revenue and active subscribers.
       </p>
 
       <SectionTitle>Subscription revenue</SectionTitle>
       <Tiles
-        cols={3}
         money
         tiles={[
           { label: 'This week', value: data.revenue.week },
@@ -184,7 +177,6 @@ function OwnerDashboard({ user }) {
 
       <SectionTitle>Active users</SectionTitle>
       <Tiles
-        cols={3}
         tiles={[
           { label: 'Hotels & Resorts', value: data.counts.hotels },
           { label: 'Active subscriptions', value: data.counts.active_subscriptions },
@@ -209,14 +201,13 @@ function AdminDashboard({ user }) {
 
   return (
     <div>
-      <h1 className="sv-serif fw-bold mb-1" style={{ fontSize: '2rem' }}>Dashboard</h1>
-      <p className="mb-4" style={{ color: 'var(--sv-muted)' }}>
+      <h1 className="sv-serif mb-1 text-[2rem] font-bold">Dashboard</h1>
+      <p className="mb-6 text-muted">
         Welcome back, {user?.name}. Today at your property.
       </p>
 
       <SectionTitle>Operations</SectionTitle>
       <Tiles
-        cols={3}
         tiles={[
           { label: 'Inventory items', value: data.cards.inventory_items },
           { label: 'Occupied rooms', value: data.cards.occupied_rooms },
@@ -227,7 +218,6 @@ function AdminDashboard({ user }) {
 
       <SectionTitle>Revenue collected</SectionTitle>
       <Tiles
-        cols={3}
         money
         tiles={[
           { label: 'This week', value: data.revenue.week },

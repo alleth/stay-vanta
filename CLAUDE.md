@@ -7,8 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 StayVanta — "All-in-One Hotel & Resort Management Platform". A monorepo of two
 independently-deployed apps that talk over a JSON API:
 
-- `frontend/` — React 19 SPA (Vite). UI kit is **React-Bootstrap**; **Tailwind v4**
-  is layered on top for utility tweaks. Routing via react-router-dom v7, HTTP via axios.
+- `frontend/` — React 19 SPA (Vite). Styling is **pure Tailwind v4** (no Bootstrap):
+  design tokens live in `src/index.css` `@theme` (so `text-muted`, `bg-subtle`,
+  `border-line`, `bg-ink`, `text-accent`… are utilities), and a small in-house kit
+  `src/components/ui.jsx` provides Button/Badge/Card/Table/Modal/Form/Alert/Tabs/etc.
+  with react-bootstrap-style APIs (`variant`, `size`, `show`/`onHide`). Routing via
+  react-router-dom v7, HTTP via axios.
 - `backend/` — **CakePHP 5** JSON REST API. **MySQL** (XAMPP locally, Railway in prod).
 
 Frontend deploys to **Cloudflare Pages**; the backend API deploys separately. They are
@@ -24,7 +28,9 @@ different origins in production (CORS), same origin in dev (Vite proxy).
 - Roll back: `php bin/cake.php migrations rollback`
 - Create a migration: `php bin/cake.php bake migration CreateThings`
 - Seed a user: `php bin/cake.php create_user --name N --email E --password P --role owner|admin|receptionist [--property-id N]`
-- Tests: `vendor/bin/phpunit` — single file: `vendor/bin/phpunit tests/TestCase/Path/ThingTest.php`
+- Tests: `vendor/bin/phpunit` — single file: `vendor/bin/phpunit tests/TestCase/Path/ThingTest.php`.
+  The suite is still the CakePHP skeleton's (`ApplicationTest`, `PagesControllerTest`) — no
+  domain logic is covered; don't assume a green run validates business rules.
 - Style: `composer cs-check` / `composer cs-fix` (phpcs / phpcbf, CakePHP standard). A
   `phpstan.neon` exists but PHPStan is only a `suggest` (not installed / no `composer stan`
   script) — run it only after adding `phpstan/phpstan` to `require-dev`.
@@ -43,6 +49,11 @@ XAMPP MySQL must be running before backend commands that touch the DB. Start it 
 XAMPP control panel, or directly: `C:\xampp\mysql\bin\mysqld.exe --defaults-file=C:\xampp\mysql\bin\my.ini --standalone`.
 Create DBs: `stay_vanta` (dev) and `stay_vanta_test` (tests). Default local creds are
 `root` with empty password.
+
+**Local is MariaDB, prod is MySQL 8** — MySQL 8 enforces `ONLY_FULL_GROUP_BY` by default,
+XAMPP's MariaDB doesn't, so a query can pass locally and 500 on Railway. Known footgun:
+`$query->distinct(['col'])->count()` (emits `GROUP BY` while selecting all columns) — use
+`AppController::countDistinct($query, 'col')` instead, which emits `COUNT(DISTINCT col)`.
 
 ## Architecture & conventions
 
@@ -265,7 +276,7 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   orders (`food_orders`). Payment is `paid` / `charge_to_room` / `unpaid`; charge-to-room flows
   onto the guest's `invoices`. Cancel reverses stock + invoice. See `FoodOrdersTable::place()`.
 
-The base schema is `backend/config/Migrations/20260615000000_InitialSchema.php`; later
-migrations add the subscription columns (`AddSubscriptionFieldsToProperties`) and revenue-tracking
-columns (`AddRevenueFields` — `invoices.settled_at`, etc.). `schema-dump-default.lock` is the
-regenerated dump.
+The base schema is `backend/config/Migrations/20260615000000_InitialSchema.php`; each feature
+since ships its own dated migration on top (subscriptions, revenue fields, soft-deletes,
+extra charges, promo rates, downpayments, …) — add new schema changes the same way rather
+than editing the base schema. `schema-dump-default.lock` is the regenerated dump.
