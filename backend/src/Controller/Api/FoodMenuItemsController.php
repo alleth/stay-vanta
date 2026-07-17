@@ -57,7 +57,8 @@ class FoodMenuItemsController extends AppController
             throw new BadRequestException('property_id is required.');
         }
 
-        $inventoryItemId = $this->request->getData('inventory_item_id') ?: null;
+        $inventoryItemId = $this->request->getData('inventory_item_id');
+        $inventoryItemId = $inventoryItemId !== null && $inventoryItemId !== '' ? (int)$inventoryItemId : null;
         $type = $this->request->getData('type');
 
         $menu = $this->fetchTable('FoodMenuItems');
@@ -97,7 +98,8 @@ class FoodMenuItemsController extends AppController
             $menu->find()->where(['FoodMenuItems.id' => $id, 'FoodMenuItems.deleted_at IS' => null]),
         )->firstOrFail();
 
-        $inventoryItemId = $this->request->getData('inventory_item_id') ?: null;
+        $inventoryItemId = $this->request->getData('inventory_item_id');
+        $inventoryItemId = $inventoryItemId !== null && $inventoryItemId !== '' ? (int)$inventoryItemId : null;
         $type = $this->request->getData('type');
 
         $menu->patchEntity($item, [

@@ -1076,9 +1076,11 @@ const STOCK_KIND_FOR_TYPE = { food: 'food_stock', linen: 'linen' }
 
 function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved }) {
   const editing = Boolean(item)
+  // The type is fixed by which tab (Food/Linens) this modal was opened from —
+  // not user-selectable, since that's the whole point of separating the tabs.
+  const menuType = item?.type ?? defaultType ?? 'food'
   const [form, setForm] = useState({
     name: item?.name ?? '',
-    type: item?.type ?? defaultType ?? 'food',
     price: item?.price ?? '',
     inventory_item_id: item?.inventory_item_id ?? '',
     is_available: item?.is_available ?? true,
@@ -1086,23 +1088,15 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
 
   const stockOptions = useMemo(
-    () => inventory.filter((i) => i.inventory_category?.kind === STOCK_KIND_FOR_TYPE[form.type]),
-    [inventory, form.type],
+    () => inventory.filter((i) => i.inventory_category?.kind === STOCK_KIND_FOR_TYPE[menuType]),
+    [inventory, menuType],
   )
-  // Switching type can orphan the current link (e.g. Food → Linen) — clear it
-  // rather than silently submit a mismatched item.
-  function setType(e) {
-    const type = e.target.value
-    const stillValid = stockOptions.some((i) => String(i.id) === String(form.inventory_item_id))
-      && STOCK_KIND_FOR_TYPE[type] === STOCK_KIND_FOR_TYPE[form.type]
-    setForm({ ...form, type, inventory_item_id: stillValid ? form.inventory_item_id : '' })
-  }
 
   const linkedItem = inventory.find((i) => String(i.id) === String(form.inventory_item_id))
   const outOfStock = linkedItem && Number(linkedItem.quantity) <= 0
 
   const { run, busy, err } = useSubmit(async () => {
-    const payload = { ...form, inventory_item_id: form.inventory_item_id || null }
+    const payload = { ...form, type: menuType, inventory_item_id: form.inventory_item_id || null }
     if (editing) await updateMenuItem(item.id, payload)
     else await createMenuItem(payload, propertyId)
     onSaved()
@@ -1112,17 +1106,10 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
     <Modal show onHide={onClose} centered>
       <Form onSubmit={run}>
         <Modal.Header closeButton>
-          <Modal.Title>{editing ? 'Edit item' : form.type === 'linen' ? 'Add linen item' : 'Add food item'}</Modal.Title>
+          <Modal.Title>{editing ? 'Edit item' : menuType === 'linen' ? 'Add linen item' : 'Add food item'}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-4">
-            <Form.Label>Type</Form.Label>
-            <Form.Select value={form.type} onChange={setType}>
-              <option value="food">Food</option>
-              <option value="linen">Linen</option>
-            </Form.Select>
-          </Form.Group>
           <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus />
@@ -1143,7 +1130,7 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
           </div>
           <Form.Group>
             <Form.Label>
-              Linked {form.type === 'linen' ? 'linen' : 'food'} stock (decrements on order)
+              Linked {menuType === 'linen' ? 'linen' : 'food'} stock (decrements on order)
             </Form.Label>
             <Form.Select value={form.inventory_item_id} onChange={set('inventory_item_id')}>
               <option value="">Not linked</option>
