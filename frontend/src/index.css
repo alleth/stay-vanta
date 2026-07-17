@@ -79,4 +79,25 @@
     border-bottom-right-radius: 0.5rem;
   }
   .sv-group > *:focus { position: relative; z-index: 1; }
+
+  /* Boot splash (components/BrandSplash.jsx; duplicated inline in index.html
+     for the pre-JS gap — keep both in sync): staggered letter wave + a
+     sliding accent bar. */
+  .sv-splash-letter {
+    display: inline-block;
+    animation: sv-wave 1.3s ease-in-out infinite;
+  }
+  .sv-splash-bar {
+    animation: sv-bar-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+}
+
+@keyframes sv-wave {
+  0%, 40%, 100% { transform: translateY(0); }
+  20% { transform: translateY(-0.3em); }
+}
+
+@keyframes sv-bar-slide {
+  0% { left: -35%; }
+  100% { left: 100%; }
 }

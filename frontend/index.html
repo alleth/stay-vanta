@@ -5,9 +5,67 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>StayVanta — All-in-One Hotel & Resort Management Platform</title>
+    <!-- Boot splash for the gap before the JS bundle loads. React replaces
+         #root with the identical BrandSplash component while the session
+         resolves, so a refresh shows one continuous animation. Keep in sync
+         with src/components/BrandSplash.jsx / src/index.css. -->
+    <style>
+      body { margin: 0; background: #f7f7f8; }
+      .sv-boot {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+      .sv-boot-word {
+        font-size: 2.25rem;
+        line-height: 2.5rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: #1a1a1e;
+      }
+      .sv-boot-word span {
+        display: inline-block;
+        animation: sv-wave 1.3s ease-in-out infinite;
+      }
+      .sv-boot-word .accent { color: #d99211; }
+      .sv-boot-track {
+        position: relative;
+        width: 10rem;
+        height: 0.25rem;
+        border-radius: 9999px;
+        background: #f1f1f3;
+        overflow: hidden;
+      }
+      .sv-boot-bar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 33%;
+        border-radius: 9999px;
+        background: #d99211;
+        animation: sv-bar-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
+      @keyframes sv-wave {
+        0%, 40%, 100% { transform: translateY(0); }
+        20% { transform: translateY(-0.3em); }
+      }
+      @keyframes sv-bar-slide {
+        0% { left: -35%; }
+        100% { left: 100%; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="sv-boot" role="status" aria-label="Loading StayVanta">
+        <div class="sv-boot-word" aria-hidden="true"><span style="animation-delay:0ms">S</span><span style="animation-delay:70ms">t</span><span style="animation-delay:140ms">a</span><span style="animation-delay:210ms">y</span><span class="accent" style="animation-delay:280ms">V</span><span class="accent" style="animation-delay:350ms">a</span><span class="accent" style="animation-delay:420ms">n</span><span class="accent" style="animation-delay:490ms">t</span><span class="accent" style="animation-delay:560ms">a</span></div>
+        <div class="sv-boot-track" aria-hidden="true"><div class="sv-boot-bar"></div></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
