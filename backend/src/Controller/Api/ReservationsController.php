@@ -210,68 +210,32 @@ class ReservationsController extends AppController
                 $rooms->saveOrFail($room);
             }
 
-            // On check-out, post the room charge to the guest's invoice so it
-            // becomes collectable revenue (room revenue is otherwise computed
-            // only at read-time and never persisted).
+            // The room charge is usually already posted from Mark paid
+            // (Front Desk) — postRoomCharge() is a no-op then. It still runs
+            // here as a fallback for a reservation checked out without ever
+            // being marked paid, so room revenue is always persisted by
+            // check-out.
             if ($transition === 'check-out' && $reservation->guest_id) {
-                $quote = $reservations->quote(
-                    $reservation,
-                    $this->resolveBaseRate((int)$reservation->property_id, $reservation->room_id),
-                );
+                $this->postRoomCharge($reservation);
+
                 $downpayment = (float)$reservation->downpayment;
-                if ($quote['subtotal'] > 0 || $downpayment > 0) {
+                if ($downpayment > 0) {
                     $invoices = $this->fetchTable('Invoices');
                     $invoice = $invoices->openInvoiceFor(
                         (int)$reservation->property_id,
                         (int)$reservation->guest_id,
                         (int)$reservation->id,
                     );
-                    // Itemized: the room subtotal (noting the promo rate, if
-                    // any), then the senior/PWD discount as its own negative
-                    // line — the folio shows exactly what applied, not a
-                    // single net figure.
-                    if ($quote['subtotal'] > 0) {
-                        $rateNote = $reservation->promo_rate !== null
-                            ? sprintf(
-                                ' (%s promo rate)',
-                                ReservationsTable::SOURCE_LABELS[$reservation->source] ?? $reservation->source,
-                            )
-                            : '';
-                        $description = sprintf(
-                            'Room %s · %d night(s)%s',
-                            $reservation->room_id ? '#' . $reservation->room_id : '',
-                            $quote['nights'],
-                            $rateNote,
-                        );
-                        $invoices->addLine(
-                            $invoice,
-                            $description,
-                            (float)$quote['subtotal'],
-                            'reservation',
-                            (int)$reservation->id,
-                        );
-                    }
-                    if ($quote['discount'] > 0) {
-                        $label = $reservation->discount_type === 'senior' ? 'Senior' : 'PWD';
-                        $invoices->addLine(
-                            $invoice,
-                            sprintf('%s discount (20%%)', $label),
-                            -(float)$quote['discount'],
-                            'reservation',
-                            (int)$reservation->id,
-                        );
-                    }
-                    // The downpayment was already collected at booking (its own
-                    // settled invoice) — credit it so only the balance is due.
-                    if ($downpayment > 0) {
-                        $invoices->addLine(
-                            $invoice,
-                            'Less: downpayment already collected',
-                            -$downpayment,
-                            'downpayment_credit',
-                            (int)$reservation->id,
-                        );
-                    }
+                    // The downpayment was already collected at booking (its
+                    // own settled invoice) — credit it so only the balance
+                    // is due.
+                    $invoices->addLine(
+                        $invoice,
+                        'Less: downpayment already collected',
+                        -$downpayment,
+                        'downpayment_credit',
+                        (int)$reservation->id,
+                    );
                 }
             }
 
@@ -296,10 +260,14 @@ class ReservationsController extends AppController
                 }
             }
 
-            // Cancelling reverses any early check-in fee already posted.
+            // Cancelling reverses any early check-in fee already posted, and
+            // any room charge already posted from Mark paid ahead of
+            // check-out (a cancelled booking shouldn't leave a room charge
+            // on the guest's tab).
             if ($transition === 'cancel') {
                 $invoices = $this->fetchTable('Invoices');
                 $invoices->removeLinesFor('early_check_in', (int)$reservation->id);
+                $invoices->removeLinesFor('reservation', (int)$reservation->id);
 
                 // A cancelled advance booking doesn't get the downpayment back
                 // in full: 10% is retained, 90% is refunded onto the settled
@@ -333,10 +301,12 @@ class ReservationsController extends AppController
      * invoice's own settled status (Food & Orders → Invoices).
      *
      * Marking a reservation `paid` opens (or reuses) the guest's invoice right
-     * away, ahead of check-out — so any extras ordered afterwards (additional
-     * linens, food) land on that same open tab via `openInvoiceFor()`'s
-     * find-or-create-by-guest lookup, instead of only getting one once the
-     * first charge happens to be posted.
+     * away, ahead of check-out, and posts the room charge onto it immediately
+     * (instead of only at check-out) — so the amount is visible on Food &
+     * Orders → Invoices as soon as the guest has settled up, whether that
+     * happens at check-in or any time before check-out. Any extras ordered
+     * afterwards (additional linens, food) land on that same open tab via
+     * `openInvoiceFor()`'s find-or-create-by-guest lookup.
      */
     public function payment(int $id): void
     {
@@ -351,18 +321,79 @@ class ReservationsController extends AppController
             throw new BadRequestException('payment_status must be unpaid or paid.');
         }
 
-        $reservation->set('payment_status', $status);
-        $reservations->saveOrFail($reservation);
+        $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $status) {
+            $reservation->set('payment_status', $status);
+            $reservations->saveOrFail($reservation);
 
-        if ($status === 'paid' && $reservation->guest_id) {
-            $this->fetchTable('Invoices')->openInvoiceFor(
-                (int)$reservation->property_id,
-                (int)$reservation->guest_id,
+            if ($status === 'paid' && $reservation->guest_id) {
+                $this->fetchTable('Invoices')->openInvoiceFor(
+                    (int)$reservation->property_id,
+                    (int)$reservation->guest_id,
+                    (int)$reservation->id,
+                );
+                $this->postRoomCharge($reservation);
+            }
+        });
+
+        $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * Post the room charge — subtotal plus any senior/PWD discount as its own
+     * negative line — to the guest's invoice, itemized the same way whether
+     * it's triggered by Mark paid or by check-out. Idempotent: a no-op if a
+     * `reservation`-sourced line already exists for this booking, so whichever
+     * of the two happens first is the one that posts it.
+     */
+    private function postRoomCharge(Reservation $reservation): void
+    {
+        if (!$reservation->guest_id) {
+            return;
+        }
+
+        $invoices = $this->fetchTable('Invoices');
+        if ($invoices->invoiceForLine('reservation', (int)$reservation->id) !== null) {
+            return;
+        }
+
+        $quote = $this->fetchTable('Reservations')->quote(
+            $reservation,
+            $this->resolveBaseRate((int)$reservation->property_id, $reservation->room_id),
+        );
+        if ($quote['subtotal'] <= 0) {
+            return;
+        }
+
+        $invoice = $invoices->openInvoiceFor(
+            (int)$reservation->property_id,
+            (int)$reservation->guest_id,
+            (int)$reservation->id,
+        );
+
+        $rateNote = $reservation->promo_rate !== null
+            ? sprintf(
+                ' (%s promo rate)',
+                ReservationsTable::SOURCE_LABELS[$reservation->source] ?? $reservation->source,
+            )
+            : '';
+        $description = sprintf(
+            'Room %s · %d night(s)%s',
+            $reservation->room_id ? '#' . $reservation->room_id : '',
+            $quote['nights'],
+            $rateNote,
+        );
+        $invoices->addLine($invoice, $description, (float)$quote['subtotal'], 'reservation', (int)$reservation->id);
+
+        if ($quote['discount'] > 0) {
+            $label = $reservation->discount_type === 'senior' ? 'Senior' : 'PWD';
+            $invoices->addLine(
+                $invoice,
+                sprintf('%s discount (20%%)', $label),
+                -(float)$quote['discount'],
+                'reservation',
                 (int)$reservation->id,
             );
         }
-
-        $this->respondWithReservation($reservation, 200);
     }
 
     /**

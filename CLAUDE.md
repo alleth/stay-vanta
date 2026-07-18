@@ -180,9 +180,15 @@ and via `ProtectedRoute roles=` in `App.jsx`** (frontend guards are UX only):
 - **Admin (hotel) revenue = collected**: Σ settled `invoices.total` (bucketed by `invoices.settled_at`,
   stamped in `InvoicesController::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room
   food already lives inside invoices, so only `paid` food orders are added (no double count).
-- **Room revenue is persisted on check-out**: `ReservationsController::transition` posts the
-  `quote()` total as a `reservation` line on the guest's invoice (via `InvoicesTable::addLine`),
-  so rooms become collectable revenue (previously `quote()` was read-time only).
+- **Room revenue is persisted on Mark paid, falling back to check-out**: `ReservationsController::postRoomCharge()`
+  posts the `quote()` subtotal (itemized with any senior/PWD discount as its own negative line) as
+  `reservation` line(s) on the guest's invoice (via `InvoicesTable::addLine`), so rooms become
+  collectable revenue. It's called from both `payment()` (the moment a reservation is marked
+  `paid`, whether that's at check-in or any time before check-out) and `transition()`'s check-out
+  step; it's idempotent (a no-op if a `reservation`-sourced line already exists for that booking
+  via `InvoicesTable::invoiceForLine()`), so whichever happens first is the one that posts it, and
+  check-out is just a fallback for a reservation that skipped Mark paid. Cancelling reverses it
+  (`removeLinesFor('reservation', ...)`) alongside the early check-in fee reversal.
 - **Downpayments are collected at booking**: an advance booking creates an immediately-settled
   invoice (`InvoicesTable::settledInvoiceWith`, `settled_at` = now) holding the 50% `downpayment`
   line, so it counts as collected the day it's taken. Check-out posts a negative
@@ -278,14 +284,21 @@ touch it (occupancy is the nights `[check_in, check_out)`, so the check-out day 
 **Reservation payment status**: `reservations.payment_status` (`unpaid`|`paid`, default `unpaid`)
 is a Front Desk operational flag toggled via `POST /api/reservations/{id}/payment` — independent
 of the booking lifecycle (`status`) and of the linked invoice's own `open`/`settled` state; the
-reservations table shows a badge + Mark paid/unpaid button per row. On **check-out**,
-`ReservationsController::transition()` posts the room charge to the guest's invoice **itemized**:
-the subtotal as one line (noting the OTA promo rate in its description when `promo_rate` is set,
-via `ReservationsTable::SOURCE_LABELS`), then, if `discount_type` is `senior`/`pwd`, a separate
-negative "Senior/PWD discount (20%)" line — mirroring how `FoodOrdersTable::place()` itemizes its
-own discount, so the invoice folio always shows the discount and promo rate as their own lines,
-not folded into a single net figure. The reservations table's Total column shows the same
-breakdown (promo-rate note, discount amount, downpayment) inline.
+reservations table shows a badge + Mark paid/unpaid button per row. Marking a reservation `paid`
+opens (or reuses) the guest's invoice right away and posts the room charge onto it immediately via
+`ReservationsController::postRoomCharge()` — so a guest who pays at check-in (or any time before
+check-out) already shows the room amount on Food & Orders → Invoices, instead of only getting it
+at check-out. `postRoomCharge()` itemizes it: the subtotal as one line (noting the OTA promo rate
+in its description when `promo_rate` is set, via `ReservationsTable::SOURCE_LABELS`), then, if
+`discount_type` is `senior`/`pwd`, a separate negative "Senior/PWD discount (20%)" line —
+mirroring how `FoodOrdersTable::place()` itemizes its own discount, so the invoice folio always
+shows the discount and promo rate as their own lines, not folded into a single net figure. It's
+idempotent (checks `InvoicesTable::invoiceForLine('reservation', ...)` first), so **check-out**
+calling the same helper is just a fallback for a reservation that was never marked paid — whichever
+happens first is the one that actually posts the line. Cancelling a reservation reverses it
+(alongside the early check-in fee) so a cancelled booking never leaves a room charge on the tab.
+The reservations table's Total column shows the same breakdown (promo-rate note, discount amount,
+downpayment) inline.
 
 ### Staff & roles enforcement
 `UsersController` is the staff module and the canonical example of backend role enforcement:
