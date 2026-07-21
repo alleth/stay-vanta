@@ -802,18 +802,23 @@ function ReservationModal({
   // Guest name autocomplete over previously-registered guests.
   const [suggestions, setSuggestions] = useState([])
   const [showSug, setShowSug] = useState(false)
+  const [searching, setSearching] = useState(false) // true while a debounced lookup is in flight
 
   useEffect(() => {
     if (!showSug || guestId) return undefined
     const q = form.guest_name.trim()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived reset, not a data fetch
+    if (q.length < 2) { setSuggestions([]); setSearching(false); return undefined }
     let active = true
+    setSearching(true)
     const t = setTimeout(async () => {
-      if (q.length < 2) { if (active) setSuggestions([]); return }
       try {
         const list = await listGuests(propertyId, { q })
         if (active) setSuggestions(list.slice(0, 8))
-      } catch { /* ignore search errors */ }
-    }, 250)
+      } catch { /* ignore search errors */ } finally {
+        if (active) setSearching(false)
+      }
+    }, 200)
     return () => { active = false; clearTimeout(t) }
   }, [form.guest_name, showSug, guestId, propertyId])
 
@@ -832,6 +837,25 @@ function ReservationModal({
       contact_number: g.contact_number ?? '',
       email: g.email ?? '',
       address: g.address ?? '',
+    }))
+  }
+
+  // Undo picking a guest (e.g. the wrong suggestion was clicked): drop the
+  // link and blank every auto-filled detail field back out so the receptionist
+  // can search again or type a fresh guest from scratch.
+  function clearGuestSelection() {
+    setGuestId(null)
+    setDuplicates(null)
+    setSuggestions([])
+    setShowSug(false)
+    setForm((f) => ({
+      ...f,
+      guest_name: '',
+      guest_type: 'local',
+      nationality: '',
+      contact_number: '',
+      email: '',
+      address: '',
     }))
   }
 
@@ -944,7 +968,13 @@ function ReservationModal({
           <div className="mb-2 flex items-center justify-between">
             <span className="font-semibold">Guest details</span>
             {guestId && (
-              <Badge bg="success">Using existing guest</Badge>
+              <span className="flex items-center gap-2">
+                <Badge bg="success">Using existing guest</Badge>
+                <button type="button" className="text-xs text-red-600 hover:underline"
+                  onClick={clearGuestSelection}>
+                  Wrong guest? Clear
+                </button>
+              </span>
             )}
           </div>
 
@@ -979,9 +1009,15 @@ function ReservationModal({
                   onFocus={() => setShowSug(true)}
                   onBlur={() => setTimeout(() => setShowSug(false), 150)}
                   placeholder="Search a returning guest, or type a new name" />
-                {showSug && !guestId && suggestions.length > 0 && (
+                {searching && !guestId && (
+                  <Spinner size="sm" className="absolute right-2 top-1/2 -translate-y-1/2" />
+                )}
+                {showSug && !guestId && (searching || suggestions.length > 0) && (
                   <div className="absolute z-10 mt-1 max-h-[220px] w-full overflow-y-auto rounded-lg border border-line bg-surface shadow-md"
                     onMouseDown={(e) => e.preventDefault()}>
+                    {suggestions.length === 0 && searching && (
+                      <div className="px-3 py-2 text-xs text-muted">Searching…</div>
+                    )}
                     {suggestions.map((g) => (
                       <button type="button" key={g.id}
                         className="flex w-full flex-col px-3 py-2 text-left hover:bg-subtle"
