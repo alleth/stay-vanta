@@ -26,20 +26,15 @@ export const createRoomRate = (data, propertyId) =>
 export const updateRoomRate = (id, data) =>
   client.patch(`/room-rates/${id}`, data).then((r) => r.data.roomRate)
 
-// Booking sources (admin-configurable OTA list: Cocotel, Agoda, ...)
+// Booking sources — read-only from the frontend: the list a property books
+// through (Cocotel, Agoda, ...) is created implicitly by typing a new name
+// into "Add promo rate" (see createPromoRate/updatePromoRate below), not
+// managed separately.
 export const listBookingSources = (propertyId) =>
   client.get('/booking-sources', { params: withProp({}, propertyId) }).then((r) => r.data.bookingSources)
 
-export const createBookingSource = (data, propertyId) =>
-  client.post('/booking-sources', withProp(data, propertyId)).then((r) => r.data.bookingSource)
-
-export const updateBookingSource = (id, data) =>
-  client.patch(`/booking-sources/${id}`, data).then((r) => r.data.bookingSource)
-
-export const deleteBookingSource = (id) =>
-  client.delete(`/booking-sources/${id}`).then((r) => r.data)
-
-// Promo rates (admin-configured OTA nightly prices per booking source)
+// Promo rates (admin-configured OTA nightly prices per booking source).
+// `source_name` resolves-or-creates the booking source by name server-side.
 export const listPromoRates = (propertyId) =>
   client.get('/promo-rates', { params: withProp({}, propertyId) }).then((r) => r.data.promoRates)
 

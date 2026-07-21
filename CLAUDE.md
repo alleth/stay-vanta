@@ -148,8 +148,8 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/receipt-series` (any authed) · `POST /api/receipt-series` (**owner/admin only**; registers a pre-printed booklet — `type` is `invoice` (Physical/Sales Invoice) or `official_receipt`, plus optional `prefix`, `start_number`/`end_number`; zero-padding width is taken from how `start_number` was typed, e.g. `"0001"` → 4 digits) · `PATCH|PUT /api/receipt-series/{id}` (**owner/admin only**; toggles `is_active`) · `DELETE /api/receipt-series/{id}` (**owner/admin only**; refused once any number has been issued — deactivate instead)
 - `GET|POST /api/rooms` (create **owner/admin only**) · `PATCH|PUT /api/rooms/{id}` · `DELETE /api/rooms/{id}` (**owner/admin only**; refused if the room has reservations, removes room-specific rates)
 - `GET /api/room-rates[?room_id=]` · `POST /api/room-rates` (**owner/admin only**) · `PATCH|PUT /api/room-rates/{id}` (**owner/admin only**; fix a mistyped name/rate/target room — receptionists read rates but can't change them; a rate carries an optional `description` of the amenities & bed type the guest gets)
-- `GET /api/booking-sources` (any authed; starts **empty** for every property — nothing is pre-seeded) · `POST /api/booking-sources` (**owner/admin only**; `{name}` — `code` is slugified from the name and fixed from then on) · `PATCH|PUT /api/booking-sources/{id}` (**owner/admin only**; renames `name` only, `code` never changes) · `DELETE /api/booking-sources/{id}` (**owner/admin only**; refused while any reservation or promo rate still references its `code`)
-- `GET /api/promo-rates[?source=]` (any authed — the booking form reads them) · `POST /api/promo-rates` · `PATCH|PUT /api/promo-rates/{id}` · `DELETE /api/promo-rates/{id}` (writes **owner/admin only**; a row = booking `source` (one of the property's `booking_sources`, never `walk_in`) + rate `multiplier` (> 0, of the room's original rate), optionally room-specific via `room_id`)
+- `GET /api/booking-sources` (any authed; **read-only** — starts empty for every property; a row is created only as a side effect of `POST /api/promo-rates`/`PATCH /api/promo-rates/{id}`, never through this endpoint)
+- `GET /api/promo-rates[?source=]` (any authed — the booking form reads them) · `POST /api/promo-rates` · `PATCH|PUT /api/promo-rates/{id}` (writes **owner/admin only**; a row = booking `source` + rate `multiplier` (> 0, of the room's original rate), optionally room-specific via `room_id`; both take a typed `source_name`, never a `source` code — `BookingSourcesTable::resolveOrCreate()` resolves it to an existing source by name (case-insensitive) or creates a new one, so adding/editing a promo rate is the only way a booking source comes into being) · `DELETE /api/promo-rates/{id}`
 - `GET /api/extra-charges` (any authed; index **auto-seeds** the built-in `early_check_in` row per property) · `POST /api/extra-charges` (**owner/admin only**; custom charge, `code` null) · `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; set amount/active, built-in row's name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the built-in early check-in row)
 - `GET|POST /api/reservations[?status=]` · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; an **advance booking** (check-in after today, guest on file) collects a **50% downpayment** of the quoted total as an immediately-settled invoice; **check-out** credits it against the room charge; **cancel** from `booked` refunds 90% and retains 10% (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`); **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting; `promo_rate` is **never client-supplied** — booking resolves it server-side from `promo_rates` for OTA sources) · `POST /api/reservations/{id}/payment` (any authed; `{payment_status: unpaid|paid}` — a Front Desk operational flag independent of the booking lifecycle and of invoice settlement, toggled from the reservations table)
 - `GET /api/guests[?guest_type=&q=&page=&limit=]` (**paginated** → `{guests,total,page,limit}`; `limit` is only clamped 5–100 when a caller passes it — omitting it, as the Food & Orders charge-to-room picker and the Front Desk booking combobox do, returns the same wide unpaginated window (500) the endpoint always returned, so those client-side search comboboxes aren't affected by the Guests tab's pagination) · `GET /api/guests/stats` (total/local/foreign count **today's registrations only** — the cards reset daily; in_house is current) · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
@@ -256,18 +256,21 @@ handled it; transitions also flip `rooms.status` (occupied/available) and are gu
 allowed-from-state table. Pricing lives in `ReservationsTable::quote()`: nightly rate =
 `promo_rate` (OTA) ?? resolved room rate; senior/PWD apply `STATUTORY_DISCOUNT` (20%).
 
-**Booking sources are admin-configurable, not a hardcoded list**: `booking_sources` (managed
-on the Front Desk **Promo Rates** tab, writes owner/admin-only via `BookingSourcesController`)
-holds each property's own OTA list — whatever they actually book through (Cocotel, Agoda,
-Booking.com, ...) — instead of a fixed set baked into the code. **The list starts empty for
-every property; nothing is pre-seeded** — the Source dropdown only ever shows sources an admin
-explicitly added. `code` is slugified from the admin's typed name at creation and never
-changes afterward (it's what's stored on `reservations.source`/`promo_rates.source`); `name`
-is the editable display label. `'walk_in'` is NOT a `booking_sources` row — it's a fixed
-constant (`BookingSourcesTable::WALK_IN`) always offered alongside the configured list, since
-it's not an OTA and never carries a promo rate; deleting a source is refused while any reservation or
-promo rate still references its code. **Promo rates are admin-configured multipliers, not
-typed by receptionists**: the `promo_rates` table holds a `multiplier` (e.g. ×2 of the room's
+**Booking sources are admin-configurable, not a hardcoded list — and have no standalone
+management UI**: `booking_sources` holds each property's own OTA list (Cocotel, Agoda,
+Booking.com, ...) instead of a fixed set baked into the code, but there's no dedicated "add a
+source" screen; a row is created (or reused, if the typed name already matches one
+case-insensitively) purely as a side effect of the Front Desk **Promo Rates** tab's "Add promo
+rate" / "Edit promo rate" form, whose Source field is a free-text combobox
+(`BookingSourcesTable::resolveOrCreate()`, called from `PromoRatesController`). `code` is
+slugified from the typed name at creation and never changes afterward (it's what's stored on
+`reservations.source`/`promo_rates.source`); `name` is the display label. `BookingSourcesController`
+is read-only (`index` only) — it just serves the list to the New Reservation form's Source
+dropdown and the promo rate form's autocomplete suggestions. `'walk_in'` is NOT a
+`booking_sources` row — it's a fixed constant (`BookingSourcesTable::WALK_IN`) always offered
+alongside the configured list, since it's not an OTA and never carries a promo rate.
+**Promo rates are admin-configured multipliers, not typed by receptionists**: the
+`promo_rates` table holds a `multiplier` (e.g. ×2 of the room's
 original rate) per booking source, optionally per room; `PromoRatesTable::multiplierFor()`
 resolves it (room-specific wins over property-wide) and `ReservationsController::add` stamps
 base × multiplier onto `reservations.promo_rate` server-side, ignoring any client value (null

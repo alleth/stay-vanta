@@ -3,17 +3,20 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
-use App\Model\Table\BookingSourcesTable;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
+use InvalidArgumentException;
 
 /**
  * Promo rates — per-OTA rate multipliers the admin configures per booking
- * source (one of the property's own `booking_sources`, e.g. Cocotel, Agoda —
- * see BookingSourcesController), optionally per room. The promo nightly price
- * is the room's original rate × the multiplier; the New Reservation form
- * auto-fills from these. Receptionists read them but only owners/admins
- * create, edit, or delete them.
+ * source, optionally per room. Adding/editing a promo rate takes a typed
+ * `source_name` and resolves-or-creates the underlying `booking_sources` row
+ * by name (BookingSourcesTable::resolveOrCreate) — there's no separate "add
+ * a source first" step; typing a new name here is what registers it, and it
+ * immediately shows up on the New Reservation form's Source dropdown. The
+ * promo nightly price is the room's original rate × the multiplier; the New
+ * Reservation form auto-fills from these. Receptionists read them but only
+ * owners/admins create, edit, or delete them.
  */
 class PromoRatesController extends AppController
 {
@@ -53,8 +56,7 @@ class PromoRatesController extends AppController
             throw new BadRequestException('property_id is required.');
         }
 
-        $source = (string)$this->request->getData('source');
-        $this->assertValidSource($propertyId, $source);
+        $source = $this->resolveSource($propertyId, (string)$this->request->getData('source_name'));
 
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $promoRates->newEntity([
@@ -91,8 +93,7 @@ class PromoRatesController extends AppController
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $this->scopeToProperty($promoRates->find()->where(['PromoRates.id' => $id]))->firstOrFail();
 
-        $source = (string)$this->request->getData('source');
-        $this->assertValidSource((int)$rate->property_id, $source);
+        $source = $this->resolveSource((int)$rate->property_id, (string)$this->request->getData('source_name'));
 
         // room_id may be intentionally set to null ("all rooms"); read it raw.
         $promoRates->patchEntity($rate, [
@@ -134,22 +135,15 @@ class PromoRatesController extends AppController
     }
 
     /**
-     * A promo rate's source must be one of the property's configured booking
-     * sources — never 'walk_in' (walk-ins pay the base rate, they don't get
-     * a promo).
+     * Resolve a typed source name to its code, creating the underlying
+     * `booking_sources` row if it's new (BookingSourcesTable::resolveOrCreate).
      */
-    private function assertValidSource(int $propertyId, string $source): void
+    private function resolveSource(int $propertyId, string $sourceName): string
     {
-        if ($source === BookingSourcesTable::WALK_IN || $source === '') {
-            throw new BadRequestException('Pick an OTA booking source.');
-        }
-
-        $exists = $this->fetchTable('BookingSources')->exists([
-            'BookingSources.property_id' => $propertyId,
-            'BookingSources.code' => $source,
-        ]);
-        if (!$exists) {
-            throw new BadRequestException('Unknown booking source.');
+        try {
+            return $this->fetchTable('BookingSources')->resolveOrCreate($propertyId, $sourceName);
+        } catch (InvalidArgumentException $e) {
+            throw new BadRequestException($e->getMessage());
         }
     }
 }

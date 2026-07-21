@@ -11,7 +11,7 @@ import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
-  listBookingSources, createBookingSource, updateBookingSource, deleteBookingSource,
+  listBookingSources,
   listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
   listReservations, createReservation, transitionReservation, setReservationPayment,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
@@ -263,20 +263,6 @@ export default function FrontDesk() {
       await refresh()
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Could not delete the promo rate.')
-    } finally {
-      setPending(null)
-    }
-  }
-
-  async function doDeleteBookingSource(bs) {
-    if (!window.confirm(`Delete "${bs.name}" as a booking source?`)) return
-    setPending(`source-${bs.id}`)
-    setError(null)
-    try {
-      await deleteBookingSource(bs.id)
-      await refresh()
-    } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not delete the source.')
     } finally {
       setPending(null)
     }
@@ -537,47 +523,9 @@ export default function FrontDesk() {
 
           {/* ---- Promo Rates (OTA nightly prices; auto-fill the booking form) ---- */}
           <Tab eventKey="promo-rates" title={`Promo Rates (${promoRates.length})`}>
-            <Card className="mb-4 shadow-sm">
-              <Card.Header className="flex items-center justify-between">
-                <span>Booking sources</span>
-                {canManageRooms && (
-                  <Button size="sm" onClick={() => setModal({ type: 'source' })}>Add source</Button>
-                )}
-              </Card.Header>
-              <Card.Body>
-                <p className="mb-3 text-sm text-muted">
-                  These are the OTAs this property actually books through — the <strong>Source</strong>{' '}
-                  dropdown on New Reservation and the promo rates below both draw from this list.
-                  &quot;Walk-in&quot; is always available and isn&apos;t listed here (it never carries a
-                  promo rate).
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {bookingSources.length === 0 && <span className="text-sm text-muted">No sources yet.</span>}
-                  {bookingSources.map((bs) => (
-                    <Badge key={bs.id} bg="light" className="flex items-center gap-2 font-normal">
-                      {bs.name}
-                      {canManageRooms && (
-                        <span className="flex gap-1">
-                          <button type="button" className="text-primary hover:underline"
-                            onClick={() => setModal({ type: 'source', bookingSource: bs })}>edit</button>
-                          <button type="button" className="text-red-600 hover:underline"
-                            disabled={pending !== null}
-                            onClick={() => doDeleteBookingSource(bs)}>
-                            {pending === `source-${bs.id}` ? <Spinner size="sm" /> : 'delete'}
-                          </button>
-                        </span>
-                      )}
-                    </Badge>
-                  ))}
-                </div>
-              </Card.Body>
-            </Card>
-
             {canManageRooms && (
               <div className="mb-2 flex justify-end">
-                <Button onClick={() => setModal({ type: 'promo' })} disabled={bookingSources.length === 0}>
-                  Add promo rate
-                </Button>
+                <Button onClick={() => setModal({ type: 'promo' })}>Add promo rate</Button>
               </div>
             )}
             <Card className="shadow-sm">
@@ -616,10 +564,11 @@ export default function FrontDesk() {
             </Card>
             <p className="mt-2 mb-0 text-sm text-muted">
               A promo rate is a <strong>multiple of the room&apos;s original rate</strong> — e.g. ×2
-              doubles the nightly price for that OTA. When a reservation&apos;s <strong>Source</strong> is
-              an OTA, the booking form computes original rate × multiplier automatically (a
-              room-specific multiplier wins over an &quot;All rooms&quot; one). Receptionists can&apos;t
-              type promo prices by hand.
+              doubles the nightly price for that OTA. Typing a new booking source&apos;s name when adding
+              a promo rate adds it to the <strong>Source</strong> dropdown on New Reservation automatically
+              — there&apos;s nothing to set up separately. When a reservation&apos;s Source is an OTA, the
+              booking form computes original rate × multiplier automatically (a room-specific multiplier
+              wins over an &quot;All rooms&quot; one). Receptionists can&apos;t type promo prices by hand.
             </p>
           </Tab>
 
@@ -751,10 +700,6 @@ export default function FrontDesk() {
       )}
       {modal?.type === 'rate' && (
         <RateModal rooms={rooms} propertyId={propertyId} rate={modal.rate}
-          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
-      )}
-      {modal?.type === 'source' && (
-        <BookingSourceModal propertyId={propertyId} bookingSource={modal.bookingSource}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
       {modal?.type === 'promo' && (
@@ -1180,14 +1125,22 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
 
 function PromoRateModal({ rooms, bookingSources, propertyId, promoRate, onClose, onSaved }) {
   const editing = Boolean(promoRate)
+  // Booking source is a free-text field, not a fixed picker: typing an
+  // existing source's name reuses it, typing a new one creates it — the
+  // backend resolves/creates by name (BookingSourcesTable::slugFor), so
+  // there's no separate "add a source first" step.
   const [form, setForm] = useState({
-    source: promoRate?.source ?? bookingSources[0]?.code ?? '',
+    sourceName: promoRate ? sourceLabel(bookingSources, promoRate.source) : '',
     multiplier: promoRate?.multiplier ?? '',
     room_id: promoRate?.room_id ?? '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const { run, busy, err } = useSubmit(async () => {
-    const payload = { source: form.source, multiplier: form.multiplier, room_id: form.room_id || null }
+    const payload = {
+      source_name: form.sourceName,
+      multiplier: form.multiplier,
+      room_id: form.room_id || null,
+    }
     if (editing) await updatePromoRate(promoRate.id, payload)
     else await createPromoRate(payload, propertyId)
     onSaved()
@@ -1202,9 +1155,15 @@ function PromoRateModal({ rooms, bookingSources, propertyId, promoRate, onClose,
           {err && <Alert variant="danger">{err}</Alert>}
           <Form.Group className="mb-4">
             <Form.Label>Booking source</Form.Label>
-            <Form.Select value={form.source} onChange={set('source')} autoFocus>
-              {bookingSources.map((bs) => <option key={bs.id} value={bs.code}>{bs.name}</option>)}
-            </Form.Select>
+            <Form.Control list="booking-source-suggestions" value={form.sourceName} onChange={set('sourceName')}
+              placeholder="e.g. Cocotel, Agoda, Booking.com" required autoFocus />
+            <datalist id="booking-source-suggestions">
+              {bookingSources.map((bs) => <option key={bs.id} value={bs.name} />)}
+            </datalist>
+            <Form.Text muted>
+              Pick an existing source or type a new one — new sources are added automatically and
+              immediately show up on the New Reservation form&apos;s Source dropdown.
+            </Form.Text>
           </Form.Group>
           <Form.Group className="mb-4">
             <Form.Label>Rate multiplier</Form.Label>
@@ -1220,37 +1179,6 @@ function PromoRateModal({ rooms, bookingSources, propertyId, promoRate, onClose,
               <option value="">All rooms (property-wide)</option>
               {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
             </Form.Select>
-          </Form.Group>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
-        </Modal.Footer>
-      </Form>
-    </Modal>
-  )
-}
-
-function BookingSourceModal({ bookingSource, propertyId, onClose, onSaved }) {
-  const editing = Boolean(bookingSource)
-  const [name, setName] = useState(bookingSource?.name ?? '')
-  const { run, busy, err } = useSubmit(async () => {
-    if (editing) await updateBookingSource(bookingSource.id, { name })
-    else await createBookingSource({ name }, propertyId)
-    onSaved()
-  })
-  return (
-    <Modal show onHide={onClose} centered>
-      <Form onSubmit={run}>
-        <Modal.Header closeButton>
-          <Modal.Title>{editing ? 'Rename source' : 'Add booking source'}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group>
-            <Form.Label>Name</Form.Label>
-            <Form.Control value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Cocotel, Agoda, Booking.com" required autoFocus />
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>

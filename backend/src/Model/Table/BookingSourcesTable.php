@@ -5,14 +5,16 @@ namespace App\Model\Table;
 
 use Cake\ORM\Table;
 use Cake\Validation\Validator;
+use InvalidArgumentException;
 
 /**
- * BookingSources model — the admin-configurable list of OTA sources a
- * property books through (Cocotel, Agoda, ...). Starts empty for every
- * property — nothing is pre-seeded; the Source dropdown only ever shows what
- * an admin explicitly added on the Promo Rates tab. 'walk_in' is deliberately
- * not stored here: it's not an OTA, always available, and never carries a
- * promo rate.
+ * BookingSources model — the list of OTA sources a property books through
+ * (Cocotel, Agoda, ...). Starts empty for every property; there's no
+ * standalone add/rename/delete flow — a row is created (or reused, if the
+ * name already matches one) as a side effect of adding a promo rate for it
+ * (see `resolveOrCreate()`, called from PromoRatesController). 'walk_in' is
+ * deliberately not stored here: it's not an OTA, always available, and never
+ * carries a promo rate.
  *
  * @method \App\Model\Entity\BookingSource newEmptyEntity()
  * @method \App\Model\Entity\BookingSource get(mixed $primaryKey, array $options = [])
@@ -83,6 +85,44 @@ class BookingSourcesTable extends Table
         }
 
         return $code;
+    }
+
+    /**
+     * Resolve a typed source name to its code, creating the row if no
+     * existing source (case-insensitive) matches — this is the only way a
+     * `booking_sources` row comes into being: typing a new name when adding
+     * a promo rate.
+     *
+     * @throws \InvalidArgumentException On a blank name or "Walk-in" (that's
+     *   the fixed non-OTA constant, never a real row).
+     */
+    public function resolveOrCreate(int $propertyId, string $name): string
+    {
+        $name = trim($name);
+        if ($name === '') {
+            throw new InvalidArgumentException('Pick or type an OTA booking source.');
+        }
+        if (mb_strtolower($name) === 'walk-in' || mb_strtolower($name) === 'walk in') {
+            throw new InvalidArgumentException('"Walk-in" isn\'t a bookable OTA source.');
+        }
+
+        $existing = $this->find()
+            ->where(['BookingSources.property_id' => $propertyId])
+            ->all();
+        foreach ($existing as $row) {
+            if (mb_strtolower(trim((string)$row->name)) === mb_strtolower($name)) {
+                return $row->code;
+            }
+        }
+
+        $source = $this->newEntity([
+            'property_id' => $propertyId,
+            'name' => $name,
+            'code' => $this->slugFor($name, $propertyId),
+        ]);
+        $this->saveOrFail($source);
+
+        return $source->code;
     }
 
     /**
