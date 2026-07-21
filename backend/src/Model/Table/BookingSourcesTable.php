@@ -8,9 +8,11 @@ use Cake\Validation\Validator;
 
 /**
  * BookingSources model — the admin-configurable list of OTA sources a
- * property books through (Cocotel, Agoda, ...), replacing what used to be a
- * fixed hardcoded list. 'walk_in' is deliberately not stored here: it's not
- * an OTA, always available, and never carries a promo rate.
+ * property books through (Cocotel, Agoda, ...). Starts empty for every
+ * property — nothing is pre-seeded; the Source dropdown only ever shows what
+ * an admin explicitly added on the Promo Rates tab. 'walk_in' is deliberately
+ * not stored here: it's not an OTA, always available, and never carries a
+ * promo rate.
  *
  * @method \App\Model\Entity\BookingSource newEmptyEntity()
  * @method \App\Model\Entity\BookingSource get(mixed $primaryKey, array $options = [])
@@ -19,14 +21,6 @@ class BookingSourcesTable extends Table
 {
     /** The fixed, non-configurable "guest just walked in" source. */
     public const WALK_IN = 'walk_in';
-
-    /** The four sources every property had before this became configurable. */
-    private const DEFAULTS = [
-        'cocotel' => 'Cocotel',
-        'agoda' => 'Agoda',
-        'trip_com' => 'Trip.com',
-        'tripadvisor' => 'TripAdvisor',
-    ];
 
     public function initialize(array $config): void
     {
@@ -89,28 +83,6 @@ class BookingSourcesTable extends Table
         }
 
         return $code;
-    }
-
-    /**
-     * Lazily seed a new property's booking sources with the four that used
-     * to be hardcoded, so existing reservations/promo rates (which store
-     * these exact codes) keep resolving and the dropdown isn't empty on day
-     * one. A no-op once the property has any row of its own.
-     */
-    public function seedDefaultsFor(int $propertyId): void
-    {
-        $hasAny = $this->exists(['BookingSources.property_id' => $propertyId]);
-        if ($hasAny) {
-            return;
-        }
-
-        foreach (self::DEFAULTS as $code => $name) {
-            $this->saveOrFail($this->newEntity([
-                'property_id' => $propertyId,
-                'code' => $code,
-                'name' => $name,
-            ]));
-        }
     }
 
     /**

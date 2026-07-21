@@ -9,10 +9,11 @@ use Cake\Http\Exception\ForbiddenException;
 
 /**
  * BookingSources — the admin-configurable list of OTA sources a property
- * books through. Everyone reads them (the New Reservation form's Source
- * dropdown needs the list), but only owners/admins add, rename, or remove
- * one — like room rates and promo rates. 'walk_in' is not managed here; it's
- * a fixed option the frontend always shows alongside these.
+ * books through. Starts empty; nothing is pre-seeded. Everyone reads them
+ * (the New Reservation form's Source dropdown needs the list), but only
+ * owners/admins add, rename, or remove one — like room rates and promo
+ * rates. 'walk_in' is not managed here; it's a fixed option the frontend
+ * always shows alongside these.
  */
 class BookingSourcesController extends AppController
 {
@@ -22,12 +23,6 @@ class BookingSourcesController extends AppController
     public function index(): void
     {
         $sources = $this->fetchTable('BookingSources');
-
-        $propertyId = $this->effectivePropertyId();
-        if ($propertyId !== null) {
-            $sources->seedDefaultsFor($propertyId);
-        }
-
         $query = $this->scopeToProperty($sources->find()->orderBy(['BookingSources.name' => 'ASC']));
 
         $this->set('bookingSources', $query->all());
