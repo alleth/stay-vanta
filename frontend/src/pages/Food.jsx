@@ -447,18 +447,18 @@ function MenuCatalog({ menuType, items, canManageMenu, pending, onAdd, onEdit, o
         <Table hover>
           <thead>
             <tr>
-              <th>Item</th><th className="text-right">Price</th><th>Linked stock</th>
+              <th>Item</th><th className="text-right">Price</th><th>Linked stock</th><th>Ingredients</th>
               <th>Available</th>{canManageMenu && <th></th>}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={canManageMenu ? 5 : 4} className="py-6 text-center text-muted">No {noun}s yet.</td></tr>
+              <tr><td colSpan={canManageMenu ? 6 : 5} className="py-6 text-center text-muted">No {noun}s yet.</td></tr>
             )}
             {groups.map(([category, groupItems]) => (
               <Fragment key={category}>
                 <tr className="bg-subtle">
-                  <td colSpan={canManageMenu ? 5 : 4} className="text-xs font-semibold uppercase text-muted">
+                  <td colSpan={canManageMenu ? 6 : 5} className="text-xs font-semibold uppercase text-muted">
                     {category}
                   </td>
                 </tr>
@@ -467,6 +467,13 @@ function MenuCatalog({ menuType, items, canManageMenu, pending, onAdd, onEdit, o
                     <td className="font-semibold">{m.name}</td>
                     <td className="text-right">{formatMoney(m.price)}</td>
                     <td className="text-xs">{m.inventory_item?.name ?? <span className="text-muted">—</span>}</td>
+                    <td className="text-xs">
+                      {m.food_menu_item_ingredients?.length
+                        ? m.food_menu_item_ingredients
+                          .map((ing) => `${ing.inventory_item?.name ?? '?'} ×${Number(ing.quantity)}`)
+                          .join(', ')
+                        : <span className="text-muted">—</span>}
+                    </td>
                     <td>
                       {m.is_available
                         ? <Badge bg="success">yes</Badge>
@@ -1090,6 +1097,9 @@ function GuestPicker({ guests, roomByGuest, value, onChange, required, propertyI
 // Bed" utensil item never shows up as a linkable Food Stock choice.
 const STOCK_KIND_FOR_TYPE = { food: 'food_stock', linen: 'linen' }
 
+let ingredientKeySeq = 0
+const newIngredientKey = () => `ing-${++ingredientKeySeq}`
+
 function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved }) {
   const editing = Boolean(item)
   // The type is fixed by which tab (Food/Linens) this modal was opened from —
@@ -1103,6 +1113,24 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
 
+  // A recipe: extra ingredients this dish consumes on top of (not instead of)
+  // the single Linked Stock above — e.g. a menu item made of several
+  // stocked ingredients (Eggplant, Hotdog, Egg, ...), each with how much one
+  // serving uses. Ordering the item decrements every row here too.
+  const [ingredients, setIngredients] = useState(
+    () => (item?.food_menu_item_ingredients ?? []).map((ing) => ({
+      key: newIngredientKey(),
+      inventory_item_id: String(ing.inventory_item_id),
+      quantity: ing.quantity,
+    })),
+  )
+  const addIngredient = () => setIngredients([...ingredients, { key: newIngredientKey(), inventory_item_id: '', quantity: 1 }])
+  const removeIngredient = (key) => setIngredients(ingredients.filter((r) => r.key !== key))
+  const setIngredientField = (key, field) => (e) => {
+    const value = e.target.value
+    setIngredients(ingredients.map((r) => (r.key === key ? { ...r, [field]: value } : r)))
+  }
+
   const stockOptions = useMemo(
     () => inventory.filter((i) => i.inventory_category?.kind === STOCK_KIND_FOR_TYPE[menuType]),
     [inventory, menuType],
@@ -1112,7 +1140,15 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
   const outOfStock = linkedItem && Number(linkedItem.quantity) <= 0
 
   const { run, busy, err } = useSubmit(async () => {
-    const payload = { ...form, type: menuType, inventory_item_id: form.inventory_item_id || null }
+    const validIngredients = ingredients
+      .filter((r) => r.inventory_item_id)
+      .map((r) => ({ inventory_item_id: Number(r.inventory_item_id), quantity: Number(r.quantity) || 0 }))
+    const payload = {
+      ...form,
+      type: menuType,
+      inventory_item_id: form.inventory_item_id || null,
+      ingredients: validIngredients,
+    }
     if (editing) await updateMenuItem(item.id, payload)
     else await createMenuItem(payload, propertyId)
     onSaved()
@@ -1159,6 +1195,34 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
                 This item is out of stock — it will be saved as unavailable.
               </Form.Text>
             )}
+          </Form.Group>
+          <Form.Group className="mt-4">
+            <Form.Label>
+              Ingredients (recipe — decrements per serving, on top of the linked stock above)
+            </Form.Label>
+            {ingredients.map((row) => {
+              const rowItem = inventory.find((i) => String(i.id) === row.inventory_item_id)
+              const rowOutOfStock = rowItem && Number(rowItem.quantity) <= 0
+              return (
+                <div key={row.key} className="mb-1 flex items-center gap-1">
+                  <Form.Select size="sm" value={row.inventory_item_id} onChange={setIngredientField(row.key, 'inventory_item_id')}>
+                    <option value="">Select ingredient…</option>
+                    {stockOptions.map((i) => (
+                      <option key={i.id} value={i.id}>{i.name} ({Number(i.quantity)} {i.unit})</option>
+                    ))}
+                  </Form.Select>
+                  <Form.Control size="sm" type="number" min={0.01} step="0.01" value={row.quantity}
+                    onChange={setIngredientField(row.key, 'quantity')} placeholder="Qty / serving"
+                    style={{ width: 110 }} />
+                  <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                    onClick={() => removeIngredient(row.key)}>×</button>
+                  {rowOutOfStock && <span className="text-xs text-amber-600 whitespace-nowrap">out of stock</span>}
+                </div>
+              )
+            })}
+            <Button size="sm" variant="outline-secondary" onClick={addIngredient}>
+              + Add ingredient
+            </Button>
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>

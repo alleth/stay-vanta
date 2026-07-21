@@ -13,10 +13,11 @@ use RuntimeException;
 /**
  * FoodOrders model — the order lifecycle and its side effects.
  *
- * Placing an order decrements the linked Food Stock inventory through
- * StockMovementsTable::record() (so the deduction is stamped to the acting
- * receptionist) and, when charge-to-room, mirrors the total onto the guest's
- * invoice. Cancelling reverses both.
+ * Placing an order decrements the linked Food Stock inventory AND every
+ * recipe ingredient (FoodMenuItemIngredients) through StockMovementsTable::record()
+ * (so the deduction is stamped to the acting receptionist) and, when
+ * charge-to-room, mirrors the total onto the guest's invoice. Cancelling
+ * reverses all of it.
  *
  * @method \App\Model\Entity\FoodOrder newEmptyEntity()
  * @method \App\Model\Entity\FoodOrder get(mixed $primaryKey, array $options = [])
@@ -165,12 +166,13 @@ class FoodOrdersTable extends Table
                 $subtotal = 0.0;
                 foreach ($items as $line) {
                     if (!empty($line['food_menu_item_id'])) {
-                        // Menu line: price from the menu, stock from the link.
+                        // Menu line: price from the menu, stock from the link + recipe.
                         $menu = $menus->find()
                             ->where([
                                 'FoodMenuItems.id' => (int)$line['food_menu_item_id'],
                                 'FoodMenuItems.property_id' => $propertyId,
                             ])
+                            ->contain(['FoodMenuItemIngredients'])
                             ->firstOrFail();
                         $qty = max(1, (int)($line['quantity'] ?? 1));
                         $lineTotal = (float)$menu->price * $qty;
@@ -188,6 +190,16 @@ class FoodOrdersTable extends Table
                         if ($menu->inventory_item_id) {
                             $item = $inventory->get($menu->inventory_item_id);
                             $stock->record($item, 'out', (float)$qty, $receptionistId, [
+                                'reason' => 'food_order',
+                                'reference_type' => 'food_order',
+                                'reference_id' => $order->id,
+                            ]);
+                        }
+
+                        // Decrement every recipe ingredient (per-serving qty × ordered qty).
+                        foreach ($menu->food_menu_item_ingredients as $ingredient) {
+                            $item = $inventory->get($ingredient->inventory_item_id);
+                            $stock->record($item, 'out', (float)$ingredient->quantity * $qty, $receptionistId, [
                                 'reason' => 'food_order',
                                 'reference_type' => 'food_order',
                                 'reference_id' => $order->id,
@@ -280,13 +292,25 @@ class FoodOrdersTable extends Table
 
                 $lines = $orderItems->find()
                     ->where(['FoodOrderItems.food_order_id' => $order->id])
-                    ->contain(['FoodMenuItems'])
+                    ->contain(['FoodMenuItems' => ['FoodMenuItemIngredients']])
                     ->all();
 
                 foreach ($lines as $line) {
-                    if ($line->food_menu_item && $line->food_menu_item->inventory_item_id) {
+                    if (!$line->food_menu_item) {
+                        continue;
+                    }
+                    if ($line->food_menu_item->inventory_item_id) {
                         $item = $inventory->get($line->food_menu_item->inventory_item_id);
                         $stock->record($item, 'in', (float)$line->quantity, $receptionistId, [
+                            'reason' => 'food_order_cancel',
+                            'reference_type' => 'food_order',
+                            'reference_id' => $order->id,
+                        ]);
+                    }
+                    foreach ($line->food_menu_item->food_menu_item_ingredients as $ingredient) {
+                        $item = $inventory->get($ingredient->inventory_item_id);
+                        $restockQty = (float)$ingredient->quantity * (float)$line->quantity;
+                        $stock->record($item, 'in', $restockQty, $receptionistId, [
                             'reason' => 'food_order_cancel',
                             'reference_type' => 'food_order',
                             'reference_id' => $order->id,
@@ -302,7 +326,7 @@ class FoodOrdersTable extends Table
                 $this->saveOrFail($order);
 
                 return $order;
-            }
+            },
         );
     }
 }

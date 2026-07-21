@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\Entity\FoodMenuItem;
 use App\Model\Table\FoodMenuItemsTable;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -23,7 +24,10 @@ class FoodMenuItemsController extends AppController
         $query = $this->scopeToProperty(
             $menu->find()
                 ->where(['FoodMenuItems.deleted_at IS' => null])
-                ->contain(['InventoryItems' => ['InventoryCategories']])
+                ->contain([
+                    'InventoryItems' => ['InventoryCategories'],
+                    'FoodMenuItemIngredients' => ['InventoryItems' => ['InventoryCategories']],
+                ])
                 ->orderBy(['FoodMenuItems.name' => 'ASC']),
         );
 
@@ -46,6 +50,11 @@ class FoodMenuItemsController extends AppController
      * scopes the Linked Stock choices on the frontend. If the linked inventory
      * item is out of stock (quantity <= 0), the item is force-saved unavailable
      * regardless of what was requested — there's nothing to sell yet.
+     *
+     * `ingredients[]` ({inventory_item_id, quantity}) is an optional recipe —
+     * on top of (not instead of) the single `inventory_item_id` link — each row
+     * naming how much of an inventory item one serving of this dish consumes;
+     * ordering the item decrements every ingredient alongside the single link.
      */
     public function add(): void
     {
@@ -60,6 +69,7 @@ class FoodMenuItemsController extends AppController
         $inventoryItemId = $this->request->getData('inventory_item_id');
         $inventoryItemId = $inventoryItemId !== null && $inventoryItemId !== '' ? (int)$inventoryItemId : null;
         $type = $this->request->getData('type');
+        $ingredients = $this->normalizeIngredients((array)$this->request->getData('ingredients'), $propertyId);
 
         $menu = $this->fetchTable('FoodMenuItems');
         $item = $menu->newEntity([
@@ -70,6 +80,7 @@ class FoodMenuItemsController extends AppController
             'inventory_item_id' => $inventoryItemId,
             'is_available' => $this->resolveAvailability(
                 $inventoryItemId,
+                $ingredients,
                 (bool)($this->request->getData('is_available') ?? true),
             ),
         ]);
@@ -80,8 +91,10 @@ class FoodMenuItemsController extends AppController
             return;
         }
 
+        $this->saveIngredients($item, $ingredients);
+
         $this->response = $this->response->withStatus(201);
-        $this->set('menuItem', $item);
+        $this->set('menuItem', $this->reloadWithIngredients($item->id));
         $this->viewBuilder()->setOption('serialize', ['menuItem']);
     }
 
@@ -101,6 +114,8 @@ class FoodMenuItemsController extends AppController
         $inventoryItemId = $this->request->getData('inventory_item_id');
         $inventoryItemId = $inventoryItemId !== null && $inventoryItemId !== '' ? (int)$inventoryItemId : null;
         $type = $this->request->getData('type');
+        $rawIngredients = (array)$this->request->getData('ingredients');
+        $ingredients = $this->normalizeIngredients($rawIngredients, (int)$item->property_id);
 
         $menu->patchEntity($item, [
             'name' => $this->request->getData('name'),
@@ -109,6 +124,7 @@ class FoodMenuItemsController extends AppController
             'inventory_item_id' => $inventoryItemId,
             'is_available' => $this->resolveAvailability(
                 $inventoryItemId,
+                $ingredients,
                 (bool)($this->request->getData('is_available') ?? $item->is_available),
             ),
         ], ['accessibleFields' => ['property_id' => false]]);
@@ -119,30 +135,125 @@ class FoodMenuItemsController extends AppController
             return;
         }
 
-        $this->set('menuItem', $item);
+        $this->saveIngredients($item, $ingredients);
+
+        $this->set('menuItem', $this->reloadWithIngredients($item->id));
         $this->viewBuilder()->setOption('serialize', ['menuItem']);
     }
 
     /**
-     * An item linked to out-of-stock inventory (quantity <= 0) is forced
-     * unavailable — there's nothing on the shelf to sell yet, regardless of
-     * what the admin picked.
+     * An item linked to out-of-stock inventory (quantity <= 0), or missing any
+     * ingredient's required-per-serving quantity, is forced unavailable —
+     * there's nothing on the shelf to sell yet, regardless of what the admin
+     * picked.
+     *
+     * @param array<int, array{inventory_item_id: int, quantity: float}> $ingredients
      */
-    private function resolveAvailability(?int $inventoryItemId, bool $requested): bool
+    private function resolveAvailability(?int $inventoryItemId, array $ingredients, bool $requested): bool
     {
-        if ($inventoryItemId === null || !$requested) {
+        if (!$requested || (!$inventoryItemId && !$ingredients)) {
             return $requested;
         }
 
-        $item = $this->fetchTable('InventoryItems')->find()
-            ->where(['InventoryItems.id' => $inventoryItemId])
-            ->first();
+        $inventoryItems = $this->fetchTable('InventoryItems');
 
-        if ($item !== null && (float)$item->quantity <= 0) {
-            return false;
+        if ($inventoryItemId !== null) {
+            $item = $inventoryItems->find()->where(['InventoryItems.id' => $inventoryItemId])->first();
+            if ($item !== null && (float)$item->quantity <= 0) {
+                return false;
+            }
+        }
+
+        foreach ($ingredients as $ingredient) {
+            $item = $inventoryItems->find()
+                ->where(['InventoryItems.id' => $ingredient['inventory_item_id']])
+                ->first();
+            if ($item !== null && (float)$item->quantity < $ingredient['quantity']) {
+                return false;
+            }
         }
 
         return $requested;
+    }
+
+    /**
+     * Parse+validate a raw `ingredients` request array into
+     * {inventory_item_id, quantity} rows: each item must exist, belong to this
+     * property, and not be soft-deleted; quantity must be > 0; duplicate
+     * inventory items in the same recipe are rejected.
+     *
+     * @return array<int, array{inventory_item_id: int, quantity: float}>
+     */
+    private function normalizeIngredients(array $raw, int $propertyId): array
+    {
+        $inventoryItems = $this->fetchTable('InventoryItems');
+        $seen = [];
+        $ingredients = [];
+
+        foreach ($raw as $row) {
+            $inventoryItemId = (int)($row['inventory_item_id'] ?? 0);
+            if ($inventoryItemId <= 0) {
+                continue;
+            }
+            $quantity = (float)($row['quantity'] ?? 0);
+            if ($quantity <= 0) {
+                throw new BadRequestException('Each ingredient needs a quantity greater than zero.');
+            }
+            if (isset($seen[$inventoryItemId])) {
+                throw new BadRequestException('The same ingredient was added more than once.');
+            }
+            $seen[$inventoryItemId] = true;
+
+            $exists = $inventoryItems->exists([
+                'InventoryItems.id' => $inventoryItemId,
+                'InventoryItems.property_id' => $propertyId,
+                'InventoryItems.deleted_at IS' => null,
+            ]);
+            if (!$exists) {
+                throw new BadRequestException('One of the selected ingredients was not found.');
+            }
+
+            $ingredients[] = ['inventory_item_id' => $inventoryItemId, 'quantity' => $quantity];
+        }
+
+        return $ingredients;
+    }
+
+    /**
+     * Replace a menu item's recipe with the given rows (delete-then-insert —
+     * the list is small and always sent in full from the edit form).
+     *
+     * @param array<int, array{inventory_item_id: int, quantity: float}> $ingredients
+     */
+    private function saveIngredients(FoodMenuItem $item, array $ingredients): void
+    {
+        $ingredientsTable = $this->fetchTable('FoodMenuItemIngredients');
+        $rebuild = function () use ($ingredientsTable, $item, $ingredients): void {
+            $ingredientsTable->deleteAll(['food_menu_item_id' => $item->id]);
+            foreach ($ingredients as $ingredient) {
+                $ingredientsTable->saveOrFail($ingredientsTable->newEntity([
+                    'food_menu_item_id' => $item->id,
+                    'inventory_item_id' => $ingredient['inventory_item_id'],
+                    'quantity' => $ingredient['quantity'],
+                ]));
+            }
+        };
+        $ingredientsTable->getConnection()->transactional($rebuild);
+    }
+
+    /**
+     * Reload a saved menu item with its stock link + recipe contained, for
+     * the response payload.
+     */
+    private function reloadWithIngredients(int $id): FoodMenuItem
+    {
+        return $this->fetchTable('FoodMenuItems')->find()
+            ->where(['FoodMenuItems.id' => $id])
+            ->contain([
+                'InventoryItems' => ['InventoryCategories'],
+                'FoodMenuItemIngredients' => ['InventoryItems' => ['InventoryCategories']],
+            ])
+            ->firstOrFail();
     }
 
     /**

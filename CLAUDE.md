@@ -353,4 +353,5 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
 The base schema is `backend/config/Migrations/20260615000000_InitialSchema.php`; each feature
 since ships its own dated migration on top (subscriptions, revenue fields, soft-deletes,
 extra charges, promo rates, downpayments, …) — add new schema changes the same way rather
-than editing the base schema. `schema-dump-default.lock` is the regenerated dump.
+than editing the base schema. `backend/config/Migrations/schema-dump-default.lock` is the
+regenerated dump.
