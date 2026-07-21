@@ -6,6 +6,13 @@ const withProp = (params, propertyId) =>
 export const listGuests = (propertyId, params = {}) =>
   client.get('/guests', { params: withProp(params, propertyId) }).then((r) => r.data.guests)
 
+// Paginated form — returns { guests, total, page, limit } for the Guests
+// tab's table. Pass page/limit to opt into the 5-100 clamp; listGuests()
+// above (no limit) keeps getting the wide unpaginated window other callers
+// (Food & Orders, the Front Desk booking combobox) rely on.
+export const listGuestsPage = (propertyId, params = {}) =>
+  client.get('/guests', { params: withProp(params, propertyId) }).then((r) => r.data)
+
 export const guestStats = (propertyId) =>
   client.get('/guests/stats', { params: withProp({}, propertyId) }).then((r) => r.data.stats)
 

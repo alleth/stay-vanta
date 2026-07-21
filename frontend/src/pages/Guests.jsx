@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
-  Card, Table, Button, Badge, Modal, Form, InputGroup, Alert, Spinner, ListGroup,
+  Card, Table, Button, Badge, Modal, Form, InputGroup, Alert, Spinner, ListGroup, Pagination,
 } from '../components/ui'
 import { useProperty } from '../context/PropertyContext'
-import { listGuests, guestStats, getGuest, createGuest, updateGuest, matchGuests } from '../api/guests'
-import { SkeletonTable, Skeleton } from '../components/Skeleton'
+import { listGuestsPage, guestStats, getGuest, createGuest, updateGuest, matchGuests } from '../api/guests'
+import { SkeletonTable, SkeletonTableRows, Skeleton } from '../components/Skeleton'
 
 const TYPE_VARIANT = { local: 'info', foreign: 'warning' }
 // Stat-card number tint per card variant.
@@ -15,22 +15,36 @@ const VALUE_COLOR = {
   success: 'text-emerald-600',
 }
 
+const GUESTS_PER_PAGE = 20
+
 export default function Guests() {
   const { propertyId } = useProperty()
-  const [guests, setGuests] = useState([])
   const [stats, setStats] = useState({ total: 0, local: 0, foreign: 0, inHouse: 0 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [search, setSearch] = useState('')
+
+  // The registry can grow large, so search/type filtering and pagination are
+  // server-side (GuestsController::index) rather than over a fully-loaded list.
+  const [guests, setGuests] = useState([])
+  const [total, setTotal] = useState(0)
+  const [listLoading, setListLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('') // raw input, debounced below
+  const [q, setQ] = useState('') // debounced value actually sent to the server
   const [typeFilter, setTypeFilter] = useState('all')
   const [modal, setModal] = useState(null) // 'add' | { type:'edit', guest } | { type:'view', id }
 
-  const refresh = useCallback(async () => {
+  // Debounce the search box so every keystroke doesn't fire a request; jump
+  // back to page 1 whenever the effective search text changes.
+  useEffect(() => {
+    const t = setTimeout(() => { setQ(search.trim()); setPage(1) }, 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const loadStats = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [g, s] = await Promise.all([listGuests(propertyId), guestStats(propertyId)])
-      setGuests(g)
-      setStats(s)
+      setStats(await guestStats(propertyId))
       setError(null)
     } catch {
       setError('Could not load guests.')
@@ -39,21 +53,35 @@ export default function Guests() {
     }
   }, [propertyId])
 
-  useEffect(() => {
-    // State updates run after the awaited fetch; safe data effect.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh()
-  }, [refresh])
+  const loadGuests = useCallback(async () => {
+    if (!propertyId) return
+    setListLoading(true)
+    try {
+      const params = { page, limit: GUESTS_PER_PAGE }
+      if (typeFilter !== 'all') params.guest_type = typeFilter
+      if (q) params.q = q
+      const data = await listGuestsPage(propertyId, params)
+      setGuests(data.guests ?? [])
+      setTotal(data.total ?? 0)
+      setError(null)
+    } catch {
+      setError('Could not load guests.')
+    } finally {
+      setListLoading(false)
+    }
+  }, [propertyId, page, typeFilter, q])
 
-  // Search + type filtering happen client-side over the loaded list.
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return guests.filter(
-      (g) =>
-        (typeFilter === 'all' || g.guest_type === typeFilter) &&
-        (q === '' || g.full_name.toLowerCase().includes(q)),
-    )
-  }, [guests, search, typeFilter])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadStats() }, [loadStats])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadGuests() }, [loadGuests])
+
+  function refresh() {
+    loadStats()
+    loadGuests()
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / GUESTS_PER_PAGE))
 
   if (!propertyId)
     return <Alert variant="info">Select or create a property to view guests.</Alert>
@@ -81,12 +109,13 @@ export default function Guests() {
             <InputGroup.Text>Search</InputGroup.Text>
             <Form.Control value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Guest name" />
           </InputGroup>
-          <Form.Select style={{ maxWidth: 180 }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+          <Form.Select style={{ maxWidth: 180 }} value={typeFilter}
+            onChange={(e) => { setTypeFilter(e.target.value); setPage(1) }}>
             <option value="all">All types</option>
             <option value="local">Local</option>
             <option value="foreign">Foreign</option>
           </Form.Select>
-          <span className="ml-auto text-sm font-normal text-muted">{filtered.length} shown</span>
+          <span className="ml-auto text-sm font-normal text-muted">{total} guest(s)</span>
         </Card.Header>
 
         {loading ? (
@@ -100,10 +129,11 @@ export default function Guests() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
+              {listLoading && <SkeletonTableRows rows={5} cols={5} />}
+              {!listLoading && guests.length === 0 && (
                 <tr><td colSpan={5} className="py-6 text-center text-muted">No guests found.</td></tr>
               )}
-              {filtered.map((g) => (
+              {!listLoading && guests.map((g) => (
                 <tr key={g.id}>
                   <td className="font-semibold">{g.full_name}</td>
                   <td><Badge bg={TYPE_VARIANT[g.guest_type]}>{g.guest_type}</Badge></td>
@@ -126,6 +156,17 @@ export default function Guests() {
               ))}
             </tbody>
           </Table>
+        )}
+        {!loading && totalPages > 1 && (
+          <Card.Footer className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-muted">Page {page} of {totalPages} · {total} guest(s)</span>
+            <Pagination>
+              <Pagination.Prev disabled={page <= 1 || listLoading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))} />
+              <Pagination.Next disabled={page >= totalPages || listLoading}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))} />
+            </Pagination>
+          </Card.Footer>
         )}
       </Card>
 

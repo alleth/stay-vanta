@@ -11,13 +11,20 @@ use Cake\Http\Exception\BadRequestException;
 class GuestsController extends AppController
 {
     /**
-     * GET /api/guests[?guest_type=local|foreign][?q=name]
+     * GET /api/guests[?guest_type=local|foreign][?q=name][?page=&limit=]
+     *
+     * Paginated (the registry only grows). `total`/`page`/`limit` are always
+     * returned, but `limit` only enforces the 5-100 window a caller opts into
+     * by passing it explicitly — callers that don't (the Food & Orders
+     * charge-to-room picker, the Front Desk booking combobox, both of which
+     * want a wide unpaginated list to search over client-side) get the same
+     * wide window the endpoint always returned before pagination existed.
      */
     public function index(): void
     {
         $guests = $this->fetchTable('Guests');
         $query = $this->scopeToProperty(
-            $guests->find()->orderBy(['Guests.created' => 'DESC'])->limit(500)
+            $guests->find()->orderBy(['Guests.created' => 'DESC']),
         );
 
         $type = $this->request->getQuery('guest_type');
@@ -30,8 +37,19 @@ class GuestsController extends AppController
             $query->where(['Guests.full_name LIKE' => '%' . $search . '%']);
         }
 
-        $this->set('guests', $query->all());
-        $this->viewBuilder()->setOption('serialize', ['guests']);
+        $total = $query->count();
+        $requestedLimit = $this->request->getQuery('limit');
+        $limit = $requestedLimit !== null ? min(100, max(5, (int)$requestedLimit)) : 500;
+        $page = max(1, (int)($this->request->getQuery('page') ?? 1));
+        $query->limit($limit)->offset(($page - 1) * $limit);
+
+        $this->set([
+            'guests' => $query->all(),
+            'total' => $total,
+            'page' => $page,
+            'limit' => $limit,
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['guests', 'total', 'page', 'limit']);
     }
 
     /**
