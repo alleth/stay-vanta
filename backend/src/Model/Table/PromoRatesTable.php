@@ -16,9 +16,6 @@ use Cake\Validation\Validator;
  */
 class PromoRatesTable extends Table
 {
-    /** Booking sources a promo rate can target (OTAs only — walk-ins pay the base rate). */
-    public const SOURCES = ['cocotel', 'agoda', 'trip_com', 'tripadvisor'];
-
     public function initialize(array $config): void
     {
         parent::initialize($config);
@@ -38,9 +35,14 @@ class PromoRatesTable extends Table
             ->requirePresence('property_id', 'create')
             ->integer('property_id');
 
+        // Validity (must be one of the property's configured booking sources,
+        // never 'walk_in') is checked in the controller, where the property
+        // is known.
         $validator
+            ->scalar('source')
+            ->maxLength('source', 50)
             ->requirePresence('source', 'create')
-            ->inList('source', self::SOURCES, 'Pick an OTA booking source.');
+            ->notEmptyString('source');
 
         $validator
             ->numeric('multiplier')

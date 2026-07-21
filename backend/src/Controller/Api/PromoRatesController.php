@@ -3,15 +3,17 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\Table\BookingSourcesTable;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Promo rates — per-OTA rate multipliers the admin configures per booking
- * source (Cocotel, Agoda, Trip.com, TripAdvisor), optionally per room. The
- * promo nightly price is the room's original rate × the multiplier; the New
- * Reservation form auto-fills from these. Receptionists read them but only
- * owners/admins create, edit, or delete them.
+ * source (one of the property's own `booking_sources`, e.g. Cocotel, Agoda —
+ * see BookingSourcesController), optionally per room. The promo nightly price
+ * is the room's original rate × the multiplier; the New Reservation form
+ * auto-fills from these. Receptionists read them but only owners/admins
+ * create, edit, or delete them.
  */
 class PromoRatesController extends AppController
 {
@@ -51,11 +53,14 @@ class PromoRatesController extends AppController
             throw new BadRequestException('property_id is required.');
         }
 
+        $source = (string)$this->request->getData('source');
+        $this->assertValidSource($propertyId, $source);
+
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $promoRates->newEntity([
             'property_id' => $propertyId,
             'room_id' => $this->request->getData('room_id') ?: null,
-            'source' => $this->request->getData('source'),
+            'source' => $source,
             'multiplier' => $this->request->getData('multiplier'),
         ]);
 
@@ -86,9 +91,12 @@ class PromoRatesController extends AppController
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $this->scopeToProperty($promoRates->find()->where(['PromoRates.id' => $id]))->firstOrFail();
 
+        $source = (string)$this->request->getData('source');
+        $this->assertValidSource((int)$rate->property_id, $source);
+
         // room_id may be intentionally set to null ("all rooms"); read it raw.
         $promoRates->patchEntity($rate, [
-            'source' => $this->request->getData('source'),
+            'source' => $source,
             'multiplier' => $this->request->getData('multiplier'),
             'room_id' => $this->request->getData('room_id') ?: null,
         ], ['accessibleFields' => ['property_id' => false]]);
@@ -123,5 +131,25 @@ class PromoRatesController extends AppController
 
         $this->set('deleted', true);
         $this->viewBuilder()->setOption('serialize', ['deleted']);
+    }
+
+    /**
+     * A promo rate's source must be one of the property's configured booking
+     * sources — never 'walk_in' (walk-ins pay the base rate, they don't get
+     * a promo).
+     */
+    private function assertValidSource(int $propertyId, string $source): void
+    {
+        if ($source === BookingSourcesTable::WALK_IN || $source === '') {
+            throw new BadRequestException('Pick an OTA booking source.');
+        }
+
+        $exists = $this->fetchTable('BookingSources')->exists([
+            'BookingSources.property_id' => $propertyId,
+            'BookingSources.code' => $source,
+        ]);
+        if (!$exists) {
+            throw new BadRequestException('Unknown booking source.');
+        }
     }
 }

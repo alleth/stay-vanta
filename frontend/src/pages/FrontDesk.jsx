@@ -11,6 +11,7 @@ import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
+  listBookingSources, createBookingSource, updateBookingSource, deleteBookingSource,
   listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
   listReservations, createReservation, transitionReservation, setReservationPayment,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
@@ -28,13 +29,13 @@ function startOfWeek() {
 }
 const dateOf = (ts) => (ts ? new Date(ts).toISOString().slice(0, 10) : null)
 
-const SOURCES = [
-  ['walk_in', 'Walk-in'], ['cocotel', 'Cocotel'], ['agoda', 'Agoda'],
-  ['trip_com', 'Trip.com'], ['tripadvisor', 'TripAdvisor'],
-]
-// OTA sources a promo rate can target (walk-ins pay the base rate).
-const OTA_SOURCES = SOURCES.filter(([v]) => v !== 'walk_in')
-const sourceLabel = (v) => SOURCES.find(([s]) => s === v)?.[1] ?? v
+// 'walk_in' is fixed — always available, never admin-managed, never eligible
+// for a promo rate. Every other source comes from the property's own
+// `booking_sources` (admin-managed on this tab), replacing what used to be a
+// hardcoded OTA list.
+const WALK_IN = 'walk_in'
+const sourceLabel = (bookingSources, code) =>
+  (code === WALK_IN ? 'Walk-in' : bookingSources.find((s) => s.code === code)?.name ?? code)
 
 // The promo multiplier that applies to a source + room: the admin's
 // room-specific row wins over a property-wide one; null when none is
@@ -86,6 +87,7 @@ export default function FrontDesk() {
   const canManageRooms = role === 'owner' || role === 'admin'
   const [rooms, setRooms] = useState([])
   const [rates, setRates] = useState([])
+  const [bookingSources, setBookingSources] = useState([])
   const [promoRates, setPromoRates] = useState([])
   const [reservations, setReservations] = useState([])
   const [extraCharges, setExtraCharges] = useState([])
@@ -103,12 +105,13 @@ export default function FrontDesk() {
   const refresh = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [rm, rt, pr, rs, ec] = await Promise.all([
-        listRooms(propertyId), listRoomRates(propertyId), listPromoRates(propertyId),
-        listReservations(propertyId), listExtraCharges(propertyId),
+      const [rm, rt, bs, pr, rs, ec] = await Promise.all([
+        listRooms(propertyId), listRoomRates(propertyId), listBookingSources(propertyId),
+        listPromoRates(propertyId), listReservations(propertyId), listExtraCharges(propertyId),
       ])
       setRooms(rm)
       setRates(rt)
+      setBookingSources(bs)
       setPromoRates(pr)
       setReservations(rs)
       setExtraCharges(ec)
@@ -252,7 +255,7 @@ export default function FrontDesk() {
   }
 
   async function doDeletePromoRate(pr) {
-    if (!window.confirm(`Delete the ${sourceLabel(pr.source)} promo rate?`)) return
+    if (!window.confirm(`Delete the ${sourceLabel(bookingSources, pr.source)} promo rate?`)) return
     setPending(`promo-${pr.id}`)
     setError(null)
     try {
@@ -260,6 +263,20 @@ export default function FrontDesk() {
       await refresh()
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Could not delete the promo rate.')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function doDeleteBookingSource(bs) {
+    if (!window.confirm(`Delete "${bs.name}" as a booking source?`)) return
+    setPending(`source-${bs.id}`)
+    setError(null)
+    try {
+      await deleteBookingSource(bs.id)
+      await refresh()
+    } catch (ex) {
+      setError(ex?.response?.data?.message ?? 'Could not delete the source.')
     } finally {
       setPending(null)
     }
@@ -369,7 +386,7 @@ export default function FrontDesk() {
                       <td>{r.room?.room_number ?? '—'}</td>
                       <td className="text-xs">{r.check_in} → {r.check_out}</td>
                       <td className="text-xs">
-                        {SOURCES.find((s) => s[0] === r.source)?.[1] ?? r.source}
+                        {sourceLabel(bookingSources, r.source)}
                         {r.discount_type !== 'none' && (
                           <Badge bg="info" className="ml-1">{r.discount_type}</Badge>
                         )}
@@ -520,9 +537,47 @@ export default function FrontDesk() {
 
           {/* ---- Promo Rates (OTA nightly prices; auto-fill the booking form) ---- */}
           <Tab eventKey="promo-rates" title={`Promo Rates (${promoRates.length})`}>
+            <Card className="mb-4 shadow-sm">
+              <Card.Header className="flex items-center justify-between">
+                <span>Booking sources</span>
+                {canManageRooms && (
+                  <Button size="sm" onClick={() => setModal({ type: 'source' })}>Add source</Button>
+                )}
+              </Card.Header>
+              <Card.Body>
+                <p className="mb-3 text-sm text-muted">
+                  These are the OTAs this property actually books through — the <strong>Source</strong>{' '}
+                  dropdown on New Reservation and the promo rates below both draw from this list.
+                  &quot;Walk-in&quot; is always available and isn&apos;t listed here (it never carries a
+                  promo rate).
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {bookingSources.length === 0 && <span className="text-sm text-muted">No sources yet.</span>}
+                  {bookingSources.map((bs) => (
+                    <Badge key={bs.id} bg="light" className="flex items-center gap-2 font-normal">
+                      {bs.name}
+                      {canManageRooms && (
+                        <span className="flex gap-1">
+                          <button type="button" className="text-primary hover:underline"
+                            onClick={() => setModal({ type: 'source', bookingSource: bs })}>edit</button>
+                          <button type="button" className="text-red-600 hover:underline"
+                            disabled={pending !== null}
+                            onClick={() => doDeleteBookingSource(bs)}>
+                            {pending === `source-${bs.id}` ? <Spinner size="sm" /> : 'delete'}
+                          </button>
+                        </span>
+                      )}
+                    </Badge>
+                  ))}
+                </div>
+              </Card.Body>
+            </Card>
+
             {canManageRooms && (
               <div className="mb-2 flex justify-end">
-                <Button onClick={() => setModal({ type: 'promo' })}>Add promo rate</Button>
+                <Button onClick={() => setModal({ type: 'promo' })} disabled={bookingSources.length === 0}>
+                  Add promo rate
+                </Button>
               </div>
             )}
             <Card className="shadow-sm">
@@ -539,7 +594,7 @@ export default function FrontDesk() {
                   )}
                   {promoRates.map((pr) => (
                     <tr key={pr.id}>
-                      <td className="font-semibold">{sourceLabel(pr.source)}</td>
+                      <td className="font-semibold">{sourceLabel(bookingSources, pr.source)}</td>
                       <td>{pr.room ? roomLabel(pr.room) : 'All rooms'}</td>
                       <td className="text-right">×{Number(pr.multiplier)}</td>
                       {canManageRooms && (
@@ -686,8 +741,8 @@ export default function FrontDesk() {
       )}
 
       {modal === 'reservation' && (
-        <ReservationModal rooms={rooms} rates={rates} promoRates={promoRates} propertyId={propertyId}
-          defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
+        <ReservationModal rooms={rooms} rates={rates} bookingSources={bookingSources} promoRates={promoRates}
+          propertyId={propertyId} defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
       {modal === 'room' && (
@@ -698,8 +753,13 @@ export default function FrontDesk() {
         <RateModal rooms={rooms} propertyId={propertyId} rate={modal.rate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
+      {modal?.type === 'source' && (
+        <BookingSourceModal propertyId={propertyId} bookingSource={modal.bookingSource}
+          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
+      )}
       {modal?.type === 'promo' && (
-        <PromoRateModal rooms={rooms} propertyId={propertyId} promoRate={modal.promoRate}
+        <PromoRateModal rooms={rooms} bookingSources={bookingSources} propertyId={propertyId}
+          promoRate={modal.promoRate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
       {modal?.type === 'charge' && (
@@ -758,12 +818,14 @@ function SummaryCard({ label, value, variant }) {
   )
 }
 
-function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId, defaultCheckIn, onClose, onSaved }) {
+function ReservationModal({
+  rooms, rates, bookingSources, promoRates, propertyId, defaultRoomId, defaultCheckIn, onClose, onSaved,
+}) {
   const firstAvailable = rooms.find((r) => r.status === 'available')
   const [form, setForm] = useState({
     room_id: defaultRoomId ?? firstAvailable?.id ?? '',
     check_in: defaultCheckIn ?? '', check_out: '',
-    source: 'walk_in', discount_type: 'none', additional_beds: 0,
+    source: WALK_IN, discount_type: 'none', additional_beds: 0,
     guest_name: '', guest_type: 'local', nationality: '',
     contact_number: '', email: '', address: '',
   })
@@ -771,7 +833,7 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
   // The promo rate is read-only here: the room's original rate × the admin's
   // multiplier for the picked source (the backend computes the same on booking).
   const baseRate = resolveBaseRate(rates, form.room_id)
-  const multiplier = form.source === 'walk_in'
+  const multiplier = form.source === WALK_IN
     ? null
     : resolvePromoMultiplier(promoRates, form.source, form.room_id)
   const promoRate = multiplier !== null && baseRate > 0 ? multiplier * baseRate : null
@@ -887,7 +949,8 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
             <Form.Group className="mb-4 md:col-span-4">
               <Form.Label>Source</Form.Label>
               <Form.Select value={form.source} onChange={set('source')}>
-                {SOURCES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                <option value={WALK_IN}>Walk-in</option>
+                {bookingSources.map((bs) => <option key={bs.id} value={bs.code}>{bs.name}</option>)}
               </Form.Select>
             </Form.Group>
             <Form.Group className="mb-4 md:col-span-4">
@@ -902,18 +965,18 @@ function ReservationModal({ rooms, rates, promoRates, propertyId, defaultRoomId,
               <Form.Label>Promo rate</Form.Label>
               <Form.Control value={promoRate !== null ? formatMoney(promoRate) : ''}
                 disabled readOnly
-                placeholder={form.source === 'walk_in' ? '—' : 'Not set'} />
+                placeholder={form.source === WALK_IN ? '—' : 'Not set'} />
               {promoRate !== null && (
                 <Form.Text muted>
                   ×{multiplier} of {formatMoney(baseRate)} original rate
                 </Form.Text>
               )}
-              {form.source !== 'walk_in' && multiplier === null && (
+              {form.source !== WALK_IN && multiplier === null && (
                 <Form.Text muted>
-                  No {sourceLabel(form.source)} multiplier is set — the original room rate applies.
+                  No {sourceLabel(bookingSources, form.source)} multiplier is set — the original room rate applies.
                 </Form.Text>
               )}
-              {form.source !== 'walk_in' && multiplier !== null && baseRate <= 0 && (
+              {form.source !== WALK_IN && multiplier !== null && baseRate <= 0 && (
                 <Form.Text muted>
                   This room has no rate yet — add one on the Rates tab first.
                 </Form.Text>
@@ -1115,10 +1178,10 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
   )
 }
 
-function PromoRateModal({ rooms, propertyId, promoRate, onClose, onSaved }) {
+function PromoRateModal({ rooms, bookingSources, propertyId, promoRate, onClose, onSaved }) {
   const editing = Boolean(promoRate)
   const [form, setForm] = useState({
-    source: promoRate?.source ?? OTA_SOURCES[0][0],
+    source: promoRate?.source ?? bookingSources[0]?.code ?? '',
     multiplier: promoRate?.multiplier ?? '',
     room_id: promoRate?.room_id ?? '',
   })
@@ -1140,7 +1203,7 @@ function PromoRateModal({ rooms, propertyId, promoRate, onClose, onSaved }) {
           <Form.Group className="mb-4">
             <Form.Label>Booking source</Form.Label>
             <Form.Select value={form.source} onChange={set('source')} autoFocus>
-              {OTA_SOURCES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              {bookingSources.map((bs) => <option key={bs.id} value={bs.code}>{bs.name}</option>)}
             </Form.Select>
           </Form.Group>
           <Form.Group className="mb-4">
@@ -1157,6 +1220,37 @@ function PromoRateModal({ rooms, propertyId, promoRate, onClose, onSaved }) {
               <option value="">All rooms (property-wide)</option>
               {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
             </Form.Select>
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  )
+}
+
+function BookingSourceModal({ bookingSource, propertyId, onClose, onSaved }) {
+  const editing = Boolean(bookingSource)
+  const [name, setName] = useState(bookingSource?.name ?? '')
+  const { run, busy, err } = useSubmit(async () => {
+    if (editing) await updateBookingSource(bookingSource.id, { name })
+    else await createBookingSource({ name }, propertyId)
+    onSaved()
+  })
+  return (
+    <Modal show onHide={onClose} centered>
+      <Form onSubmit={run}>
+        <Modal.Header closeButton>
+          <Modal.Title>{editing ? 'Rename source' : 'Add booking source'}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {err && <Alert variant="danger">{err}</Alert>}
+          <Form.Group>
+            <Form.Label>Name</Form.Label>
+            <Form.Control value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Cocotel, Agoda, Booking.com" required autoFocus />
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>

@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Model\Entity\Reservation;
-use App\Model\Table\PromoRatesTable;
+use App\Model\Table\BookingSourcesTable;
 use App\Model\Table\ReservationsTable;
 use Cake\Http\Exception\BadRequestException;
 use Cake\I18n\Date;
@@ -88,15 +88,25 @@ class ReservationsController extends AppController
         $ok = $reservations->getConnection()->transactional(
             function () use ($reservations, $propertyId, &$reservation): bool {
                 $guestId = $this->resolveGuestId($propertyId);
-                $source = $this->request->getData('source') ?? 'walk_in';
+                $source = $this->request->getData('source') ?? BookingSourcesTable::WALK_IN;
                 $roomId = $this->request->getData('room_id');
+
+                if (
+                    $source !== BookingSourcesTable::WALK_IN
+                    && !$this->fetchTable('BookingSources')->exists([
+                        'BookingSources.property_id' => $propertyId,
+                        'BookingSources.code' => $source,
+                    ])
+                ) {
+                    throw new BadRequestException('Unknown booking source.');
+                }
 
                 // The promo rate is never client-supplied: it's the room's
                 // original (base) rate × the admin's multiplier for the chosen
                 // source (room-specific preferred), or null (base rate applies)
                 // when no multiplier — or no base rate — is configured.
                 $promoRate = null;
-                if (in_array($source, PromoRatesTable::SOURCES, true)) {
+                if ($source !== BookingSourcesTable::WALK_IN) {
                     $multiplier = $this->fetchTable('PromoRates')
                         ->multiplierFor($propertyId, $source, $roomId ? (int)$roomId : null);
                     if ($multiplier !== null) {
@@ -373,7 +383,7 @@ class ReservationsController extends AppController
         $rateNote = $reservation->promo_rate !== null
             ? sprintf(
                 ' (%s promo rate)',
-                ReservationsTable::SOURCE_LABELS[$reservation->source] ?? $reservation->source,
+                $this->fetchTable('BookingSources')->labelFor((int)$reservation->property_id, $reservation->source),
             )
             : '';
         $description = sprintf(

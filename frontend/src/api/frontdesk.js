@@ -26,6 +26,19 @@ export const createRoomRate = (data, propertyId) =>
 export const updateRoomRate = (id, data) =>
   client.patch(`/room-rates/${id}`, data).then((r) => r.data.roomRate)
 
+// Booking sources (admin-configurable OTA list: Cocotel, Agoda, ...)
+export const listBookingSources = (propertyId) =>
+  client.get('/booking-sources', { params: withProp({}, propertyId) }).then((r) => r.data.bookingSources)
+
+export const createBookingSource = (data, propertyId) =>
+  client.post('/booking-sources', withProp(data, propertyId)).then((r) => r.data.bookingSource)
+
+export const updateBookingSource = (id, data) =>
+  client.patch(`/booking-sources/${id}`, data).then((r) => r.data.bookingSource)
+
+export const deleteBookingSource = (id) =>
+  client.delete(`/booking-sources/${id}`).then((r) => r.data)
+
 // Promo rates (admin-configured OTA nightly prices per booking source)
 export const listPromoRates = (propertyId) =>
   client.get('/promo-rates', { params: withProp({}, propertyId) }).then((r) => r.data.promoRates)

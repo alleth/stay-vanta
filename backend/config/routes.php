@@ -130,6 +130,16 @@ return function (RouteBuilder $routes): void {
         $builder->put('/room-rates/{id}', ['controller' => 'RoomRates', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
+        // Booking sources (admin-configurable OTA list: Cocotel, Agoda, ...).
+        $builder->get('/booking-sources', ['controller' => 'BookingSources', 'action' => 'index']);
+        $builder->post('/booking-sources', ['controller' => 'BookingSources', 'action' => 'add']);
+        $builder->patch('/booking-sources/{id}', ['controller' => 'BookingSources', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->put('/booking-sources/{id}', ['controller' => 'BookingSources', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->delete('/booking-sources/{id}', ['controller' => 'BookingSources', 'action' => 'delete'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+
         // Promo rates (admin-configured OTA nightly prices per booking source).
         $builder->get('/promo-rates', ['controller' => 'PromoRates', 'action' => 'index']);
         $builder->post('/promo-rates', ['controller' => 'PromoRates', 'action' => 'add']);

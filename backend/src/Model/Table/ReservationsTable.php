@@ -16,18 +16,8 @@ use Cake\Validation\Validator;
 class ReservationsTable extends Table
 {
     public const STATUSES = ['booked', 'checked_in', 'checked_out', 'cancelled'];
-    public const SOURCES = ['walk_in', 'cocotel', 'agoda', 'trip_com', 'tripadvisor'];
     public const DISCOUNT_TYPES = ['none', 'senior', 'pwd'];
     public const PAYMENT_STATUSES = ['unpaid', 'paid'];
-
-    /** Human-readable OTA source labels, for invoice line descriptions. */
-    public const SOURCE_LABELS = [
-        'walk_in' => 'Walk-in',
-        'cocotel' => 'Cocotel',
-        'agoda' => 'Agoda',
-        'trip_com' => 'Trip.com',
-        'tripadvisor' => 'TripAdvisor',
-    ];
 
     /** Statutory Senior Citizen / PWD discount (Philippines). */
     public const STATUTORY_DISCOUNT = 0.20;
@@ -57,7 +47,9 @@ class ReservationsTable extends Table
             ->integer('property_id');
 
         $validator->inList('status', self::STATUSES);
-        $validator->inList('source', self::SOURCES);
+        // Validity (walk_in, or one of the property's configured booking
+        // sources) is checked in the controller, where the property is known.
+        $validator->scalar('source')->maxLength('source', 50);
         $validator->inList('discount_type', self::DISCOUNT_TYPES);
         $validator->inList('payment_status', self::PAYMENT_STATUSES);
 
