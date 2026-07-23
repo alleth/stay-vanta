@@ -1,9 +1,14 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Card, Alert, Form, Table, Button, Badge } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { ownerDashboard, adminDashboard, dailyCollection, monthlyVisits } from '../api/reports'
 import { formatMoney } from '../utils/format'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
+
+// ApexCharts is a large dependency (~200KB gzipped) used only by the admin
+// Dashboard's seasonality chart — code-split it so every other role/page
+// never pays for it.
+const Chart = lazy(() => import('react-apexcharts'))
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
 const MONTHS = [
@@ -161,80 +166,26 @@ function CollectionReport({ allowMonthly }) {
   )
 }
 
-// A smooth curve through a set of {x,y} points using monotone cubic
-// (Fritsch-Carlson) interpolation — unlike a plain Catmull-Rom spline, it's
-// guaranteed not to overshoot beyond the two points on either side of a
-// segment. That matters here: a flat run of zero months right next to a
-// spike (a common shape for seasonal data) would otherwise curve visibly
-// *below* the zero baseline approaching the flat months, which reads as a
-// negative count. Sets the tangent to 0 at any local min/max (including
-// flat runs) so the curve settles rather than overshooting.
-function smoothPath(pts) {
-  const n = pts.length
-  if (n === 0) return ''
-  if (n === 1) return `M${pts[0].x},${pts[0].y}`
-
-  const slope = []
-  for (let i = 0; i < n - 1; i++) {
-    const dx = pts[i + 1].x - pts[i].x
-    slope[i] = dx === 0 ? 0 : (pts[i + 1].y - pts[i].y) / dx
-  }
-  const tangent = new Array(n)
-  tangent[0] = slope[0]
-  tangent[n - 1] = slope[n - 2]
-  for (let i = 1; i < n - 1; i++) {
-    tangent[i] = (slope[i - 1] === 0 || slope[i] === 0 || slope[i - 1] * slope[i] < 0)
-      ? 0
-      : (slope[i - 1] + slope[i]) / 2
-  }
-  // Limit each tangent so the curve can't swing past the segment's own
-  // endpoints (the standard Fritsch-Carlson overshoot correction).
-  for (let i = 0; i < n - 1; i++) {
-    if (slope[i] === 0) {
-      tangent[i] = 0
-      tangent[i + 1] = 0
-      continue
-    }
-    const a = tangent[i] / slope[i]
-    const b = tangent[i + 1] / slope[i]
-    const h = Math.hypot(a, b)
-    if (h > 3) {
-      const scale = 3 / h
-      tangent[i] = scale * a * slope[i]
-      tangent[i + 1] = scale * b * slope[i]
-    }
-  }
-
-  let d = `M${pts[0].x},${pts[0].y}`
-  for (let i = 0; i < n - 1; i++) {
-    const p0 = pts[i]
-    const p1 = pts[i + 1]
-    const dx = p1.x - p0.x
-    const c1x = p0.x + dx / 3
-    const c1y = p0.y + (tangent[i] * dx) / 3
-    const c2x = p1.x - dx / 3
-    const c2y = p1.y - (tangent[i + 1] * dx) / 3
-    d += ` C${c1x},${c1y} ${c2x},${c2y} ${p1.x},${p1.y}`
-  }
-  return d
-}
+// The app's design tokens (frontend/src/index.css @theme), as literal hex
+// values — ApexCharts' config takes real color strings, not CSS custom
+// properties.
+const CHART_ACCENT = '#d99211'
+const CHART_MUTED = '#6b7280'
 
 // Seasonality: non-cancelled reservations per month (by check-in date), one
-// year at a time. A stat-card widget in the style of Flowbite's area-chart
-// example (headline number + a vs-last-year change badge, a minimal smooth
-// area chart with no axis chrome, a footer with the period control) — built
-// as plain SVG since that reference is actually built on ApexCharts and this
-// repo has no charting library. Single series, so no legend box is needed
-// (the title names it); the busiest month is direct-labeled since that's the
-// one thing this chart exists to answer. A table-view toggle is the
-// accessible twin, reachable from the footer like the reference's link.
+// year at a time. A stat-card widget matching Flowbite's area-chart example
+// (headline number + a vs-last-year change badge in the header, a minimal
+// smooth gradient-fill area chart, a footer with the period control) —
+// rendered with ApexCharts via react-apexcharts, the same engine Flowbite's
+// own charts use. Month labels stay on the x-axis (unlike the reference,
+// which shows none) since knowing *which* month is the entire point of this
+// chart; the busiest month gets a point annotation for the same reason. A
+// table-view toggle is the accessible twin, reachable from the footer like
+// the reference's link.
 function SeasonalityChart() {
   const nowYear = new Date().getFullYear()
   const [year, setYear] = useState(nowYear)
   const [showTable, setShowTable] = useState(false)
-  const [hover, setHover] = useState(null)
-  const svgRef = useRef(null)
-  const gradientId = useId()
 
   // Keyed by the year that produced it, so switching years shows the
   // loading skeleton (a stale key) without a synchronous setState. The
@@ -263,46 +214,59 @@ function SeasonalityChart() {
 
   const years = Array.from({ length: 6 }, (_, i) => nowYear - i)
 
-  const W = 720
-  const H = 220
-  const padX = 8
-  const padT = 32
-  const padB = 24
-  const innerW = W - padX * 2
-  const innerH = H - padT - padB
-
   const months = data?.months ?? []
   const counts = months.map((m) => m.count)
   const total = counts.reduce((s, c) => s + c, 0)
   const maxCount = counts.length ? Math.max(...counts) : 0
-  const top = Math.max(maxCount, 1) * 1.2
   const peakIndex = maxCount > 0 ? counts.indexOf(maxCount) : -1
   const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : null
 
-  const xFor = (i) => padX + (months.length > 1 ? (innerW * i) / (months.length - 1) : innerW / 2)
-  const yFor = (v) => padT + innerH - (innerH * v) / top
+  const series = [{ name: 'Reservations', data: counts }]
 
-  const points = months.map((m, i) => ({ ...m, x: xFor(i), y: yFor(m.count) }))
-  const linePath = smoothPath(points)
-  // Area variant: the same smoothed line, closed down to the zero baseline —
-  // filled with a gradient fading to transparent, never a flat saturated block.
-  const baselineY = yFor(0)
-  const areaPath = points.length
-    ? `${linePath} L${points[points.length - 1].x},${baselineY} L${points[0].x},${baselineY} Z`
-    : ''
-
-  function onMove(e) {
-    if (!svgRef.current || points.length === 0) return
-    const rect = svgRef.current.getBoundingClientRect()
-    const px = ((e.clientX - rect.left) / rect.width) * W
-    const ratio = innerW > 0 ? (px - padX) / innerW : 0
-    const idx = Math.min(points.length - 1, Math.max(0, Math.round(ratio * (points.length - 1))))
-    setHover(idx)
+  const chartOptions = {
+    chart: {
+      type: 'area',
+      height: 220,
+      toolbar: { show: false },
+      zoom: { enabled: false },
+      fontFamily: 'inherit',
+      animations: { enabled: false },
+    },
+    colors: [CHART_ACCENT],
+    dataLabels: { enabled: false },
+    stroke: { curve: 'smooth', width: 2 },
+    fill: {
+      type: 'gradient',
+      gradient: { opacityFrom: 0.35, opacityTo: 0, shadeIntensity: 1, stops: [0, 100] },
+    },
+    grid: { show: false, padding: { left: 8, right: 8 } },
+    xaxis: {
+      categories: months.map((m) => m.label),
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+      labels: { style: { colors: CHART_MUTED, fontSize: '10px' } },
+      crosshairs: { show: true },
+    },
+    yaxis: { show: false },
+    tooltip: {
+      y: { formatter: (v) => `${v} visit${v === 1 ? '' : 's'}` },
+      x: { show: false },
+    },
+    markers: { size: 0, hover: { size: 5 } },
+    annotations: peakIndex >= 0 ? {
+      points: [{
+        x: months[peakIndex].label,
+        y: counts[peakIndex],
+        marker: { size: 5, fillColor: CHART_ACCENT, strokeColor: '#fff', strokeWidth: 2 },
+        label: {
+          text: `${months[peakIndex].label} · ${counts[peakIndex]}`,
+          borderWidth: 0,
+          offsetY: -8,
+          style: { color: CHART_ACCENT, fontSize: '11px', fontWeight: 600, background: 'transparent' },
+        },
+      }],
+    } : { points: [] },
   }
-
-  const hovered = hover !== null ? points[hover] : null
-  const tooltipW = 96
-  const tooltipX = hovered ? Math.min(Math.max(hovered.x - tooltipW / 2, padX), W - padX - tooltipW) : 0
 
   return (
     <Card className="mb-6">
@@ -342,56 +306,9 @@ function SeasonalityChart() {
 
       {!error && data && !showTable && (
         <Card.Body className="pt-2">
-          <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full select-none" style={{ maxHeight: 220 }}
-            onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-
-            {points.map((p) => (
-              <text key={p.month} x={p.x} y={H - 6} textAnchor="middle" fontSize="10" fill="var(--color-muted)">
-                {p.label}
-              </text>
-            ))}
-
-            <path d={areaPath} fill={`url(#${gradientId})`} stroke="none" />
-
-            {hovered && (
-              <line x1={hovered.x} x2={hovered.x} y1={padT} y2={H - padB}
-                stroke="var(--color-muted)" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
-            )}
-
-            <path d={linePath} fill="none" stroke="var(--color-ink)" strokeWidth="2"
-              strokeLinejoin="round" strokeLinecap="round" />
-
-            {points.map((p, i) => (
-              <circle key={p.month} cx={p.x} cy={p.y} r={i === peakIndex || hover === i ? 5 : 4}
-                fill={i === peakIndex ? 'var(--color-accent)' : 'var(--color-ink)'}
-                stroke="var(--color-surface)" strokeWidth="2" />
-            ))}
-
-            {peakIndex >= 0 && (
-              <text x={points[peakIndex].x} y={points[peakIndex].y - 12} textAnchor="middle"
-                fontSize="11" fontWeight="600" fill="var(--color-accent)">
-                {points[peakIndex].label} · {points[peakIndex].count}
-              </text>
-            )}
-
-            {hovered && (
-              <g transform={`translate(${tooltipX}, ${Math.max(hovered.y - 46, padT - 6)})`}>
-                <rect width={tooltipW} height="34" rx="6" fill="var(--color-ink)" />
-                <text x={tooltipW / 2} y="14" textAnchor="middle" fontSize="12" fontWeight="700" fill="#fff">
-                  {hovered.count} visit{hovered.count === 1 ? '' : 's'}
-                </text>
-                <text x={tooltipW / 2} y="27" textAnchor="middle" fontSize="10" fill="#c7cad4">
-                  {hovered.label} {data.year}
-                </text>
-              </g>
-            )}
-          </svg>
+          <Suspense fallback={<SkeletonTable rows={3} />}>
+            <Chart key={year} type="area" height={220} series={series} options={chartOptions} />
+          </Suspense>
         </Card.Body>
       )}
 

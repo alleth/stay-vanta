@@ -12,7 +12,10 @@ independently-deployed apps that talk over a JSON API:
   `border-line`, `bg-ink`, `text-accent`… are utilities), and a small in-house kit
   `src/components/ui.jsx` provides Button/Badge/Card/Table/Modal/Form/Alert/Tabs/etc.
   with react-bootstrap-style APIs (`variant`, `size`, `show`/`onHide`). Routing via
-  react-router-dom v7, HTTP via axios.
+  react-router-dom v7, HTTP via axios. The one exception to "no external UI library":
+  `apexcharts`/`react-apexcharts` powers the Dashboard's seasonality chart (`Dashboard.jsx`) —
+  loaded via `React.lazy()` (~200KB gzipped) so only an admin who opens that chart pays for it,
+  everyone else's bundle is unaffected.
 - `backend/` — **CakePHP 5** JSON REST API. **MySQL** (XAMPP locally, Railway in prod).
 
 Frontend deploys to **Cloudflare Pages**; the backend API deploys separately. They are
