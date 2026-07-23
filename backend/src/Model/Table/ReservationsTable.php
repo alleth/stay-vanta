@@ -16,7 +16,7 @@ use Cake\Validation\Validator;
 class ReservationsTable extends Table
 {
     public const STATUSES = ['booked', 'checked_in', 'checked_out', 'cancelled'];
-    public const DISCOUNT_TYPES = ['none', 'senior', 'pwd'];
+    public const DISCOUNT_TYPES = ['none', 'senior', 'pwd', 'referral'];
     public const PAYMENT_STATUSES = ['unpaid', 'paid'];
 
     /** Statutory Senior Citizen / PWD discount (Philippines). */
@@ -52,6 +52,16 @@ class ReservationsTable extends Table
         $validator->scalar('source')->maxLength('source', 50);
         $validator->inList('discount_type', self::DISCOUNT_TYPES);
         $validator->inList('payment_status', self::PAYMENT_STATUSES);
+
+        // A referral discount has no fixed rate — the receptionist decides
+        // the amount, so it must be a positive number when that's the type.
+        $validator
+            ->numeric('discount_amount')
+            ->greaterThan('discount_amount', 0, 'Enter a discount amount greater than 0.')
+            ->requirePresence('discount_amount', function (array $context) {
+                return ($context['data']['discount_type'] ?? null) === 'referral';
+            })
+            ->allowEmptyString('discount_amount', null, fn($context) => ($context['data']['discount_type'] ?? null) !== 'referral');
 
         $validator
             ->date('check_in')
@@ -91,7 +101,9 @@ class ReservationsTable extends Table
     /**
      * Compute a price quote for a reservation given the resolved nightly rate.
      * The promo rate (an OTA-negotiated nightly price) overrides the base rate
-     * when present; senior/PWD applies the statutory discount.
+     * when present; senior/PWD applies the statutory 20% discount; referral
+     * applies the receptionist-entered flat amount, capped at the subtotal so
+     * the total can never go negative.
      *
      * @return array{nights:int, nightly_rate:float, subtotal:float, discount:float, total:float}
      */
@@ -103,10 +115,13 @@ class ReservationsTable extends Table
 
         $nights = $this->nights($reservation);
         $subtotal = $nightly * $nights;
-        $discountRate = in_array($reservation->discount_type, ['senior', 'pwd'], true)
-            ? self::STATUTORY_DISCOUNT
-            : 0.0;
-        $discount = round($subtotal * $discountRate, 2);
+        if (in_array($reservation->discount_type, ['senior', 'pwd'], true)) {
+            $discount = round($subtotal * self::STATUTORY_DISCOUNT, 2);
+        } elseif ($reservation->discount_type === 'referral') {
+            $discount = round(min((float)$reservation->discount_amount, $subtotal), 2);
+        } else {
+            $discount = 0.0;
+        }
 
         return [
             'nights' => $nights,

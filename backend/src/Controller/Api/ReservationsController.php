@@ -63,8 +63,12 @@ class ReservationsController extends AppController
     /**
      * POST /api/reservations
      *
-     * { room_id, check_in, check_out, source?, discount_type?,
+     * { room_id, check_in, check_out, source?, discount_type?, discount_amount?,
      *   additional_beds?, guest_id? | guest_name?+nationality?+guest_type? }
+     *
+     * `discount_amount` (a flat peso amount, receptionist-decided) only applies
+     * — and is only stored — when `discount_type` is `referral`; senior/pwd are
+     * the fixed 20% statutory rate instead.
      *
      * The promo rate is resolved server-side from the promo_rates the admin
      * configured for the booking source — it is not accepted from the client.
@@ -115,6 +119,7 @@ class ReservationsController extends AppController
                     }
                 }
 
+                $discountType = $this->request->getData('discount_type') ?? 'none';
                 $reservation = $reservations->newEntity([
                     'property_id' => $propertyId,
                     'room_id' => $roomId,
@@ -124,7 +129,8 @@ class ReservationsController extends AppController
                     'check_out' => $this->request->getData('check_out'),
                     'status' => 'booked',
                     'source' => $source,
-                    'discount_type' => $this->request->getData('discount_type') ?? 'none',
+                    'discount_type' => $discountType,
+                    'discount_amount' => $discountType === 'referral' ? $this->request->getData('discount_amount') : null,
                     'promo_rate' => $promoRate,
                     'additional_beds' => (int)($this->request->getData('additional_beds') ?? 0),
                 ]);
@@ -404,10 +410,14 @@ class ReservationsController extends AppController
                 );
 
                 if ($quote['discount'] > 0) {
-                    $label = $reservation->discount_type === 'senior' ? 'Senior' : 'PWD';
+                    $description = match ($reservation->discount_type) {
+                        'senior' => 'Senior discount (20%)',
+                        'pwd' => 'PWD discount (20%)',
+                        default => 'Referral discount',
+                    };
                     $invoices->addLine(
                         $invoice,
-                        sprintf('%s discount (20%%)', $label),
+                        $description,
                         -(float)$quote['discount'],
                         'reservation',
                         (int)$reservation->id,

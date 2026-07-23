@@ -25,7 +25,8 @@ use Cake\ORM\Entity;
  * @property string $source         walk_in | cocotel | agoda | trip_com | tripadvisor
  * @property string|null $promo_rate
  * @property string|null $downpayment  50% collected up front on an advance booking
- * @property string $discount_type  none | senior | pwd
+ * @property string $discount_type  none | senior | pwd | referral
+ * @property string|null $discount_amount  flat amount for a `referral` discount only
  * @property string $payment_status unpaid | paid — Front Desk operational flag,
  *   independent of the booking lifecycle and of invoice settlement
  * @property int $additional_beds
@@ -47,6 +48,7 @@ class Reservation extends Entity
         'promo_rate' => true,
         'downpayment' => true,
         'discount_type' => true,
+        'discount_amount' => true,
         'payment_status' => true,
         'additional_beds' => true,
     ];

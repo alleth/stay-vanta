@@ -776,7 +776,7 @@ function ReservationModal({
   const [form, setForm] = useState({
     room_id: defaultRoomId ?? firstAvailable?.id ?? '',
     check_in: defaultCheckIn ?? '', check_out: '',
-    source: WALK_IN, discount_type: 'none', additional_beds: 0,
+    source: WALK_IN, discount_type: 'none', discount_amount: '', additional_beds: 0,
     guest_name: '', guest_type: 'local', nationality: '',
     contact_number: '', email: '', address: '',
   })
@@ -790,15 +790,21 @@ function ReservationModal({
   const promoRate = multiplier !== null && baseRate > 0 ? multiplier * baseRate : null
 
   // Advance booking (check-in after today) collects a 50% downpayment of the
-  // estimated total — promo rate and senior/PWD discount included. The
-  // backend computes the authoritative amount the same way.
+  // estimated total — promo rate and discount included. The backend computes
+  // the authoritative amount the same way. Senior/PWD is a fixed 20% off;
+  // referral is a flat amount the receptionist types in, capped at the
+  // subtotal so the estimate can't go negative while they're still typing.
   const nights = form.check_in && form.check_out
     ? Math.max(0, Math.round((new Date(form.check_out) - new Date(form.check_in)) / 86400000))
     : 0
   const nightly = promoRate ?? (baseRate > 0 ? baseRate : null)
-  const estTotal = nightly !== null && nights > 0
-    ? nightly * nights * (form.discount_type === 'none' ? 1 : 0.8)
+  const estSubtotal = nightly !== null && nights > 0 ? nightly * nights : 0
+  const estDiscount = form.discount_type === 'senior' || form.discount_type === 'pwd'
+    ? estSubtotal * 0.2
+    : form.discount_type === 'referral'
+    ? Math.min(Number(form.discount_amount) || 0, estSubtotal)
     : 0
+  const estTotal = Math.max(0, estSubtotal - estDiscount)
   const isAdvance = Boolean(form.check_in) && form.check_in > todayStr()
   const downpayment = isAdvance ? estTotal * 0.5 : 0
   const [guestId, setGuestId] = useState(null) // set when reusing an existing guest
@@ -934,6 +940,7 @@ function ReservationModal({
                 <option value="none">None</option>
                 <option value="senior">Senior citizen (20%)</option>
                 <option value="pwd">PWD (20%)</option>
+                <option value="referral">Referral</option>
               </Form.Select>
             </Form.Group>
             <Form.Group className="mb-4 md:col-span-2">
@@ -962,6 +969,16 @@ function ReservationModal({
               <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
             </Form.Group>
           </div>
+          {form.discount_type === 'referral' && (
+            <Form.Group className="mb-4">
+              <Form.Label>Referral discount amount</Form.Label>
+              <Form.Control type="number" min={0.01} step="0.01" value={form.discount_amount}
+                onChange={set('discount_amount')} required autoFocus placeholder="e.g. 500" />
+              <Form.Text muted>
+                Flat amount off the room total{estSubtotal > 0 ? ` (max ${formatMoney(estSubtotal)})` : ''}.
+              </Form.Text>
+            </Form.Group>
+          )}
           {downpayment > 0 && (
             <Alert variant="info" className="mb-4 px-4 py-2">
               <strong>Advance booking</strong> — collect a downpayment of{' '}

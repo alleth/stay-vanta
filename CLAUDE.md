@@ -186,7 +186,7 @@ and via `ProtectedRoute roles=` in `App.jsx`** (frontend guards are UX only):
   stamped in `InvoicesController::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room
   food already lives inside invoices, so only `paid` food orders are added (no double count).
 - **Room revenue is persisted on Mark paid, falling back to check-out**: `ReservationsController::postRoomCharge()`
-  posts the `quote()` subtotal (itemized with any senior/PWD discount as its own negative line) as
+  posts the `quote()` subtotal (itemized with any senior/PWD/referral discount as its own negative line) as
   `reservation` line(s) on the guest's invoice (via `InvoicesTable::addLine`), so rooms become
   collectable revenue. It's called from both `payment()` (the moment a reservation is marked
   `paid`, whether that's at check-in or any time before check-out) and `transition()`'s check-out
@@ -269,7 +269,12 @@ own `property_id`; an owner's chosen property defaults to the first and persists
 on every lifecycle transition (check-in/out/cancel), so a booking always shows who last
 handled it; transitions also flip `rooms.status` (occupied/available) and are guarded by an
 allowed-from-state table. Pricing lives in `ReservationsTable::quote()`: nightly rate =
-`promo_rate` (OTA) ?? resolved room rate; senior/PWD apply `STATUTORY_DISCOUNT` (20%).
+`promo_rate` (OTA) ?? resolved room rate. `discount_type` is `none`|`senior`|`pwd`|`referral`:
+senior/PWD apply the fixed `STATUTORY_DISCOUNT` (20%) of the subtotal; `referral` has no fixed
+rate — it applies `reservations.discount_amount`, a flat peso amount the receptionist types in at
+booking, capped at the subtotal (`min()`) so the total can never go negative. `discount_amount` is
+required (and must be `> 0`) only when `discount_type` is `referral`; it's forced to `null`
+server-side otherwise, regardless of what the client sends.
 
 **Booking sources are admin-configurable, not a hardcoded list — and have no standalone
 management UI**: `booking_sources` holds each property's own OTA list (Cocotel, Agoda,
@@ -319,9 +324,10 @@ opens (or reuses) the guest's invoice right away and posts the room charge onto 
 check-out) already shows the room amount on Food & Orders → Invoices, instead of only getting it
 at check-out. `postRoomCharge()` itemizes it: the subtotal as one line (noting the OTA promo rate
 in its description when `promo_rate` is set, via `ReservationsTable::SOURCE_LABELS`), then, if
-`discount_type` is `senior`/`pwd`, a separate negative "Senior/PWD discount (20%)" line —
-mirroring how `FoodOrdersTable::place()` itemizes its own discount, so the invoice folio always
-shows the discount and promo rate as their own lines, not folded into a single net figure. It's
+`quote()`'s discount is > 0, a separate negative line — "Senior discount (20%)" / "PWD discount
+(20%)" / "Referral discount" depending on `discount_type` — mirroring how `FoodOrdersTable::place()`
+itemizes its own discount, so the invoice folio always shows the discount and promo rate as their
+own lines, not folded into a single net figure. It's
 idempotent (checks `InvoicesTable::invoiceForLine('reservation', ...)` first), so **check-out**
 calling the same helper is just a fallback for a reservation that was never marked paid — whichever
 happens first is the one that actually posts the line. Cancelling a reservation reverses it
@@ -352,8 +358,8 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   ▶/▼ expand toggle revealing its sub-items, each tracked with its own stock/quantity). Inventory
   also has a **Receipt Booklets** tab (`Inventory.jsx`) managing `receipt_series` — see below.
 - **Front Desk** (UI name for "Room Monitoring") — rooms, room rates, reservations, OTA
-  sources (`reservations.source`: cocotel/agoda/trip_com/tripadvisor), senior/PWD discounts,
-  additional beds.
+  sources (`reservations.source`: cocotel/agoda/trip_com/tripadvisor), senior/PWD/referral
+  discounts, additional beds.
 - **Guests** *(implemented)* — registry + counts (`GuestsController::stats` → total / local / foreign /
   in_house, where total/local/foreign count only guests **registered today** (daily fresh-start
   cards) and in_house = distinct guests with a `checked_in` reservation). Guests are also
