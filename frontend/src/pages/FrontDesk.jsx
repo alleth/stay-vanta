@@ -396,17 +396,6 @@ export default function FrontDesk() {
                         <Badge bg={r.payment_status === 'paid' ? 'success' : 'secondary'}>
                           {r.payment_status === 'paid' ? 'paid' : 'unpaid'}
                         </Badge>
-                        {r.status !== 'cancelled' && (
-                          <div className="mt-1">
-                            <Button size="sm" variant="outline-secondary"
-                              disabled={pending !== null}
-                              onClick={() => togglePayment(r)}>
-                              {pending === `payment-${r.id}`
-                                ? <Spinner size="sm" />
-                                : r.payment_status === 'paid' ? 'Mark unpaid' : 'Mark paid'}
-                            </Button>
-                          </div>
-                        )}
                       </td>
                       <td className="min-w-[170px] text-xs text-muted">
                         <div>Booked: {fmtDateTime(r.created) ?? '—'}</div>
@@ -414,28 +403,39 @@ export default function FrontDesk() {
                         {r.checked_out_at && <div>Out: {fmtDateTime(r.checked_out_at)}</div>}
                       </td>
                       <td className="text-xs text-muted">{r.receptionist?.name ?? '—'}</td>
-                      <td className="whitespace-nowrap text-right">
-                        {r.status === 'booked' && (
-                          <Button size="sm" variant="outline-primary" className="mr-1"
-                            disabled={pending !== null}
-                            onClick={() => onTransition(r, 'check-in')}>
-                            {pending === `check-in-${r.id}` ? <Spinner size="sm" /> : 'Check in'}
-                          </Button>
-                        )}
-                        {r.status === 'checked_in' && (
-                          <Button size="sm" variant="outline-success" className="mr-1"
-                            disabled={pending !== null}
-                            onClick={() => onTransition(r, 'check-out')}>
-                            {pending === `check-out-${r.id}` ? <Spinner size="sm" /> : 'Check out'}
-                          </Button>
-                        )}
-                        {(r.status === 'booked' || r.status === 'checked_in') && (
-                          <Button size="sm" variant="outline-danger"
-                            disabled={pending !== null}
-                            onClick={() => onTransition(r, 'cancel')}>
-                            {pending === `cancel-${r.id}` ? <Spinner size="sm" /> : 'Cancel'}
-                          </Button>
-                        )}
+                      <td className="text-right">
+                        <div className="inline-flex flex-wrap justify-end gap-1">
+                          {r.status === 'booked' && (
+                            <Button size="sm" variant="outline-primary"
+                              disabled={pending !== null}
+                              onClick={() => onTransition(r, 'check-in')}>
+                              {pending === `check-in-${r.id}` ? <Spinner size="sm" /> : 'Check in'}
+                            </Button>
+                          )}
+                          {r.status === 'checked_in' && (
+                            <Button size="sm" variant="outline-success"
+                              disabled={pending !== null}
+                              onClick={() => onTransition(r, 'check-out')}>
+                              {pending === `check-out-${r.id}` ? <Spinner size="sm" /> : 'Check out'}
+                            </Button>
+                          )}
+                          {r.status !== 'cancelled' && (
+                            <Button size="sm" variant="outline-secondary"
+                              disabled={pending !== null}
+                              onClick={() => togglePayment(r)}>
+                              {pending === `payment-${r.id}`
+                                ? <Spinner size="sm" />
+                                : r.payment_status === 'paid' ? 'Mark unpaid' : 'Mark paid'}
+                            </Button>
+                          )}
+                          {(r.status === 'booked' || r.status === 'checked_in') && (
+                            <Button size="sm" variant="outline-danger"
+                              disabled={pending !== null}
+                              onClick={() => onTransition(r, 'cancel')}>
+                              {pending === `cancel-${r.id}` ? <Spinner size="sm" /> : 'Cancel'}
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
