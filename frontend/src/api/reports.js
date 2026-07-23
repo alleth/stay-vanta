@@ -14,10 +14,12 @@ export const adminDashboard = () =>
 export const dailyCollection = (params = {}) =>
   client.get('/reports/daily-collection', { params }).then((r) => r.data.collection)
 
-// Seasonality: non-cancelled reservations per month of the given year
-// (defaults to current year), by check-in date. Admin only.
-export const monthlyVisits = (year) =>
-  client.get('/reports/monthly-visits', { params: year ? { year } : {} }).then((r) => r.data.report)
+// Seasonality: per month of the given year (defaults to current year) —
+// non-cancelled reservation count (by check-in date) and collected revenue
+// (settled invoices + paid food orders, same definition as adminDashboard's
+// revenue buckets). Admin only.
+export const monthlySummary = (year) =>
+  client.get('/reports/monthly-summary', { params: year ? { year } : {} }).then((r) => r.data.report)
 
 // Subscribers (owner view of properties, each with its admin user(s)).
 export const listSubscribers = () =>

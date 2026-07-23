@@ -237,17 +237,19 @@ class ReportsController extends AppController
     ];
 
     /**
-     * GET /api/reports/monthly-visits[?year=YYYY]  (admin only)
+     * GET /api/reports/monthly-summary[?year=YYYY]  (admin only)
      *
-     * Seasonality: how many stays (non-cancelled reservations, counted by the
-     * month of their check-in date) the admin's property had in each month of
-     * the given year — defaults to the current year. One count query per
-     * month (rather than a `GROUP BY MONTH(...)`) to sidestep the
-     * ONLY_FULL_GROUP_BY divergence between local MariaDB and prod MySQL 8
-     * (see CLAUDE.md) — the same pattern adminDashboard() already uses for
-     * its revenue buckets.
+     * Seasonality, two ways, one year at a time (defaults to current year):
+     * - `count` — non-cancelled reservations by the month of their check-in
+     *   date (how busy the property was).
+     * - `revenue` — collected revenue for the month: settled invoices (by
+     *   `settled_at`) + paid standalone food orders (by `created`), the same
+     *   definition adminDashboard() uses for its revenue buckets.
+     * One query per bucket per month (rather than a `GROUP BY MONTH(...)`)
+     * to sidestep the ONLY_FULL_GROUP_BY divergence between local MariaDB and
+     * prod MySQL 8 (see CLAUDE.md) — the same pattern adminDashboard() uses.
      */
-    public function monthlyVisits(): void
+    public function monthlySummary(): void
     {
         if (!$this->userHasRole('admin')) {
             throw new ForbiddenException('Only a hotel/resort admin can view this report.');
@@ -261,10 +263,13 @@ class ReportsController extends AppController
         $year = (int)$year;
 
         $reservations = $this->fetchTable('Reservations');
+        $invoices = $this->fetchTable('Invoices');
+        $foodOrders = $this->fetchTable('FoodOrders');
         $months = [];
         for ($m = 1; $m <= 12; $m++) {
             $from = DateTime::create($year, $m, 1, 0, 0, 0);
             $to = $from->addMonths(1);
+
             $count = $reservations->find()
                 ->where([
                     'property_id' => $propertyId,
@@ -273,7 +278,29 @@ class ReportsController extends AppController
                     'check_in <' => $to->toDateString(),
                 ])
                 ->count();
-            $months[] = ['month' => $m, 'label' => self::MONTH_LABELS[$m], 'count' => $count];
+
+            $inv = $invoices->find()->where([
+                'property_id' => $propertyId,
+                'status' => 'settled',
+                'settled_at >=' => $from,
+                'settled_at <' => $to,
+            ]);
+            $invTotal = (float)$inv->select(['s' => $inv->func()->sum('total')])->first()->s;
+
+            $food = $foodOrders->find()->where([
+                'property_id' => $propertyId,
+                'payment_status' => 'paid',
+                'created >=' => $from,
+                'created <' => $to,
+            ]);
+            $foodTotal = (float)$food->select(['s' => $food->func()->sum('total')])->first()->s;
+
+            $months[] = [
+                'month' => $m,
+                'label' => self::MONTH_LABELS[$m],
+                'count' => $count,
+                'revenue' => round($invTotal + $foodTotal, 2),
+            ];
         }
 
         $this->set('report', ['year' => $year, 'months' => $months]);

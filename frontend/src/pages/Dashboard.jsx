@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Card, Alert, Form, Table, Button, Badge } from '../components/ui'
+import { Card, Alert, Form, Table, Button, ButtonGroup, Badge } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
-import { ownerDashboard, adminDashboard, dailyCollection, monthlyVisits } from '../api/reports'
+import { ownerDashboard, adminDashboard, dailyCollection, monthlySummary } from '../api/reports'
 import { formatMoney } from '../utils/format'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
 
@@ -172,56 +172,97 @@ function CollectionReport({ allowMonthly }) {
 const CHART_ACCENT = '#d99211'
 const CHART_MUTED = '#6b7280'
 
-// Seasonality: non-cancelled reservations per month (by check-in date), one
-// year at a time. A stat-card widget matching Flowbite's area-chart example
-// (headline number + a vs-last-year change badge in the header, a minimal
-// smooth gradient-fill area chart, a footer with the period control) —
-// rendered with ApexCharts via react-apexcharts, the same engine Flowbite's
-// own charts use. Month labels stay on the x-axis (unlike the reference,
-// which shows none) since knowing *which* month is the entire point of this
-// chart; the busiest month gets a point annotation for the same reason. A
-// table-view toggle is the accessible twin, reachable from the footer like
-// the reference's link.
+// Seasonality: one year at a time, toggled between two metrics — non-
+// cancelled reservations by check-in date ("Guests"), or collected revenue
+// ("Revenue", the same settled-invoices + paid-food-orders definition as
+// adminDashboard's revenue buckets). A stat-card widget matching Flowbite's
+// area-chart example (headline number + a vs-last-year change badge in the
+// header, a minimal smooth gradient-fill area chart, a footer with the
+// period control) — rendered with ApexCharts via react-apexcharts, the same
+// engine Flowbite's own charts use. Month labels stay on the x-axis (unlike
+// the reference, which shows none) since knowing *which* month is the point
+// of this chart; the busiest month always gets a point annotation, and in
+// Revenue mode the lowest month gets one too. A table-view toggle is the
+// accessible twin, reachable from the footer like the reference's link.
 function SeasonalityChart() {
   const nowYear = new Date().getFullYear()
   const [year, setYear] = useState(nowYear)
+  const [metric, setMetric] = useState('visits')
   const [showTable, setShowTable] = useState(false)
 
   // Keyed by the year that produced it, so switching years shows the
-  // loading skeleton (a stale key) without a synchronous setState. The
-  // prior year's total is best-effort (for the change badge) — its failure
-  // doesn't block the chart.
+  // loading skeleton (a stale key) without a synchronous setState. Fetches
+  // both metrics for both years in one shot (the API returns count + revenue
+  // together), so toggling the metric never refetches. The prior year is
+  // best-effort (for the change badge) — its failure doesn't block the chart.
   const [result, setResult] = useState(null)
   useEffect(() => {
     let active = true
-    Promise.allSettled([monthlyVisits(year), monthlyVisits(year - 1)]).then(([cur, prev]) => {
+    Promise.allSettled([monthlySummary(year), monthlySummary(year - 1)]).then(([cur, prev]) => {
       if (!active) return
       if (cur.status === 'rejected') {
         setResult({ year, error: dashboardError(cur.reason) })
         return
       }
-      const prevTotal = prev.status === 'fulfilled'
-        ? prev.value.months.reduce((s, m) => s + m.count, 0)
-        : null
-      setResult({ year, data: cur.value, prevTotal })
+      setResult({
+        year,
+        data: cur.value,
+        prevMonths: prev.status === 'fulfilled' ? prev.value.months : null,
+      })
     })
     return () => { active = false }
   }, [year])
 
   const data = result?.year === year ? result.data : null
   const error = result?.year === year ? result.error : null
-  const prevTotal = result?.year === year ? result.prevTotal : null
+  const prevMonths = result?.year === year ? result.prevMonths : null
 
   const years = Array.from({ length: 6 }, (_, i) => nowYear - i)
+  const pick = (m) => (metric === 'revenue' ? m.revenue : m.count)
+  const formatValue = (v) => (metric === 'revenue' ? formatMoney(v) : `${v} visit${v === 1 ? '' : 's'}`)
 
   const months = data?.months ?? []
-  const counts = months.map((m) => m.count)
-  const total = counts.reduce((s, c) => s + c, 0)
-  const maxCount = counts.length ? Math.max(...counts) : 0
-  const peakIndex = maxCount > 0 ? counts.indexOf(maxCount) : -1
+  const values = months.map(pick)
+  const total = values.reduce((s, v) => s + v, 0)
+  const maxVal = values.length ? Math.max(...values) : 0
+  const minVal = values.length ? Math.min(...values) : 0
+  const peakIndex = maxVal > 0 ? values.indexOf(maxVal) : -1
+  // The low point is only worth calling out for Revenue (a slow month to
+  // watch for), and only if it's actually distinct from the peak.
+  const troughIndex = metric === 'revenue' && maxVal > 0 && minVal !== maxVal ? values.indexOf(minVal) : -1
+
+  const prevTotal = prevMonths ? prevMonths.reduce((s, m) => s + pick(m), 0) : null
   const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : null
 
-  const series = [{ name: 'Reservations', data: counts }]
+  const series = [{ name: metric === 'revenue' ? 'Revenue' : 'Reservations', data: values }]
+
+  const annotationPoints = []
+  if (peakIndex >= 0) {
+    annotationPoints.push({
+      x: months[peakIndex].label,
+      y: values[peakIndex],
+      marker: { size: 5, fillColor: CHART_ACCENT, strokeColor: '#fff', strokeWidth: 2 },
+      label: {
+        text: `${months[peakIndex].label} · ${formatValue(values[peakIndex])}`,
+        borderWidth: 0,
+        offsetY: -8,
+        style: { color: CHART_ACCENT, fontSize: '11px', fontWeight: 600, background: 'transparent' },
+      },
+    })
+  }
+  if (troughIndex >= 0) {
+    annotationPoints.push({
+      x: months[troughIndex].label,
+      y: values[troughIndex],
+      marker: { size: 5, fillColor: CHART_MUTED, strokeColor: '#fff', strokeWidth: 2 },
+      label: {
+        text: `${months[troughIndex].label} · ${formatValue(values[troughIndex])}`,
+        borderWidth: 0,
+        offsetY: -8,
+        style: { color: CHART_MUTED, fontSize: '11px', fontWeight: 600, background: 'transparent' },
+      },
+    })
+  }
 
   const chartOptions = {
     chart: {
@@ -249,36 +290,37 @@ function SeasonalityChart() {
     },
     yaxis: { show: false },
     tooltip: {
-      y: { formatter: (v) => `${v} visit${v === 1 ? '' : 's'}` },
+      y: { formatter: formatValue },
       x: { show: false },
     },
     markers: { size: 0, hover: { size: 5 } },
-    annotations: peakIndex >= 0 ? {
-      points: [{
-        x: months[peakIndex].label,
-        y: counts[peakIndex],
-        marker: { size: 5, fillColor: CHART_ACCENT, strokeColor: '#fff', strokeWidth: 2 },
-        label: {
-          text: `${months[peakIndex].label} · ${counts[peakIndex]}`,
-          borderWidth: 0,
-          offsetY: -8,
-          style: { color: CHART_ACCENT, fontSize: '11px', fontWeight: 600, background: 'transparent' },
-        },
-      }],
-    } : { points: [] },
+    annotations: { points: annotationPoints },
   }
 
   return (
     <Card className="mb-6">
       <Card.Body className="flex flex-wrap items-center justify-between gap-3 p-6 pb-0">
         <div>
-          <div className="sv-serif text-[1.75rem] font-bold">{data ? total.toLocaleString() : '—'}</div>
-          <div className="text-sm text-muted">Reservations in {year}</div>
+          <div className="sv-serif text-[1.75rem] font-bold">
+            {data ? (metric === 'revenue' ? formatMoney(total) : total.toLocaleString()) : '—'}
+          </div>
+          <div className="text-sm text-muted">{metric === 'revenue' ? 'Revenue' : 'Reservations'} in {year}</div>
         </div>
         {delta !== null && (
           <Badge bg={delta >= 0 ? 'success' : 'danger'} className="text-sm">
             {delta >= 0 ? '↑' : '↓'} {Math.abs(delta)}% vs {year - 1}
           </Badge>
+        )}
+        {metric === 'revenue' && data && peakIndex >= 0 && troughIndex >= 0 && (
+          <div className="w-full text-xs text-muted">
+            Highest: <span className="font-medium text-body">
+              {months[peakIndex].label} · {formatMoney(values[peakIndex])}
+            </span>
+            {' · '}
+            Lowest: <span className="font-medium text-body">
+              {months[troughIndex].label} · {formatMoney(values[troughIndex])}
+            </span>
+          </div>
         )}
       </Card.Body>
 
@@ -293,9 +335,9 @@ function SeasonalityChart() {
             </thead>
             <tbody>
               <tr>
-                {months.map((m) => (
-                  <td key={m.month} className={m.count === maxCount && maxCount > 0 ? 'font-semibold' : undefined}>
-                    {m.count}
+                {months.map((m, i) => (
+                  <td key={m.month} className={values[i] === maxVal && maxVal > 0 ? 'font-semibold' : undefined}>
+                    {metric === 'revenue' ? formatMoney(values[i]) : values[i]}
                   </td>
                 ))}
               </tr>
@@ -307,16 +349,28 @@ function SeasonalityChart() {
       {!error && data && !showTable && (
         <Card.Body className="pt-2">
           <Suspense fallback={<SkeletonTable rows={3} />}>
-            <Chart key={year} type="area" height={220} series={series} options={chartOptions} />
+            <Chart key={`${year}-${metric}`} type="area" height={220} series={series} options={chartOptions} />
           </Suspense>
         </Card.Body>
       )}
 
-      <Card.Footer className="flex items-center justify-between">
-        <Form.Select size="sm" value={year} style={{ width: 'auto' }}
-          onChange={(e) => setYear(Number(e.target.value))}>
-          {years.map((y) => <option key={y} value={y}>{y}</option>)}
-        </Form.Select>
+      <Card.Footer className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ButtonGroup>
+            <Button size="sm" variant={metric === 'visits' ? 'secondary' : 'outline-secondary'}
+              onClick={() => setMetric('visits')}>
+              Guests
+            </Button>
+            <Button size="sm" variant={metric === 'revenue' ? 'secondary' : 'outline-secondary'}
+              onClick={() => setMetric('revenue')}>
+              Revenue
+            </Button>
+          </ButtonGroup>
+          <Form.Select size="sm" value={year} style={{ width: 'auto' }}
+            onChange={(e) => setYear(Number(e.target.value))}>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </Form.Select>
+        </div>
         {data && (
           <Button size="sm" variant="link" onClick={() => setShowTable((s) => !s)}>
             {showTable ? 'View as chart' : 'View as table'} →
@@ -401,6 +455,13 @@ function AdminDashboard({ user }) {
         Welcome back, {user?.name}. Today at your property.
       </p>
 
+      <SectionTitle>Seasonality</SectionTitle>
+      <p className="mb-4 text-sm text-muted">
+        Guests (non-cancelled reservations by check-in date) or revenue by month — spot your busiest
+        season, or your highest and lowest-earning months.
+      </p>
+      <SeasonalityChart />
+
       <SectionTitle>Operations</SectionTitle>
       <Tiles
         tiles={[
@@ -420,12 +481,6 @@ function AdminDashboard({ user }) {
           { label: 'Year to date', value: data.revenue.ytd },
         ]}
       />
-
-      <SectionTitle>Seasonality</SectionTitle>
-      <p className="mb-4 text-sm text-muted">
-        Reservations by month (non-cancelled, by check-in date) — spot your busiest season.
-      </p>
-      <SeasonalityChart />
 
       <SectionTitle>Collection report</SectionTitle>
       <CollectionReport allowMonthly />
