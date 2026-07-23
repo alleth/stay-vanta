@@ -19,7 +19,7 @@ class RoomRatesTable extends Table
         parent::initialize($config);
 
         $this->setTable('room_rates');
-        $this->setDisplayField('name');
+        $this->setDisplayField('id');
         $this->setPrimaryKey('id');
         $this->addBehavior('Timestamp');
 
@@ -32,12 +32,6 @@ class RoomRatesTable extends Table
         $validator
             ->requirePresence('property_id', 'create')
             ->integer('property_id');
-
-        $validator
-            ->scalar('name')
-            ->maxLength('name', 100)
-            ->requirePresence('name', 'create')
-            ->notEmptyString('name');
 
         // What the guest gets: amenities & bed type shown on the Rates tab.
         $validator

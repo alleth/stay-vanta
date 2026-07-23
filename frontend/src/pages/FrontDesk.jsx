@@ -500,20 +500,19 @@ export default function FrontDesk() {
               <Table hover>
                 <thead>
                   <tr>
-                    <th>Name</th><th>Amenities &amp; bed</th><th>Applies to</th>
+                    <th>Applies to</th><th>Amenities &amp; bed</th>
                     <th className="text-right">Nightly rate</th>
                     {canManageRooms && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rates.length === 0 && (
-                    <tr><td colSpan={canManageRooms ? 5 : 4} className="py-6 text-center text-muted">No rates yet.</td></tr>
+                    <tr><td colSpan={canManageRooms ? 4 : 3} className="py-6 text-center text-muted">No rates yet.</td></tr>
                   )}
                   {rates.map((rt) => (
                     <tr key={rt.id}>
-                      <td className="font-semibold">{rt.name}</td>
+                      <td className="font-semibold">{rt.room ? `Room ${rt.room.room_number}` : 'All rooms'}</td>
                       <td className="max-w-[320px] text-xs text-muted">{rt.description || '—'}</td>
-                      <td>{rt.room ? `Room ${rt.room.room_number}` : 'All rooms'}</td>
                       <td className="text-right">{formatMoney(rt.base_rate)}</td>
                       {canManageRooms && (
                         <td className="text-right">
@@ -1120,7 +1119,6 @@ function RoomModal({ propertyId, room, onClose, onSaved }) {
 function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
   const editing = Boolean(rate)
   const [form, setForm] = useState({
-    name: rate?.name ?? '',
     description: rate?.description ?? '',
     base_rate: rate?.base_rate ?? '',
     room_id: rate?.room_id ?? '',
@@ -1128,7 +1126,7 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const { run, busy, err } = useSubmit(async () => {
     const payload = {
-      name: form.name, description: form.description,
+      description: form.description,
       base_rate: form.base_rate, room_id: form.room_id || null,
     }
     if (editing) await updateRoomRate(rate.id, payload)
@@ -1142,12 +1140,8 @@ function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
           <Form.Group className="mb-4">
-            <Form.Label>Name</Form.Label>
-            <Form.Control value={form.name} onChange={set('name')} required autoFocus placeholder="e.g. Deluxe Standard" />
-          </Form.Group>
-          <Form.Group className="mb-4">
             <Form.Label>Amenities &amp; bed type</Form.Label>
-            <Form.Control as="textarea" rows={2} maxLength={255}
+            <Form.Control as="textarea" rows={2} maxLength={255} autoFocus
               value={form.description} onChange={set('description')}
               placeholder="What the guest gets — e.g. Queen bed, A/C, hot shower, free breakfast for 2" />
           </Form.Group>

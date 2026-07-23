@@ -20,7 +20,7 @@ class RoomRatesController extends AppController
     {
         $rates = $this->fetchTable('RoomRates');
         $query = $this->scopeToProperty(
-            $rates->find()->contain(['Rooms'])->orderBy(['RoomRates.name' => 'ASC'])
+            $rates->find()->contain(['Rooms'])->orderBy(['RoomRates.id' => 'ASC'])
         );
 
         $roomId = $this->request->getQuery('room_id');
@@ -52,7 +52,6 @@ class RoomRatesController extends AppController
         $rate = $rates->newEntity([
             'property_id' => $propertyId,
             'room_id' => $this->request->getData('room_id'),
-            'name' => $this->request->getData('name'),
             'description' => $this->request->getData('description'),
             'base_rate' => $this->request->getData('base_rate'),
         ]);
@@ -71,7 +70,7 @@ class RoomRatesController extends AppController
     }
 
     /**
-     * PATCH/PUT /api/room-rates/{id} — fix a mistyped name, target room, or rate.
+     * PATCH/PUT /api/room-rates/{id} — fix a mistyped description, target room, or rate.
      */
     public function edit(int $id): void
     {
@@ -86,7 +85,6 @@ class RoomRatesController extends AppController
 
         // room_id may be intentionally set to null ("all rooms"); read it raw.
         $rates->patchEntity($rate, [
-            'name' => $this->request->getData('name'),
             'description' => $this->request->getData('description'),
             'base_rate' => $this->request->getData('base_rate'),
             'room_id' => $this->request->getData('room_id') ?: null,
