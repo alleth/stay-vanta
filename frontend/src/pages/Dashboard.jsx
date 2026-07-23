@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Card, Alert, Form, Table, Button } from '../components/ui'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Card, Alert, Form, Table, Button, Badge } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { ownerDashboard, adminDashboard, dailyCollection, monthlyVisits } from '../api/reports'
 import { formatMoney } from '../utils/format'
@@ -161,74 +161,131 @@ function CollectionReport({ allowMonthly }) {
   )
 }
 
-// A "nice" round axis top + tick step for a max data value, e.g. 7 -> top 8,
-// ticks [0, 2, 4, 6, 8]. Keeps y-axis labels on clean whole numbers — counts
-// are always integers, so a small range (0-4, e.g. a brand-new property's
-// first year) steps by 1 rather than the general formula's fractional step.
-function niceScale(maxValue) {
-  const target = Math.max(maxValue, 1)
-  if (target <= 4) return { top: target, ticks: Array.from({ length: target + 1 }, (_, i) => i) }
-  const rough = target / 4
-  const mag = 10 ** Math.floor(Math.log10(rough))
-  const norm = rough / mag
-  const step = Math.max(1, (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag)
-  const top = Math.ceil(target / step) * step
-  const ticks = []
-  for (let v = 0; v <= top; v += step) ticks.push(Math.round(v))
-  return { top, ticks }
+// A smooth curve through a set of {x,y} points using monotone cubic
+// (Fritsch-Carlson) interpolation — unlike a plain Catmull-Rom spline, it's
+// guaranteed not to overshoot beyond the two points on either side of a
+// segment. That matters here: a flat run of zero months right next to a
+// spike (a common shape for seasonal data) would otherwise curve visibly
+// *below* the zero baseline approaching the flat months, which reads as a
+// negative count. Sets the tangent to 0 at any local min/max (including
+// flat runs) so the curve settles rather than overshooting.
+function smoothPath(pts) {
+  const n = pts.length
+  if (n === 0) return ''
+  if (n === 1) return `M${pts[0].x},${pts[0].y}`
+
+  const slope = []
+  for (let i = 0; i < n - 1; i++) {
+    const dx = pts[i + 1].x - pts[i].x
+    slope[i] = dx === 0 ? 0 : (pts[i + 1].y - pts[i].y) / dx
+  }
+  const tangent = new Array(n)
+  tangent[0] = slope[0]
+  tangent[n - 1] = slope[n - 2]
+  for (let i = 1; i < n - 1; i++) {
+    tangent[i] = (slope[i - 1] === 0 || slope[i] === 0 || slope[i - 1] * slope[i] < 0)
+      ? 0
+      : (slope[i - 1] + slope[i]) / 2
+  }
+  // Limit each tangent so the curve can't swing past the segment's own
+  // endpoints (the standard Fritsch-Carlson overshoot correction).
+  for (let i = 0; i < n - 1; i++) {
+    if (slope[i] === 0) {
+      tangent[i] = 0
+      tangent[i + 1] = 0
+      continue
+    }
+    const a = tangent[i] / slope[i]
+    const b = tangent[i + 1] / slope[i]
+    const h = Math.hypot(a, b)
+    if (h > 3) {
+      const scale = 3 / h
+      tangent[i] = scale * a * slope[i]
+      tangent[i + 1] = scale * b * slope[i]
+    }
+  }
+
+  let d = `M${pts[0].x},${pts[0].y}`
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = pts[i]
+    const p1 = pts[i + 1]
+    const dx = p1.x - p0.x
+    const c1x = p0.x + dx / 3
+    const c1y = p0.y + (tangent[i] * dx) / 3
+    const c2x = p1.x - dx / 3
+    const c2y = p1.y - (tangent[i + 1] * dx) / 3
+    d += ` C${c1x},${c1y} ${c2x},${c2y} ${p1.x},${p1.y}`
+  }
+  return d
 }
 
 // Seasonality: non-cancelled reservations per month (by check-in date), one
-// year at a time. A plain SVG line chart with a soft area fill — no charting
-// library in this repo. Single series, so per the design system no legend box
-// is needed (the title names it); the busiest month is direct-labeled since
-// that's the one thing this chart exists to answer. A table-view toggle is
-// the accessible twin.
+// year at a time. A stat-card widget in the style of Flowbite's area-chart
+// example (headline number + a vs-last-year change badge, a minimal smooth
+// area chart with no axis chrome, a footer with the period control) — built
+// as plain SVG since that reference is actually built on ApexCharts and this
+// repo has no charting library. Single series, so no legend box is needed
+// (the title names it); the busiest month is direct-labeled since that's the
+// one thing this chart exists to answer. A table-view toggle is the
+// accessible twin, reachable from the footer like the reference's link.
 function SeasonalityChart() {
   const nowYear = new Date().getFullYear()
   const [year, setYear] = useState(nowYear)
   const [showTable, setShowTable] = useState(false)
   const [hover, setHover] = useState(null)
   const svgRef = useRef(null)
+  const gradientId = useId()
 
   // Keyed by the year that produced it, so switching years shows the
-  // loading skeleton (a stale key) without a synchronous setState.
+  // loading skeleton (a stale key) without a synchronous setState. The
+  // prior year's total is best-effort (for the change badge) — its failure
+  // doesn't block the chart.
   const [result, setResult] = useState(null)
   useEffect(() => {
     let active = true
-    monthlyVisits(year)
-      .then((r) => { if (active) setResult({ year, data: r }) })
-      .catch((err) => { if (active) setResult({ year, error: dashboardError(err) }) })
+    Promise.allSettled([monthlyVisits(year), monthlyVisits(year - 1)]).then(([cur, prev]) => {
+      if (!active) return
+      if (cur.status === 'rejected') {
+        setResult({ year, error: dashboardError(cur.reason) })
+        return
+      }
+      const prevTotal = prev.status === 'fulfilled'
+        ? prev.value.months.reduce((s, m) => s + m.count, 0)
+        : null
+      setResult({ year, data: cur.value, prevTotal })
+    })
     return () => { active = false }
   }, [year])
 
   const data = result?.year === year ? result.data : null
   const error = result?.year === year ? result.error : null
+  const prevTotal = result?.year === year ? result.prevTotal : null
 
   const years = Array.from({ length: 6 }, (_, i) => nowYear - i)
 
   const W = 720
-  const H = 260
-  const padL = 34
-  const padR = 16
-  const padT = 28
-  const padB = 28
-  const innerW = W - padL - padR
+  const H = 220
+  const padX = 8
+  const padT = 32
+  const padB = 24
+  const innerW = W - padX * 2
   const innerH = H - padT - padB
 
   const months = data?.months ?? []
   const counts = months.map((m) => m.count)
+  const total = counts.reduce((s, c) => s + c, 0)
   const maxCount = counts.length ? Math.max(...counts) : 0
-  const scale = niceScale(maxCount)
+  const top = Math.max(maxCount, 1) * 1.2
   const peakIndex = maxCount > 0 ? counts.indexOf(maxCount) : -1
+  const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : null
 
-  const xFor = (i) => padL + (months.length > 1 ? (innerW * i) / (months.length - 1) : innerW / 2)
-  const yFor = (v) => padT + innerH - (innerH * v) / (scale.top || 1)
+  const xFor = (i) => padX + (months.length > 1 ? (innerW * i) / (months.length - 1) : innerW / 2)
+  const yFor = (v) => padT + innerH - (innerH * v) / top
 
   const points = months.map((m, i) => ({ ...m, x: xFor(i), y: yFor(m.count) }))
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
-  // Area variant: the same line, closed down to the zero baseline and
-  // filled as a ~10% wash — a soft fill, never a saturated block.
+  const linePath = smoothPath(points)
+  // Area variant: the same smoothed line, closed down to the zero baseline —
+  // filled with a gradient fading to transparent, never a flat saturated block.
   const baselineY = yFor(0)
   const areaPath = points.length
     ? `${linePath} L${points[points.length - 1].x},${baselineY} L${points[0].x},${baselineY} Z`
@@ -238,35 +295,34 @@ function SeasonalityChart() {
     if (!svgRef.current || points.length === 0) return
     const rect = svgRef.current.getBoundingClientRect()
     const px = ((e.clientX - rect.left) / rect.width) * W
-    const ratio = innerW > 0 ? (px - padL) / innerW : 0
+    const ratio = innerW > 0 ? (px - padX) / innerW : 0
     const idx = Math.min(points.length - 1, Math.max(0, Math.round(ratio * (points.length - 1))))
     setHover(idx)
   }
 
   const hovered = hover !== null ? points[hover] : null
   const tooltipW = 96
-  const tooltipX = hovered ? Math.min(Math.max(hovered.x - tooltipW / 2, padL), W - padR - tooltipW) : 0
+  const tooltipX = hovered ? Math.min(Math.max(hovered.x - tooltipW / 2, padX), W - padX - tooltipW) : 0
 
   return (
-    <>
-      <Card className="mb-4">
-        <Card.Body className="flex flex-wrap items-center gap-4 px-4 py-3">
-          <Form.Select size="sm" value={year} style={{ width: 'auto' }}
-            onChange={(e) => setYear(Number(e.target.value))}>
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
-          </Form.Select>
-          {data && (
-            <Button size="sm" variant="outline-secondary" className="ml-auto"
-              onClick={() => setShowTable((s) => !s)}>
-              {showTable ? 'View as chart' : 'View as table'}
-            </Button>
-          )}
-        </Card.Body>
-      </Card>
-      {error && <Alert variant="danger">{error}</Alert>}
-      {!error && !data && <SkeletonTable rows={3} />}
+    <Card className="mb-6">
+      <Card.Body className="flex flex-wrap items-center justify-between gap-3 p-6 pb-0">
+        <div>
+          <div className="sv-serif text-[1.75rem] font-bold">{data ? total.toLocaleString() : '—'}</div>
+          <div className="text-sm text-muted">Reservations in {year}</div>
+        </div>
+        {delta !== null && (
+          <Badge bg={delta >= 0 ? 'success' : 'danger'} className="text-sm">
+            {delta >= 0 ? '↑' : '↓'} {Math.abs(delta)}% vs {year - 1}
+          </Badge>
+        )}
+      </Card.Body>
+
+      {error && <Card.Body className="pt-4"><Alert variant="danger" className="mb-0">{error}</Alert></Card.Body>}
+      {!error && !data && <Card.Body><SkeletonTable rows={3} /></Card.Body>}
+
       {!error && data && showTable && (
-        <Card className="mb-6">
+        <Card.Body>
           <Table>
             <thead>
               <tr>{months.map((m) => <th key={m.month}>{m.label}</th>)}</tr>
@@ -281,66 +337,76 @@ function SeasonalityChart() {
               </tr>
             </tbody>
           </Table>
-        </Card>
+        </Card.Body>
       )}
+
       {!error && data && !showTable && (
-        <Card className="mb-6">
-          <Card.Body>
-            <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full select-none" style={{ maxHeight: 260 }}
-              onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
-              {scale.ticks.map((t) => (
-                <g key={t}>
-                  <line x1={padL} x2={W - padR} y1={yFor(t)} y2={yFor(t)} stroke="var(--color-line)" strokeWidth="1" />
-                  <text x={padL - 8} y={yFor(t)} textAnchor="end" dominantBaseline="middle"
-                    fontSize="10" fill="var(--color-muted)">{t}</text>
-                </g>
-              ))}
+        <Card.Body className="pt-2">
+          <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full select-none" style={{ maxHeight: 220 }}
+            onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.35" />
+                <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0" />
+              </linearGradient>
+            </defs>
 
-              {points.map((p) => (
-                <text key={p.month} x={p.x} y={H - 8} textAnchor="middle" fontSize="10" fill="var(--color-muted)">
-                  {p.label}
+            {points.map((p) => (
+              <text key={p.month} x={p.x} y={H - 6} textAnchor="middle" fontSize="10" fill="var(--color-muted)">
+                {p.label}
+              </text>
+            ))}
+
+            <path d={areaPath} fill={`url(#${gradientId})`} stroke="none" />
+
+            {hovered && (
+              <line x1={hovered.x} x2={hovered.x} y1={padT} y2={H - padB}
+                stroke="var(--color-muted)" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
+            )}
+
+            <path d={linePath} fill="none" stroke="var(--color-ink)" strokeWidth="2"
+              strokeLinejoin="round" strokeLinecap="round" />
+
+            {points.map((p, i) => (
+              <circle key={p.month} cx={p.x} cy={p.y} r={i === peakIndex || hover === i ? 5 : 4}
+                fill={i === peakIndex ? 'var(--color-accent)' : 'var(--color-ink)'}
+                stroke="var(--color-surface)" strokeWidth="2" />
+            ))}
+
+            {peakIndex >= 0 && (
+              <text x={points[peakIndex].x} y={points[peakIndex].y - 12} textAnchor="middle"
+                fontSize="11" fontWeight="600" fill="var(--color-accent)">
+                {points[peakIndex].label} · {points[peakIndex].count}
+              </text>
+            )}
+
+            {hovered && (
+              <g transform={`translate(${tooltipX}, ${Math.max(hovered.y - 46, padT - 6)})`}>
+                <rect width={tooltipW} height="34" rx="6" fill="var(--color-ink)" />
+                <text x={tooltipW / 2} y="14" textAnchor="middle" fontSize="12" fontWeight="700" fill="#fff">
+                  {hovered.count} visit{hovered.count === 1 ? '' : 's'}
                 </text>
-              ))}
-
-              <path d={areaPath} fill="var(--color-ink)" opacity="0.1" stroke="none" />
-
-              {hovered && (
-                <line x1={hovered.x} x2={hovered.x} y1={padT} y2={H - padB}
-                  stroke="var(--color-muted)" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
-              )}
-
-              <path d={linePath} fill="none" stroke="var(--color-ink)" strokeWidth="2"
-                strokeLinejoin="round" strokeLinecap="round" />
-
-              {points.map((p, i) => (
-                <circle key={p.month} cx={p.x} cy={p.y} r={i === peakIndex || hover === i ? 5 : 4}
-                  fill={i === peakIndex ? 'var(--color-accent)' : 'var(--color-ink)'}
-                  stroke="var(--color-surface)" strokeWidth="2" />
-              ))}
-
-              {peakIndex >= 0 && (
-                <text x={points[peakIndex].x} y={points[peakIndex].y - 12} textAnchor="middle"
-                  fontSize="11" fontWeight="600" fill="var(--color-accent)">
-                  {points[peakIndex].label} · {points[peakIndex].count}
+                <text x={tooltipW / 2} y="27" textAnchor="middle" fontSize="10" fill="#c7cad4">
+                  {hovered.label} {data.year}
                 </text>
-              )}
-
-              {hovered && (
-                <g transform={`translate(${tooltipX}, ${Math.max(hovered.y - 46, padT - 6)})`}>
-                  <rect width={tooltipW} height="34" rx="6" fill="var(--color-ink)" />
-                  <text x={tooltipW / 2} y="14" textAnchor="middle" fontSize="12" fontWeight="700" fill="#fff">
-                    {hovered.count} visit{hovered.count === 1 ? '' : 's'}
-                  </text>
-                  <text x={tooltipW / 2} y="27" textAnchor="middle" fontSize="10" fill="#c7cad4">
-                    {hovered.label} {data.year}
-                  </text>
-                </g>
-              )}
-            </svg>
-          </Card.Body>
-        </Card>
+              </g>
+            )}
+          </svg>
+        </Card.Body>
       )}
-    </>
+
+      <Card.Footer className="flex items-center justify-between">
+        <Form.Select size="sm" value={year} style={{ width: 'auto' }}
+          onChange={(e) => setYear(Number(e.target.value))}>
+          {years.map((y) => <option key={y} value={y}>{y}</option>)}
+        </Form.Select>
+        {data && (
+          <Button size="sm" variant="link" onClick={() => setShowTable((s) => !s)}>
+            {showTable ? 'View as chart' : 'View as table'} →
+          </Button>
+        )}
+      </Card.Footer>
+    </Card>
   )
 }
 
