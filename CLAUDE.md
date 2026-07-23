@@ -188,14 +188,19 @@ and via `ProtectedRoute roles=` in `App.jsx`** (frontend guards are UX only):
   `paid`, whether that's at check-in or any time before check-out) and `transition()`'s check-out
   step; it's idempotent (a no-op if a `reservation`-sourced line already exists for that booking
   via `InvoicesTable::invoiceForLine()`), so whichever happens first is the one that posts it, and
-  check-out is just a fallback for a reservation that skipped Mark paid. Cancelling reverses it
+  check-out is just a fallback for a reservation that skipped Mark paid. The same call also posts
+  the downpayment credit, if any — see below. Cancelling reverses the room charge
   (`removeLinesFor('reservation', ...)`) alongside the early check-in fee reversal.
 - **Downpayments are collected at booking**: an advance booking creates an immediately-settled
   invoice (`InvoicesTable::settledInvoiceWith`, `settled_at` = now) holding the 50% `downpayment`
-  line, so it counts as collected the day it's taken. Check-out posts a negative
-  `downpayment_credit` line so the open invoice only carries the balance; cancellation appends a
-  negative `downpayment_refund` (90%) to the settled invoice, leaving the retained 10% in revenue.
-  The invoice folio groups all `downpayment*` lines under a "Downpayment" section (`Food.jsx`).
+  line, so it counts as collected the day it's taken. `postRoomCharge()` posts the offsetting
+  negative `downpayment_credit` line **in the same call** that posts the room charge (Mark paid or
+  check-out, whichever fires first) — its own idempotency check (`invoiceForLine('downpayment_credit', ...)`),
+  independent of the room-charge one — so the open tab is never briefly shown at the full 100% on
+  top of a downpayment already collected. Cancelling reverses both the room charge and the credit
+  (`removeLinesFor('reservation'|'downpayment_credit', ...)`) and appends a negative
+  `downpayment_refund` (90%) to the settled downpayment invoice, leaving the retained 10% in
+  revenue. The invoice folio groups all `downpayment*` lines under a "Downpayment" section (`Food.jsx`).
 
 ### Subscription model
 StayVanta is subscription-based: the `owner` role is the **platform operator** (no property),
