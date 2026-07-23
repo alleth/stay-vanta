@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Card, Alert, Form, Table, Button, ButtonGroup, Badge } from '../components/ui'
+import { Card, Alert, Form, Table, Button, Badge } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { ownerDashboard, adminDashboard, dailyCollection, monthlySummary } from '../api/reports'
 import { formatMoney } from '../utils/format'
@@ -356,16 +356,11 @@ function SeasonalityChart() {
 
       <Card.Footer className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <ButtonGroup>
-            <Button size="sm" variant={metric === 'visits' ? 'secondary' : 'outline-secondary'}
-              onClick={() => setMetric('visits')}>
-              Guests
-            </Button>
-            <Button size="sm" variant={metric === 'revenue' ? 'secondary' : 'outline-secondary'}
-              onClick={() => setMetric('revenue')}>
-              Revenue
-            </Button>
-          </ButtonGroup>
+          <Form.Select size="sm" value={metric} style={{ width: 'auto' }}
+            onChange={(e) => setMetric(e.target.value)}>
+            <option value="visits">Guests</option>
+            <option value="revenue">Revenue</option>
+          </Form.Select>
           <Form.Select size="sm" value={year} style={{ width: 'auto' }}
             onChange={(e) => setYear(Number(e.target.value))}>
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
