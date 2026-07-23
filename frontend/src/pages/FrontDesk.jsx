@@ -93,7 +93,7 @@ export default function FrontDesk() {
   const [extraCharges, setExtraCharges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [modal, setModal] = useState(null) // 'reservation' | 'room' | { type:'rate'|'charge', ... }
+  const [modal, setModal] = useState(null) // 'reservation' | { type:'room'|'rate'|'charge', ... }
   const [reservationRoomId, setReservationRoomId] = useState(null)
   const [reservationDate, setReservationDate] = useState(null)
   const [calDate, setCalDate] = useState(todayStr)
@@ -448,7 +448,7 @@ export default function FrontDesk() {
           <Tab eventKey="rooms" title={`Rooms (${rooms.length})`}>
             {canManageRooms && (
               <div className="mb-2 flex justify-end">
-                <Button onClick={() => setModal('room')}>Add room</Button>
+                <Button onClick={() => setModal({ type: 'room' })}>Add room</Button>
               </div>
             )}
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
@@ -470,11 +470,18 @@ export default function FrontDesk() {
                       ))}
                     </Form.Select>
                     {canManageRooms && (
-                      <Button size="sm" variant="outline-danger" className="mt-2 w-full"
-                        disabled={pending !== null}
-                        onClick={() => doDeleteRoom(room)}>
-                        {pending === `room-${room.id}` ? <Spinner size="sm" /> : 'Delete room'}
-                      </Button>
+                      <div className="mt-2 flex gap-1">
+                        <Button size="sm" variant="outline-secondary" className="flex-1"
+                          disabled={pending !== null}
+                          onClick={() => setModal({ type: 'room', room })}>
+                          Edit
+                        </Button>
+                        <Button size="sm" variant="outline-danger" className="flex-1"
+                          disabled={pending !== null}
+                          onClick={() => doDeleteRoom(room)}>
+                          {pending === `room-${room.id}` ? <Spinner size="sm" /> : 'Delete'}
+                        </Button>
+                      </div>
                     )}
                   </Card.Body>
                 </Card>
@@ -694,8 +701,8 @@ export default function FrontDesk() {
           propertyId={propertyId} defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
-      {modal === 'room' && (
-        <RoomModal propertyId={propertyId}
+      {modal?.type === 'room' && (
+        <RoomModal propertyId={propertyId} room={modal.room}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
       {modal?.type === 'rate' && (
@@ -1073,17 +1080,23 @@ function ReservationModal({
   )
 }
 
-function RoomModal({ propertyId, onClose, onSaved }) {
-  const [form, setForm] = useState({ room_number: '', room_type: '', status: 'available' })
+function RoomModal({ propertyId, room, onClose, onSaved }) {
+  const editing = Boolean(room)
+  const [form, setForm] = useState({
+    room_number: room?.room_number ?? '',
+    room_type: room?.room_type ?? '',
+    status: room?.status ?? 'available',
+  })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const { run, busy, err } = useSubmit(async () => {
-    await createRoom(form, propertyId)
+    if (editing) await updateRoom(room.id, form)
+    else await createRoom(form, propertyId)
     onSaved()
   })
   return (
     <Modal show onHide={onClose} centered>
       <Form onSubmit={run}>
-        <Modal.Header closeButton><Modal.Title>Add room</Modal.Title></Modal.Header>
+        <Modal.Header closeButton><Modal.Title>{editing ? 'Edit room' : 'Add room'}</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
           <Form.Group className="mb-4">
@@ -1097,7 +1110,7 @@ function RoomModal({ propertyId, onClose, onSaved }) {
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : 'Create'}</Button>
+          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
         </Modal.Footer>
       </Form>
     </Modal>

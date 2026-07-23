@@ -67,7 +67,10 @@ class RoomsController extends AppController
     }
 
     /**
-     * PATCH /api/rooms/{id} — update number/type/status.
+     * PATCH /api/rooms/{id} — update number/type/status. Any authenticated
+     * staff may change `status` (a receptionist's day-to-day operational
+     * need); actually changing `room_number`/`room_type` — fixing a typo made
+     * when the room was added — is owner/admin only.
      */
     public function edit(int $id): void
     {
@@ -75,9 +78,17 @@ class RoomsController extends AppController
         $rooms = $this->fetchTable('Rooms');
         $room = $this->scopeToProperty($rooms->find()->where(['Rooms.id' => $id]))->firstOrFail();
 
+        $newNumber = $this->request->getData('room_number');
+        $newType = $this->request->getData('room_type');
+        $changingDetails = ($newNumber !== null && $newNumber !== $room->room_number)
+            || ($newType !== null && $newType !== $room->room_type);
+        if ($changingDetails && !$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Only owners and admins may rename or retype a room.');
+        }
+
         $rooms->patchEntity($room, [
-            'room_number' => $this->request->getData('room_number'),
-            'room_type' => $this->request->getData('room_type'),
+            'room_number' => $newNumber,
+            'room_type' => $newType,
             'status' => $this->request->getData('status'),
         ], ['accessibleFields' => ['property_id' => false]]);
 
