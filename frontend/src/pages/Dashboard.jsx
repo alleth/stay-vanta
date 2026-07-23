@@ -56,27 +56,39 @@ function SectionTitle({ children }) {
 }
 
 // Money collected in a day (settled invoices + paid food orders), with a date
-// filter. Admins can widen the window to a whole month/year; receptionists may
-// only view one day at a time (the backend enforces the same).
+// filter. Admins can widen the window to a whole month/year or a custom date
+// range; receptionists may only view one day at a time (the backend enforces
+// the same).
 function CollectionReport({ allowMonthly }) {
   const now = new Date()
   const [mode, setMode] = useState('day')
   const [date, setDate] = useState(todayStr)
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
+  const [rangeFrom, setRangeFrom] = useState(todayStr)
+  const [rangeTo, setRangeTo] = useState(todayStr)
   // The result is keyed by the filter that produced it, so switching filters
   // shows the loading skeleton (a stale key) without a synchronous setState.
-  const key = mode === 'month' ? `m-${month}-${year}` : `d-${date}`
+  const key = mode === 'month' ? `m-${month}-${year}`
+    : mode === 'range' ? `r-${rangeFrom}-${rangeTo}`
+    : `d-${date}`
   const [result, setResult] = useState(null)
 
+  // A backwards range (to before from) would 400 — wait for the user to fix
+  // it instead of firing a request that's guaranteed to fail.
+  const rangeInvalid = mode === 'range' && rangeTo < rangeFrom
+
   useEffect(() => {
-    const params = mode === 'month' ? { month, year } : { date }
+    if (rangeInvalid) return
+    const params = mode === 'month' ? { month, year }
+      : mode === 'range' ? { from: rangeFrom, to: rangeTo }
+      : { date }
     let active = true
     dailyCollection(params)
       .then((c) => { if (active) setResult({ key, data: c }) })
       .catch((err) => { if (active) setResult({ key, error: dashboardError(err) }) })
     return () => { active = false }
-  }, [mode, date, month, year, key])
+  }, [mode, date, month, year, rangeFrom, rangeTo, rangeInvalid, key])
 
   const data = result?.key === key ? result.data : null
   const error = result?.key === key ? result.error : null
@@ -92,12 +104,14 @@ function CollectionReport({ allowMonthly }) {
               onChange={(e) => setMode(e.target.value)}>
               <option value="day">Daily</option>
               <option value="month">Monthly</option>
+              <option value="range">Date range</option>
             </Form.Select>
           )}
-          {mode === 'day' ? (
+          {mode === 'day' && (
             <Form.Control size="sm" type="date" value={date} style={{ maxWidth: 180 }}
               onChange={(e) => setDate(e.target.value)} />
-          ) : (
+          )}
+          {mode === 'month' && (
             <>
               <Form.Select size="sm" value={month} style={{ width: 'auto' }}
                 onChange={(e) => setMonth(Number(e.target.value))}>
@@ -109,6 +123,15 @@ function CollectionReport({ allowMonthly }) {
               </Form.Select>
             </>
           )}
+          {mode === 'range' && (
+            <>
+              <Form.Control size="sm" type="date" value={rangeFrom} style={{ maxWidth: 180 }}
+                onChange={(e) => setRangeFrom(e.target.value)} />
+              <span className="text-muted">to</span>
+              <Form.Control size="sm" type="date" value={rangeTo} style={{ maxWidth: 180 }}
+                onChange={(e) => setRangeTo(e.target.value)} />
+            </>
+          )}
           {data && (
             <span className="ml-auto text-sm text-muted">
               {data.invoices.count} settled invoice(s) · {data.food_orders.count} paid food order(s)
@@ -116,9 +139,10 @@ function CollectionReport({ allowMonthly }) {
           )}
         </Card.Body>
       </Card>
-      {error && <Alert variant="danger">{error}</Alert>}
-      {!data && !error && <SkeletonCards count={3} />}
-      {data && (
+      {rangeInvalid && <Alert variant="danger">The end date must be on or after the start date.</Alert>}
+      {!rangeInvalid && error && <Alert variant="danger">{error}</Alert>}
+      {!rangeInvalid && !data && !error && <SkeletonCards count={3} />}
+      {!rangeInvalid && data && (
         <Tiles
           money
           tiles={[

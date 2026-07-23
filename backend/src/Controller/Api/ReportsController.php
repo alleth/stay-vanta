@@ -136,11 +136,11 @@ class ReportsController extends AppController
     }
 
     /**
-     * GET /api/reports/daily-collection[?date=YYYY-MM-DD | ?month=&year=]
+     * GET /api/reports/daily-collection[?date=YYYY-MM-DD | ?month=&year= | ?from=&to=]
      *
      * Money collected in the window: settled invoices (by settled_at — room
      * charges, downpayments net of refunds, charged food) + paid standalone
-     * food orders. Defaults to today. The month+year form (a whole month) is
+     * food orders. Defaults to today. The month+year and from/to forms are
      * owner/admin only — a receptionist may only view a single day's
      * collection.
      */
@@ -151,10 +151,29 @@ class ReportsController extends AppController
             throw new BadRequestException('property_id is required.');
         }
 
+        $rangeFrom = $this->request->getQuery('from');
+        $rangeTo = $this->request->getQuery('to');
         $month = $this->request->getQuery('month');
         $year = $this->request->getQuery('year');
 
-        if ($month !== null || $year !== null) {
+        if ($rangeFrom !== null || $rangeTo !== null) {
+            if (!$this->userHasRole('owner', 'admin')) {
+                throw new ForbiddenException('Receptionists can view the daily collection only.');
+            }
+            if (
+                !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$rangeFrom)
+                || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$rangeTo)
+            ) {
+                throw new BadRequestException('from and to must be YYYY-MM-DD.');
+            }
+            $from = DateTime::parse($rangeFrom . ' 00:00:00');
+            $to = DateTime::parse($rangeTo . ' 00:00:00')->addDays(1);
+            if ($to <= $from) {
+                throw new BadRequestException('to must be on or after from.');
+            }
+            $scope = 'range';
+            $label = $rangeFrom . ' – ' . $rangeTo;
+        } elseif ($month !== null || $year !== null) {
             if (!$this->userHasRole('owner', 'admin')) {
                 throw new ForbiddenException('Receptionists can view the daily collection only.');
             }
