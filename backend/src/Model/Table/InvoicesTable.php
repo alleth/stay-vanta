@@ -114,8 +114,15 @@ class InvoicesTable extends Table
     }
 
     /**
-     * Remove any lines tied to a source (e.g. a cancelled food order) and
-     * reduce the invoice total accordingly.
+     * Remove any lines tied to a source (e.g. a cancelled food order or
+     * reservation charge) and recompute the affected invoice(s)' total from
+     * their remaining lines. Recomputing from the ledger — rather than
+     * subtracting each removed line's amount from the running total — keeps
+     * a multi-line reversal (e.g. cancelling a booking removes both its room
+     * charge and its downpayment credit) correct regardless of removal
+     * order: subtracting one at a time and flooring at 0 after each step can
+     * clip a legitimately-negative intermediate total and permanently lose
+     * that amount, even though the final sum of remaining lines is right.
      */
     public function removeLinesFor(string $sourceType, int $sourceId): void
     {
@@ -124,11 +131,21 @@ class InvoicesTable extends Table
             ->where(['source_type' => $sourceType, 'source_id' => $sourceId])
             ->all();
 
+        $invoiceIds = [];
         foreach ($matching as $line) {
-            $invoice = $this->get($line->invoice_id);
-            $invoice->set('total', max(0, (float)$invoice->total - (float)$line->amount));
-            $this->saveOrFail($invoice);
+            $invoiceIds[$line->invoice_id] = true;
             $lines->delete($line);
+        }
+
+        foreach (array_keys($invoiceIds) as $invoiceId) {
+            $query = $lines->find()->where(['invoice_id' => $invoiceId]);
+            $remaining = $query->select(['s' => $query->func()->sum('amount')])
+                ->disableHydration()
+                ->first();
+
+            $invoice = $this->get($invoiceId);
+            $invoice->set('total', max(0, round((float)($remaining['s'] ?? 0), 2)));
+            $this->saveOrFail($invoice);
         }
     }
 }
