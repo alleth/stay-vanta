@@ -342,12 +342,26 @@ class ReservationsController extends AppController
      * of a downpayment already collected. That credit has its own
      * idempotency check, independent of the room-charge one above, since
      * either could in principle already be posted.
+     *
+     * Callable from both payment() (Mark paid) and transition() (check-out),
+     * so two near-simultaneous calls for the same reservation (a Mark-paid
+     * double-click, a retried request) could otherwise both pass the
+     * invoiceForLine() checks before either's insert commits and double-post
+     * a line. The row lock below serializes them, mirroring
+     * ReceiptSeriesTable::assignNext()'s FOR UPDATE for the same "read then
+     * decide to insert" problem — both callers already run inside a
+     * transaction, so the lock holds until that transaction commits.
      */
     private function postRoomCharge(Reservation $reservation): void
     {
         if (!$reservation->guest_id) {
             return;
         }
+
+        $this->fetchTable('Reservations')->find()
+            ->where(['id' => $reservation->id])
+            ->epilog('FOR UPDATE')
+            ->firstOrFail();
 
         $invoices = $this->fetchTable('Invoices');
         $invoice = null;
