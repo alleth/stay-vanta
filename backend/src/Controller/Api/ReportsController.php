@@ -230,4 +230,53 @@ class ReportsController extends AppController
 
         return (string)$value;
     }
+
+    private const MONTH_LABELS = [
+        1 => 'Jan', 2 => 'Feb', 3 => 'Mar', 4 => 'Apr', 5 => 'May', 6 => 'Jun',
+        7 => 'Jul', 8 => 'Aug', 9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dec',
+    ];
+
+    /**
+     * GET /api/reports/monthly-visits[?year=YYYY]  (admin only)
+     *
+     * Seasonality: how many stays (non-cancelled reservations, counted by the
+     * month of their check-in date) the admin's property had in each month of
+     * the given year — defaults to the current year. One count query per
+     * month (rather than a `GROUP BY MONTH(...)`) to sidestep the
+     * ONLY_FULL_GROUP_BY divergence between local MariaDB and prod MySQL 8
+     * (see CLAUDE.md) — the same pattern adminDashboard() already uses for
+     * its revenue buckets.
+     */
+    public function monthlyVisits(): void
+    {
+        if (!$this->userHasRole('admin')) {
+            throw new ForbiddenException('Only a hotel/resort admin can view this report.');
+        }
+        $propertyId = (int)$this->currentUser->property_id;
+
+        $year = (string)($this->request->getQuery('year') ?: date('Y'));
+        if (!preg_match('/^\d{4}$/', $year)) {
+            throw new BadRequestException('year must be a 4-digit number.');
+        }
+        $year = (int)$year;
+
+        $reservations = $this->fetchTable('Reservations');
+        $months = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $from = DateTime::create($year, $m, 1, 0, 0, 0);
+            $to = $from->addMonths(1);
+            $count = $reservations->find()
+                ->where([
+                    'property_id' => $propertyId,
+                    'status !=' => 'cancelled',
+                    'check_in >=' => $from->toDateString(),
+                    'check_in <' => $to->toDateString(),
+                ])
+                ->count();
+            $months[] = ['month' => $m, 'label' => self::MONTH_LABELS[$m], 'count' => $count];
+        }
+
+        $this->set('report', ['year' => $year, 'months' => $months]);
+        $this->viewBuilder()->setOption('serialize', ['report']);
+    }
 }

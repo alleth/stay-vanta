@@ -14,6 +14,11 @@ export const adminDashboard = () =>
 export const dailyCollection = (params = {}) =>
   client.get('/reports/daily-collection', { params }).then((r) => r.data.collection)
 
+// Seasonality: non-cancelled reservations per month of the given year
+// (defaults to current year), by check-in date. Admin only.
+export const monthlyVisits = (year) =>
+  client.get('/reports/monthly-visits', { params: year ? { year } : {} }).then((r) => r.data.report)
+
 // Subscribers (owner view of properties, each with its admin user(s)).
 export const listSubscribers = () =>
   client.get('/properties').then((r) => r.data.properties)
