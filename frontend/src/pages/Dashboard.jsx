@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, Alert, Form } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { ownerDashboard, adminDashboard, dailyCollection } from '../api/reports'
@@ -67,28 +67,33 @@ function CollectionReport({ allowMonthly }) {
   const [year, setYear] = useState(now.getFullYear())
   const [rangeFrom, setRangeFrom] = useState(todayStr)
   const [rangeTo, setRangeTo] = useState(todayStr)
-  // The result is keyed by the filter that produced it, so switching filters
-  // shows the loading skeleton (a stale key) without a synchronous setState.
-  const key = mode === 'month' ? `m-${month}-${year}`
-    : mode === 'range' ? `r-${rangeFrom}-${rangeTo}`
-    : `d-${date}`
   const [result, setResult] = useState(null)
 
   // A backwards range (to before from) would 400 — wait for the user to fix
   // it instead of firing a request that's guaranteed to fail.
   const rangeInvalid = mode === 'range' && rangeTo < rangeFrom
 
+  // Single source of truth for what this filter currently asks for — `key`
+  // is derived from it (rather than computed separately) so the two can't
+  // drift out of sync as modes are added or changed. Memoized so its object
+  // identity — and so the effect below — only changes when the underlying
+  // inputs actually do.
+  const params = useMemo(
+    () => (mode === 'month' ? { month, year } : mode === 'range' ? { from: rangeFrom, to: rangeTo } : { date }),
+    [mode, month, year, rangeFrom, rangeTo, date],
+  )
+  // The result is keyed by the filter that produced it, so switching filters
+  // shows the loading skeleton (a stale key) without a synchronous setState.
+  const key = `${mode}-${JSON.stringify(params)}`
+
   useEffect(() => {
     if (rangeInvalid) return
-    const params = mode === 'month' ? { month, year }
-      : mode === 'range' ? { from: rangeFrom, to: rangeTo }
-      : { date }
     let active = true
     dailyCollection(params)
       .then((c) => { if (active) setResult({ key, data: c }) })
       .catch((err) => { if (active) setResult({ key, error: dashboardError(err) }) })
     return () => { active = false }
-  }, [mode, date, month, year, rangeFrom, rangeTo, rangeInvalid, key])
+  }, [params, rangeInvalid, key])
 
   const data = result?.key === key ? result.data : null
   const error = result?.key === key ? result.error : null

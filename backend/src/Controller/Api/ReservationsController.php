@@ -339,9 +339,9 @@ class ReservationsController extends AppController
      * If the booking took a downpayment, its credit is posted in the same
      * call — right alongside the charge it offsets, not deferred to
      * check-out — so the open tab never briefly shows the full 100% on top
-     * of a downpayment already collected. That credit has its own
-     * idempotency check, independent of the room-charge one above, since
-     * either could in principle already be posted.
+     * of a downpayment already collected. The credit only ever posts once
+     * its offsetting charge line exists (this call or an earlier one) and
+     * has its own idempotency check on top of that.
      *
      * Callable from both payment() (Mark paid) and transition() (check-out),
      * so two near-simultaneous calls for the same reservation (a Mark-paid
@@ -365,8 +365,9 @@ class ReservationsController extends AppController
 
         $invoices = $this->fetchTable('Invoices');
         $invoice = null;
+        $hasChargeLine = $invoices->invoiceForLine('reservation', (int)$reservation->id) !== null;
 
-        if ($invoices->invoiceForLine('reservation', (int)$reservation->id) === null) {
+        if (!$hasChargeLine) {
             $quote = $this->fetchTable('Reservations')->quote(
                 $reservation,
                 $this->resolveBaseRate((int)$reservation->property_id, $reservation->room_id),
@@ -412,11 +413,22 @@ class ReservationsController extends AppController
                         (int)$reservation->id,
                     );
                 }
+                $hasChargeLine = true;
             }
         }
 
+        // Only credit the downpayment once its offsetting charge actually
+        // exists on the invoice (just posted above, or already posted by an
+        // earlier call) — never on its own. If the room's rate can't be
+        // resolved right now (quote subtotal 0, e.g. an edited/removed rate),
+        // skip the credit too rather than leave it stranded with nothing to
+        // offset; it posts once a later call succeeds in posting the charge.
         $downpayment = (float)$reservation->downpayment;
-        if ($downpayment > 0 && $invoices->invoiceForLine('downpayment_credit', (int)$reservation->id) === null) {
+        if (
+            $hasChargeLine
+            && $downpayment > 0
+            && $invoices->invoiceForLine('downpayment_credit', (int)$reservation->id) === null
+        ) {
             $invoice ??= $invoices->openInvoiceFor(
                 (int)$reservation->property_id,
                 (int)$reservation->guest_id,

@@ -155,17 +155,15 @@ class ReportsController extends AppController
         $rangeTo = $this->request->getQuery('to');
         $month = $this->request->getQuery('month');
         $year = $this->request->getQuery('year');
+        $isWideWindow = $rangeFrom !== null || $rangeTo !== null || $month !== null || $year !== null;
+
+        if ($isWideWindow && !$this->userHasRole('owner', 'admin')) {
+            throw new ForbiddenException('Receptionists can view the daily collection only.');
+        }
 
         if ($rangeFrom !== null || $rangeTo !== null) {
-            if (!$this->userHasRole('owner', 'admin')) {
-                throw new ForbiddenException('Receptionists can view the daily collection only.');
-            }
-            if (
-                !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$rangeFrom)
-                || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$rangeTo)
-            ) {
-                throw new BadRequestException('from and to must be YYYY-MM-DD.');
-            }
+            $rangeFrom = $this->assertDateFormat($rangeFrom, 'from');
+            $rangeTo = $this->assertDateFormat($rangeTo, 'to');
             $from = DateTime::parse($rangeFrom . ' 00:00:00');
             $to = DateTime::parse($rangeTo . ' 00:00:00')->addDays(1);
             if ($to <= $from) {
@@ -174,9 +172,6 @@ class ReportsController extends AppController
             $scope = 'range';
             $label = $rangeFrom . ' – ' . $rangeTo;
         } elseif ($month !== null || $year !== null) {
-            if (!$this->userHasRole('owner', 'admin')) {
-                throw new ForbiddenException('Receptionists can view the daily collection only.');
-            }
             if (!is_numeric($month) || !is_numeric($year) || (int)$month < 1 || (int)$month > 12) {
                 throw new BadRequestException('Provide a valid month (1-12) and year.');
             }
@@ -185,10 +180,7 @@ class ReportsController extends AppController
             $scope = 'month';
             $label = $from->format('Y-m');
         } else {
-            $date = (string)($this->request->getQuery('date') ?: date('Y-m-d'));
-            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-                throw new BadRequestException('date must be YYYY-MM-DD.');
-            }
+            $date = $this->assertDateFormat($this->request->getQuery('date') ?: date('Y-m-d'), 'date');
             $from = DateTime::parse($date . ' 00:00:00');
             $to = $from->addDays(1);
             $scope = 'day';
@@ -224,5 +216,18 @@ class ReportsController extends AppController
             'total' => round($invTotal + $foodTotal, 2),
         ]);
         $this->viewBuilder()->setOption('serialize', ['collection']);
+    }
+
+    /**
+     * Validate a YYYY-MM-DD query param shared by dailyCollection()'s three
+     * window forms, returning it as a plain string once confirmed valid.
+     */
+    private function assertDateFormat(mixed $value, string $field): string
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$value)) {
+            throw new BadRequestException(sprintf('%s must be YYYY-MM-DD.', $field));
+        }
+
+        return (string)$value;
     }
 }

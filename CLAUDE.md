@@ -195,11 +195,17 @@ and via `ProtectedRoute roles=` in `App.jsx`** (frontend guards are UX only):
   invoice (`InvoicesTable::settledInvoiceWith`, `settled_at` = now) holding the 50% `downpayment`
   line, so it counts as collected the day it's taken. `postRoomCharge()` posts the offsetting
   negative `downpayment_credit` line **in the same call** that posts the room charge (Mark paid or
-  check-out, whichever fires first) — its own idempotency check (`invoiceForLine('downpayment_credit', ...)`),
-  independent of the room-charge one — so the open tab is never briefly shown at the full 100% on
-  top of a downpayment already collected. Cancelling reverses both the room charge and the credit
-  (`removeLinesFor('reservation'|'downpayment_credit', ...)`) and appends a negative
-  `downpayment_refund` (90%) to the settled downpayment invoice, leaving the retained 10% in
+  check-out, whichever fires first), and **only once that charge line actually exists** on the
+  invoice (from this call or an earlier one) — never on its own, so a room rate that can't be
+  resolved right now (e.g. an edited/removed rate makes the quote 0) can't leave a stranded credit
+  with nothing to offset; it posts once a later call succeeds in posting the charge. This also
+  takes a `FOR UPDATE` lock on the reservation row first (mirroring `ReceiptSeriesTable::assignNext()`),
+  so two near-simultaneous calls (a Mark-paid double-click, a retried request) can't both pass the
+  idempotency checks and double-post. Cancelling reverses both the room charge and the credit
+  (`InvoicesTable::removeLinesFor()`, which recomputes the invoice's total from its remaining lines
+  rather than subtracting incrementally, so a multi-line reversal is correct regardless of removal
+  order) and appends a negative `downpayment_refund` (90%) to the settled downpayment invoice,
+  leaving the retained 10% in
   revenue. The invoice folio groups all `downpayment*` lines under a "Downpayment" section (`Food.jsx`).
 
 ### Subscription model
