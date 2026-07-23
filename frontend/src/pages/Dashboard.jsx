@@ -179,10 +179,11 @@ function niceScale(maxValue) {
 }
 
 // Seasonality: non-cancelled reservations per month (by check-in date), one
-// year at a time. A plain SVG line chart — no charting library in this repo.
-// Single series, so per the design system no legend box is needed (the title
-// names it); the busiest month is direct-labeled since that's the one thing
-// this chart exists to answer. A table-view toggle is the accessible twin.
+// year at a time. A plain SVG line chart with a soft area fill — no charting
+// library in this repo. Single series, so per the design system no legend box
+// is needed (the title names it); the busiest month is direct-labeled since
+// that's the one thing this chart exists to answer. A table-view toggle is
+// the accessible twin.
 function SeasonalityChart() {
   const nowYear = new Date().getFullYear()
   const [year, setYear] = useState(nowYear)
@@ -226,6 +227,12 @@ function SeasonalityChart() {
 
   const points = months.map((m, i) => ({ ...m, x: xFor(i), y: yFor(m.count) }))
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+  // Area variant: the same line, closed down to the zero baseline and
+  // filled as a ~10% wash — a soft fill, never a saturated block.
+  const baselineY = yFor(0)
+  const areaPath = points.length
+    ? `${linePath} L${points[points.length - 1].x},${baselineY} L${points[0].x},${baselineY} Z`
+    : ''
 
   function onMove(e) {
     if (!svgRef.current || points.length === 0) return
@@ -294,6 +301,8 @@ function SeasonalityChart() {
                   {p.label}
                 </text>
               ))}
+
+              <path d={areaPath} fill="var(--color-ink)" opacity="0.1" stroke="none" />
 
               {hovered && (
                 <line x1={hovered.x} x2={hovered.x} y1={padT} y2={H - padB}
