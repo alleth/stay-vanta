@@ -13,7 +13,7 @@ import {
   listRoomRates, createRoomRate, updateRoomRate,
   listBookingSources,
   listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
-  listReservations, createReservation, transitionReservation, setReservationPayment,
+  listReservations, createReservation, updateReservation, transitionReservation, setReservationPayment,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
 
@@ -93,7 +93,7 @@ export default function FrontDesk() {
   const [extraCharges, setExtraCharges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [modal, setModal] = useState(null) // 'reservation' | { type:'room'|'rate'|'charge', ... }
+  const [modal, setModal] = useState(null) // { type:'reservation'|'room'|'rate'|'charge', ... }
   const [reservationRoomId, setReservationRoomId] = useState(null)
   const [reservationDate, setReservationDate] = useState(null)
   const [calDate, setCalDate] = useState(todayStr)
@@ -304,7 +304,7 @@ export default function FrontDesk() {
   function openReservation(roomId = null, date = null) {
     setReservationRoomId(roomId)
     setReservationDate(date)
-    setModal('reservation')
+    setModal({ type: 'reservation' })
   }
 
   if (!propertyId)
@@ -362,7 +362,13 @@ export default function FrontDesk() {
                     <tr><td colSpan={10} className="py-6 text-center text-muted">No reservations to show.</td></tr>
                   )}
                   {visibleReservations.map((r) => (
-                    <tr key={r.id} className={r.status === 'cancelled' ? 'text-muted' : undefined}>
+                    <tr key={r.id}
+                      className={[
+                        r.status === 'cancelled' && 'text-muted',
+                        r.status === 'booked' && 'cursor-pointer',
+                      ].filter(Boolean).join(' ') || undefined}
+                      title={r.status === 'booked' ? 'Click to edit this booking' : undefined}
+                      onClick={() => r.status === 'booked' && setModal({ type: 'reservation', reservation: r })}>
                       <td className="font-semibold">
                         {r.guest?.full_name ?? '—'}{' '}
                         {r.guest && (
@@ -376,15 +382,23 @@ export default function FrontDesk() {
                         {r.discount_type !== 'none' && (
                           <Badge bg="info" className="ml-1">{r.discount_type}</Badge>
                         )}
+                        {Number(r.discount_amount) > 0 && (
+                          <Badge bg="info" className="ml-1">referral</Badge>
+                        )}
                       </td>
                       <td className="text-right">
                         {formatMoney(r.quote?.total)}
                         {r.promo_rate !== null && r.promo_rate !== undefined && (
                           <div className="whitespace-nowrap text-[11px] text-muted">promo rate</div>
                         )}
-                        {Number(r.quote?.discount) > 0 && (
+                        {Number(r.quote?.statutory_discount) > 0 && (
                           <div className="whitespace-nowrap text-[11px] text-muted">
-                            −{formatMoney(r.quote.discount)} ({r.discount_type})
+                            −{formatMoney(r.quote.statutory_discount)} ({r.discount_type})
+                          </div>
+                        )}
+                        {Number(r.quote?.referral_discount) > 0 && (
+                          <div className="whitespace-nowrap text-[11px] text-muted">
+                            −{formatMoney(r.quote.referral_discount)} (referral)
                           </div>
                         )}
                         {Number(r.downpayment) > 0 && (
@@ -403,7 +417,7 @@ export default function FrontDesk() {
                         {r.checked_out_at && <div>Out: {fmtDateTime(r.checked_out_at)}</div>}
                       </td>
                       <td className="text-xs text-muted">{r.receptionist?.name ?? '—'}</td>
-                      <td className="text-right">
+                      <td className="text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="inline-flex flex-wrap justify-end gap-1">
                           {r.status === 'booked' && (
                             <Button size="sm" variant="outline-primary"
@@ -695,9 +709,10 @@ export default function FrontDesk() {
         </>
       )}
 
-      {modal === 'reservation' && (
+      {modal?.type === 'reservation' && (
         <ReservationModal rooms={rooms} rates={rates} bookingSources={bookingSources} promoRates={promoRates}
           propertyId={propertyId} defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
+          reservation={modal.reservation}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
       {modal?.type === 'room' && (
@@ -769,14 +784,26 @@ function SummaryCard({ label, value, variant }) {
   )
 }
 
+// Editing an existing 'booked' reservation reuses this same modal, scoped to
+// booking details only (room/dates/source/discount/beds) — the linked guest
+// isn't editable here (that's the Guests module's job), and the backend
+// blocks the edit entirely once checked in or once a downpayment has been
+// collected against the original quote (cancel and rebook instead).
 function ReservationModal({
-  rooms, rates, bookingSources, promoRates, propertyId, defaultRoomId, defaultCheckIn, onClose, onSaved,
+  rooms, rates, bookingSources, promoRates, propertyId, defaultRoomId, defaultCheckIn, reservation,
+  onClose, onSaved,
 }) {
+  const editing = Boolean(reservation)
   const firstAvailable = rooms.find((r) => r.status === 'available')
   const [form, setForm] = useState({
-    room_id: defaultRoomId ?? firstAvailable?.id ?? '',
-    check_in: defaultCheckIn ?? '', check_out: '',
-    source: WALK_IN, discount_type: 'none', discount_amount: '', additional_beds: 0,
+    room_id: reservation?.room_id ?? defaultRoomId ?? firstAvailable?.id ?? '',
+    check_in: reservation?.check_in ?? defaultCheckIn ?? '',
+    check_out: reservation?.check_out ?? '',
+    source: reservation?.source ?? WALK_IN,
+    discount_type: reservation?.discount_type ?? 'none',
+    referral: Boolean(reservation?.discount_amount),
+    discount_amount: reservation?.discount_amount ?? '',
+    additional_beds: reservation?.additional_beds ?? 0,
     guest_name: '', guest_type: 'local', nationality: '',
     contact_number: '', email: '', address: '',
   })
@@ -792,18 +819,23 @@ function ReservationModal({
   // Advance booking (check-in after today) collects a 50% downpayment of the
   // estimated total — promo rate and discount included. The backend computes
   // the authoritative amount the same way. Senior/PWD is a fixed 20% off;
-  // referral is a flat amount the receptionist types in, capped at the
-  // subtotal so the estimate can't go negative while they're still typing.
+  // referral is a flat amount the receptionist types in, applied on top of
+  // whatever's left after the statutory discount and capped there so the
+  // estimate can't go negative while they're still typing — the two stack,
+  // since a guest can be a senior citizen *and* have a referral.
   const nights = form.check_in && form.check_out
     ? Math.max(0, Math.round((new Date(form.check_out) - new Date(form.check_in)) / 86400000))
     : 0
   const nightly = promoRate ?? (baseRate > 0 ? baseRate : null)
   const estSubtotal = nightly !== null && nights > 0 ? nightly * nights : 0
-  const estDiscount = form.discount_type === 'senior' || form.discount_type === 'pwd'
+  const estStatutoryDiscount = form.discount_type === 'senior' || form.discount_type === 'pwd'
     ? estSubtotal * 0.2
-    : form.discount_type === 'referral'
-    ? Math.min(Number(form.discount_amount) || 0, estSubtotal)
     : 0
+  const estRemaining = Math.max(0, estSubtotal - estStatutoryDiscount)
+  const estReferralDiscount = form.referral
+    ? Math.min(Number(form.discount_amount) || 0, estRemaining)
+    : 0
+  const estDiscount = estStatutoryDiscount + estReferralDiscount
   const estTotal = Math.max(0, estSubtotal - estDiscount)
   const isAdvance = Boolean(form.check_in) && form.check_in > todayStr()
   const downpayment = isAdvance ? estTotal * 0.5 : 0
@@ -817,7 +849,7 @@ function ReservationModal({
   const [searching, setSearching] = useState(false) // true while a debounced lookup is in flight
 
   useEffect(() => {
-    if (!showSug || guestId) return undefined
+    if (editing || !showSug || guestId) return undefined
     const q = form.guest_name.trim()
     // eslint-disable-next-line react-hooks/set-state-in-effect -- derived reset, not a data fetch
     if (q.length < 2) { setSuggestions([]); setSearching(false); return undefined }
@@ -832,7 +864,7 @@ function ReservationModal({
       }
     }, 200)
     return () => { active = false; clearTimeout(t) }
-  }, [form.guest_name, showSug, guestId, propertyId])
+  }, [form.guest_name, showSug, guestId, propertyId, editing])
 
   // Reuse an existing guest: pin its id and pre-fill the detail fields. Any
   // field the user then fills that was empty on file completes the record on save.
@@ -873,6 +905,8 @@ function ReservationModal({
 
   function buildPayload(extra = {}) {
     const payload = { ...form, ...extra }
+    if (!payload.referral) payload.discount_amount = ''
+    delete payload.referral
     if (guestId) { payload.guest_id = guestId; delete payload.guest_name }
     return payload
   }
@@ -881,6 +915,11 @@ function ReservationModal({
     setBusy(true)
     setErr(null)
     try {
+      if (editing) {
+        await updateReservation(reservation.id, buildPayload())
+        onSaved()
+        return
+      }
       // Warn about a duplicate only when creating a new (typed) guest.
       if (!force && !guestId && form.guest_name.trim()) {
         const matches = await matchGuests(
@@ -900,15 +939,24 @@ function ReservationModal({
   return (
     <Modal show onHide={onClose} centered size="lg">
       <Form onSubmit={(e) => { e.preventDefault(); book(false) }}>
-        <Modal.Header closeButton><Modal.Title>New reservation</Modal.Title></Modal.Header>
+        <Modal.Header closeButton>
+          <Modal.Title>{editing ? 'Edit reservation' : 'New reservation'}</Modal.Title>
+        </Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
+          {editing && (
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-sm text-muted">Guest:</span>
+              <span className="font-semibold">{reservation.guest?.full_name ?? '—'}</span>
+              {reservation.guest && <Badge bg="light" className="font-normal">{reservation.guest.guest_type}</Badge>}
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
             <Form.Group className="mb-4 md:col-span-6">
               <Form.Label>Room</Form.Label>
               <Form.Select value={form.room_id} onChange={set('room_id')} required>
                 {rooms.map((r) => (
-                  <option key={r.id} value={r.id} disabled={r.status !== 'available'}>
+                  <option key={r.id} value={r.id} disabled={r.status !== 'available' && r.id !== reservation?.room_id}>
                     {r.room_number} — {r.room_type ?? 'Room'}
                     {r.status !== 'available' ? ` (${r.status})` : ''}
                   </option>
@@ -940,7 +988,6 @@ function ReservationModal({
                 <option value="none">None</option>
                 <option value="senior">Senior citizen (20%)</option>
                 <option value="pwd">PWD (20%)</option>
-                <option value="referral">Referral</option>
               </Form.Select>
             </Form.Group>
             <Form.Group className="mb-4 md:col-span-2">
@@ -969,16 +1016,21 @@ function ReservationModal({
               <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
             </Form.Group>
           </div>
-          {form.discount_type === 'referral' && (
-            <Form.Group className="mb-4">
-              <Form.Label>Referral discount amount</Form.Label>
-              <Form.Control type="number" min={0.01} step="0.01" value={form.discount_amount}
-                onChange={set('discount_amount')} required autoFocus placeholder="e.g. 500" />
-              <Form.Text muted>
-                Flat amount off the room total{estSubtotal > 0 ? ` (max ${formatMoney(estSubtotal)})` : ''}.
-              </Form.Text>
-            </Form.Group>
-          )}
+          <Form.Group className="mb-4">
+            <Form.Check type="checkbox" label="Referral discount"
+              checked={form.referral}
+              onChange={(e) => setForm({ ...form, referral: e.target.checked })} />
+            {form.referral && (
+              <>
+                <Form.Control className="mt-2" type="number" min={0.01} step="0.01" value={form.discount_amount}
+                  onChange={set('discount_amount')} required autoFocus placeholder="e.g. 500" />
+                <Form.Text muted>
+                  Flat amount off the room total, on top of any senior/PWD discount above
+                  {estRemaining > 0 ? ` (max ${formatMoney(estRemaining)})` : ''}.
+                </Form.Text>
+              </>
+            )}
+          </Form.Group>
           {downpayment > 0 && (
             <Alert variant="info" className="mb-4 px-4 py-2">
               <strong>Advance booking</strong> — collect a downpayment of{' '}
@@ -987,6 +1039,8 @@ function ReservationModal({
               downpayment is retained.
             </Alert>
           )}
+          {!editing && (
+          <>
           <hr />
           <div className="mb-2 flex items-center justify-between">
             <span className="font-semibold">Guest details</span>
@@ -1086,10 +1140,14 @@ function ReservationModal({
               <Form.Control value={form.address} onChange={set('address')} placeholder="Optional" />
             </Form.Group>
           </div>
+          </>
+          )}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : 'Book'}</Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? <Spinner size="sm" /> : editing ? 'Save changes' : 'Book'}
+          </Button>
         </Modal.Footer>
       </Form>
     </Modal>

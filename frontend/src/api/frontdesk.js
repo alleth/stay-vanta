@@ -54,6 +54,12 @@ export const listReservations = (propertyId, params = {}) =>
 export const createReservation = (data, propertyId) =>
   client.post('/reservations', withProp(data, propertyId)).then((r) => r.data.reservation)
 
+// Fix a mistake made at booking (room, dates, source, discount) while the
+// guest hasn't checked in yet. Blocked server-side once checked in, or once
+// an advance-booking downpayment has been collected.
+export const updateReservation = (id, data) =>
+  client.patch(`/reservations/${id}`, data).then((r) => r.data.reservation)
+
 // transition: 'check-in' | 'check-out' | 'cancel'
 // `data` carries flags like { early_check_in: true } for the check-in transition.
 export const transitionReservation = (id, transition, data = {}) =>

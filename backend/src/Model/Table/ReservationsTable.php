@@ -16,7 +16,7 @@ use Cake\Validation\Validator;
 class ReservationsTable extends Table
 {
     public const STATUSES = ['booked', 'checked_in', 'checked_out', 'cancelled'];
-    public const DISCOUNT_TYPES = ['none', 'senior', 'pwd', 'referral'];
+    public const DISCOUNT_TYPES = ['none', 'senior', 'pwd'];
     public const PAYMENT_STATUSES = ['unpaid', 'paid'];
 
     /** Statutory Senior Citizen / PWD discount (Philippines). */
@@ -53,15 +53,14 @@ class ReservationsTable extends Table
         $validator->inList('discount_type', self::DISCOUNT_TYPES);
         $validator->inList('payment_status', self::PAYMENT_STATUSES);
 
-        // A referral discount has no fixed rate — the receptionist decides
-        // the amount, so it must be a positive number when that's the type.
+        // Referral is a flat peso amount the receptionist decides, independent
+        // of (and stackable with) the senior/pwd statutory discount above —
+        // so it's optional regardless of discount_type, but must be a
+        // positive number whenever it's set at all.
         $validator
             ->numeric('discount_amount')
-            ->greaterThan('discount_amount', 0, 'Enter a discount amount greater than 0.')
-            ->requirePresence('discount_amount', function (array $context) {
-                return ($context['data']['discount_type'] ?? null) === 'referral';
-            })
-            ->allowEmptyString('discount_amount', null, fn($context) => ($context['data']['discount_type'] ?? null) !== 'referral');
+            ->greaterThan('discount_amount', 0, 'Enter a referral discount amount greater than 0.')
+            ->allowEmptyString('discount_amount');
 
         $validator
             ->date('check_in')
@@ -101,11 +100,17 @@ class ReservationsTable extends Table
     /**
      * Compute a price quote for a reservation given the resolved nightly rate.
      * The promo rate (an OTA-negotiated nightly price) overrides the base rate
-     * when present; senior/PWD applies the statutory 20% discount; referral
-     * applies the receptionist-entered flat amount, capped at the subtotal so
-     * the total can never go negative.
+     * when present. Senior/PWD (`discount_type`) and referral
+     * (`discount_amount`) are independent and stack: a guest can be, say, a
+     * senior citizen *and* have a referral discount. Senior/PWD applies the
+     * statutory 20% off the subtotal; referral is the receptionist-entered
+     * flat amount, applied on what's left after the statutory discount and
+     * capped there so the total can never go negative.
      *
-     * @return array{nights:int, nightly_rate:float, subtotal:float, discount:float, total:float}
+     * @return array{
+     *     nights:int, nightly_rate:float, subtotal:float,
+     *     statutory_discount:float, referral_discount:float, discount:float, total:float
+     * }
      */
     public function quote(Reservation $reservation, float $baseNightlyRate): array
     {
@@ -115,20 +120,23 @@ class ReservationsTable extends Table
 
         $nights = $this->nights($reservation);
         $subtotal = $nightly * $nights;
-        if (in_array($reservation->discount_type, ['senior', 'pwd'], true)) {
-            $discount = round($subtotal * self::STATUTORY_DISCOUNT, 2);
-        } elseif ($reservation->discount_type === 'referral') {
-            $discount = round(min((float)$reservation->discount_amount, $subtotal), 2);
-        } else {
-            $discount = 0.0;
-        }
+
+        $statutoryDiscount = in_array($reservation->discount_type, ['senior', 'pwd'], true)
+            ? round($subtotal * self::STATUTORY_DISCOUNT, 2)
+            : 0.0;
+        $remaining = max(0.0, $subtotal - $statutoryDiscount);
+        $referralDiscount = $reservation->discount_amount !== null
+            ? round(min((float)$reservation->discount_amount, $remaining), 2)
+            : 0.0;
 
         return [
             'nights' => $nights,
             'nightly_rate' => round($nightly, 2),
             'subtotal' => round($subtotal, 2),
-            'discount' => $discount,
-            'total' => round($subtotal - $discount, 2),
+            'statutory_discount' => $statutoryDiscount,
+            'referral_discount' => $referralDiscount,
+            'discount' => round($statutoryDiscount + $referralDiscount, 2),
+            'total' => round($subtotal - $statutoryDiscount - $referralDiscount, 2),
         ];
     }
 }

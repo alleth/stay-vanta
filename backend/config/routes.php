@@ -156,6 +156,10 @@ return function (RouteBuilder $routes): void {
 
         $builder->get('/reservations', ['controller' => 'Reservations', 'action' => 'index']);
         $builder->post('/reservations', ['controller' => 'Reservations', 'action' => 'add']);
+        $builder->patch('/reservations/{id}', ['controller' => 'Reservations', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->put('/reservations/{id}', ['controller' => 'Reservations', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post('/reservations/{id}/{transition}', ['controller' => 'Reservations', 'action' => 'transition'])
             ->setPatterns(['id' => '\d+', 'transition' => 'check-in|check-out|cancel'])
             ->setPass(['id', 'transition']);

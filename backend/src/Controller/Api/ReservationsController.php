@@ -66,9 +66,9 @@ class ReservationsController extends AppController
      * { room_id, check_in, check_out, source?, discount_type?, discount_amount?,
      *   additional_beds?, guest_id? | guest_name?+nationality?+guest_type? }
      *
-     * `discount_amount` (a flat peso amount, receptionist-decided) only applies
-     * — and is only stored — when `discount_type` is `referral`; senior/pwd are
-     * the fixed 20% statutory rate instead.
+     * `discount_type` (none/senior/pwd) and `discount_amount` (a flat peso
+     * referral amount, receptionist-decided) are independent and stack — a
+     * guest can be a senior citizen *and* have a referral discount.
      *
      * The promo rate is resolved server-side from the promo_rates the admin
      * configured for the booking source — it is not accepted from the client.
@@ -130,7 +130,7 @@ class ReservationsController extends AppController
                     'status' => 'booked',
                     'source' => $source,
                     'discount_type' => $discountType,
-                    'discount_amount' => $discountType === 'referral' ? $this->request->getData('discount_amount') : null,
+                    'discount_amount' => $this->resolveReferralAmount(),
                     'promo_rate' => $promoRate,
                     'additional_beds' => (int)($this->request->getData('additional_beds') ?? 0),
                 ]);
@@ -139,29 +139,8 @@ class ReservationsController extends AppController
                     return false;
                 }
 
-                // Advance booking (check-in after today): collect a 50%
-                // downpayment of the quoted total (promo rate and senior/PWD
-                // discount included) as an immediately-settled invoice, so it
-                // shows in collections right away. Needs a guest to bill.
-                if ($guestId !== null && $reservation->check_in > Date::today()) {
-                    $quote = $reservations->quote(
-                        $reservation,
-                        $this->resolveBaseRate($propertyId, $roomId ? (int)$roomId : null),
-                    );
-                    $downpayment = round($quote['total'] * self::DOWNPAYMENT_RATE, 2);
-                    if ($downpayment > 0) {
-                        $reservation->set('downpayment', $downpayment);
-                        $reservations->saveOrFail($reservation);
-                        $this->fetchTable('Invoices')->settledInvoiceWith(
-                            $propertyId,
-                            (int)$guestId,
-                            (int)$reservation->id,
-                            sprintf('Downpayment (50%%) — booking #%d', $reservation->id),
-                            $downpayment,
-                            'downpayment',
-                            (int)$reservation->id,
-                        );
-                    }
+                if ($guestId !== null) {
+                    $this->collectAdvanceDownpayment($reservation, $propertyId, $guestId);
                 }
 
                 return true;
@@ -175,6 +154,99 @@ class ReservationsController extends AppController
         }
 
         $this->respondWithReservation($reservation, 201);
+    }
+
+    /**
+     * PATCH/PUT /api/reservations/{id} — fix a mistake made at booking (wrong
+     * room, dates, source, discount) while the guest hasn't checked in yet.
+     * Any authed staff may edit (matching who can create a booking).
+     *
+     * Blocked once checked in, and blocked once a downpayment has been
+     * collected against the original quote — editing the total afterward
+     * would leave that already-collected amount out of sync with a
+     * recalculated one; cancel and rebook instead (cancellation already
+     * refunds 90% of the downpayment correctly).
+     *
+     * Accepts the same body as add() (room_id, check_in, check_out, source?,
+     * discount_type?, discount_amount?, additional_beds?) minus the guest
+     * fields — the linked guest isn't editable here. The promo rate is
+     * recomputed server-side the same way add() does, for whatever
+     * source/room the edit ends up with. If the edit turns this into (or
+     * keeps it as) an advance booking, the downpayment is collected the same
+     * way add() does.
+     */
+    public function edit(int $id): void
+    {
+        $this->request->allowMethod(['patch', 'put', 'post']);
+
+        $propertyId = $this->effectivePropertyId();
+        if ($propertyId === null) {
+            throw new BadRequestException('property_id is required.');
+        }
+
+        $reservations = $this->fetchTable('Reservations');
+        $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
+            ->firstOrFail();
+
+        if ($reservation->status !== 'booked') {
+            throw new BadRequestException("Only a booking that hasn't checked in yet can be edited.");
+        }
+        if ((float)$reservation->downpayment > 0) {
+            throw new BadRequestException(
+                'This booking already collected a downpayment — cancel and rebook instead of editing it.',
+            );
+        }
+
+        $source = $this->request->getData('source') ?? $reservation->source;
+        if (
+            $source !== BookingSourcesTable::WALK_IN
+            && !$this->fetchTable('BookingSources')->exists([
+                'BookingSources.property_id' => $propertyId,
+                'BookingSources.code' => $source,
+            ])
+        ) {
+            throw new BadRequestException('Unknown booking source.');
+        }
+
+        $roomId = $this->request->getData('room_id') ?? $reservation->room_id;
+
+        // The promo rate is never client-supplied: recomputed the same way
+        // add() does, for the (possibly new) source/room.
+        $promoRate = null;
+        if ($source !== BookingSourcesTable::WALK_IN) {
+            $multiplier = $this->fetchTable('PromoRates')
+                ->multiplierFor($propertyId, $source, $roomId ? (int)$roomId : null);
+            if ($multiplier !== null) {
+                $base = $this->resolveBaseRate($propertyId, $roomId ? (int)$roomId : null);
+                $promoRate = $base > 0 ? round($base * $multiplier, 2) : null;
+            }
+        }
+
+        $discountType = $this->request->getData('discount_type') ?? $reservation->discount_type;
+
+        $reservations->patchEntity($reservation, [
+            'room_id' => $roomId,
+            'check_in' => $this->request->getData('check_in') ?? $reservation->check_in,
+            'check_out' => $this->request->getData('check_out') ?? $reservation->check_out,
+            'source' => $source,
+            'discount_type' => $discountType,
+            'discount_amount' => $this->resolveReferralAmount(),
+            'promo_rate' => $promoRate,
+            'additional_beds' => (int)($this->request->getData('additional_beds') ?? $reservation->additional_beds),
+            'receptionist_id' => (int)$this->currentUser->id,
+        ], ['accessibleFields' => ['property_id' => false]]);
+
+        if ($reservations->save($reservation) === false) {
+            $this->validationFailed($reservation->getErrors());
+
+            return;
+        }
+
+        if ($reservation->guest_id !== null) {
+            $this->collectAdvanceDownpayment($reservation, $propertyId, (int)$reservation->guest_id);
+        }
+
+        $this->respondWithReservation($reservation, 200);
     }
 
     /**
@@ -409,16 +481,23 @@ class ReservationsController extends AppController
                     (int)$reservation->id,
                 );
 
-                if ($quote['discount'] > 0) {
-                    $description = match ($reservation->discount_type) {
-                        'senior' => 'Senior discount (20%)',
-                        'pwd' => 'PWD discount (20%)',
-                        default => 'Referral discount',
-                    };
+                if ($quote['statutory_discount'] > 0) {
+                    $description = $reservation->discount_type === 'senior'
+                        ? 'Senior discount (20%)'
+                        : 'PWD discount (20%)';
                     $invoices->addLine(
                         $invoice,
                         $description,
-                        -(float)$quote['discount'],
+                        -(float)$quote['statutory_discount'],
+                        'reservation',
+                        (int)$reservation->id,
+                    );
+                }
+                if ($quote['referral_discount'] > 0) {
+                    $invoices->addLine(
+                        $invoice,
+                        'Referral discount',
+                        -(float)$quote['referral_discount'],
                         'reservation',
                         (int)$reservation->id,
                     );
@@ -455,6 +534,18 @@ class ReservationsController extends AppController
                 (int)$reservation->id,
             );
         }
+    }
+
+    /**
+     * The referral discount amount from the request, or null when not set —
+     * distinct from `discount_type` (none/senior/pwd), since referral stacks
+     * with it rather than being one more option in that enum.
+     */
+    private function resolveReferralAmount(): ?string
+    {
+        $raw = $this->request->getData('discount_amount');
+
+        return ($raw === null || $raw === '') ? null : (string)$raw;
     }
 
     /**
@@ -538,6 +629,44 @@ class ReservationsController extends AppController
             ->first();
 
         return $rate ? (float)$rate->base_rate : 0.0;
+    }
+
+    /**
+     * Advance booking (check-in after today): collect a 50% downpayment of
+     * the quoted total (promo rate and discount included) as an
+     * immediately-settled invoice, so it shows in collections right away.
+     * A no-op if check-in isn't in the future, or the quoted downpayment is
+     * 0 — used by both add() (a brand-new booking) and edit() (a 'booked'
+     * reservation edited into becoming, or remaining, an advance booking;
+     * edit() only ever reaches here when no downpayment was collected yet).
+     */
+    private function collectAdvanceDownpayment(Reservation $reservation, int $propertyId, int $guestId): void
+    {
+        if ($reservation->check_in === null || $reservation->check_in <= Date::today()) {
+            return;
+        }
+
+        $reservations = $this->fetchTable('Reservations');
+        $quote = $reservations->quote(
+            $reservation,
+            $this->resolveBaseRate($propertyId, $reservation->room_id ? (int)$reservation->room_id : null),
+        );
+        $downpayment = round($quote['total'] * self::DOWNPAYMENT_RATE, 2);
+        if ($downpayment <= 0) {
+            return;
+        }
+
+        $reservation->set('downpayment', $downpayment);
+        $reservations->saveOrFail($reservation);
+        $this->fetchTable('Invoices')->settledInvoiceWith(
+            $propertyId,
+            $guestId,
+            (int)$reservation->id,
+            sprintf('Downpayment (50%%) — booking #%d', $reservation->id),
+            $downpayment,
+            'downpayment',
+            (int)$reservation->id,
+        );
     }
 
     private function respondWithReservation(Reservation $reservation, int $status): void
