@@ -20,6 +20,7 @@ use Cake\ORM\Entity;
  * @property bool $is_available
  * @property \Cake\I18n\DateTime|null $deleted_at  soft-delete marker (hidden when set)
  * @property \App\Model\Entity\FoodMenuItemIngredient[] $food_menu_item_ingredients
+ * @property \App\Model\Entity\FoodMenuItemOptionGroup[] $food_menu_item_option_groups
  */
 class FoodMenuItem extends Entity
 {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Model\Entity\FoodMenuItem;
+use App\Model\Table\FoodMenuItemOptionGroupsTable;
 use App\Model\Table\FoodMenuItemsTable;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -24,10 +25,7 @@ class FoodMenuItemsController extends AppController
         $query = $this->scopeToProperty(
             $menu->find()
                 ->where(['FoodMenuItems.deleted_at IS' => null])
-                ->contain([
-                    'InventoryItems' => ['InventoryCategories'],
-                    'FoodMenuItemIngredients' => ['InventoryItems' => ['InventoryCategories']],
-                ])
+                ->contain($this->menuItemContain())
                 ->orderBy(['FoodMenuItems.name' => 'ASC']),
         );
 
@@ -55,6 +53,13 @@ class FoodMenuItemsController extends AppController
      * on top of (not instead of) the single `inventory_item_id` link — each row
      * naming how much of an inventory item one serving of this dish consumes;
      * ordering the item decrements every ingredient alongside the single link.
+     *
+     * `option_groups[]` ({name, kind, options: [{label, price_delta, inventory_item_id}]})
+     * is an optional set of guest-facing picks, distinct from the silent recipe
+     * above: a `choice` group (guest must pick exactly one option, normally free
+     * — e.g. "Choice of Drink") or an `addon` group (guest may add any number of
+     * each option, normally priced — e.g. "Additional egg"). Ordering decrements
+     * whichever options were picked.
      */
     public function add(): void
     {
@@ -70,6 +75,7 @@ class FoodMenuItemsController extends AppController
         $inventoryItemId = $inventoryItemId !== null && $inventoryItemId !== '' ? (int)$inventoryItemId : null;
         $type = $this->request->getData('type');
         $ingredients = $this->normalizeIngredients((array)$this->request->getData('ingredients'), $propertyId);
+        $optionGroups = $this->normalizeOptionGroups((array)$this->request->getData('option_groups'), $propertyId);
 
         $menu = $this->fetchTable('FoodMenuItems');
         $item = $menu->newEntity([
@@ -92,6 +98,7 @@ class FoodMenuItemsController extends AppController
         }
 
         $this->saveIngredients($item, $ingredients);
+        $this->saveOptionGroups($item, $optionGroups);
 
         $this->response = $this->response->withStatus(201);
         $this->set('menuItem', $this->reloadWithIngredients($item->id));
@@ -116,6 +123,10 @@ class FoodMenuItemsController extends AppController
         $type = $this->request->getData('type');
         $rawIngredients = (array)$this->request->getData('ingredients');
         $ingredients = $this->normalizeIngredients($rawIngredients, (int)$item->property_id);
+        $optionGroups = $this->normalizeOptionGroups(
+            (array)$this->request->getData('option_groups'),
+            (int)$item->property_id,
+        );
 
         $menu->patchEntity($item, [
             'name' => $this->request->getData('name'),
@@ -136,6 +147,7 @@ class FoodMenuItemsController extends AppController
         }
 
         $this->saveIngredients($item, $ingredients);
+        $this->saveOptionGroups($item, $optionGroups);
 
         $this->set('menuItem', $this->reloadWithIngredients($item->id));
         $this->viewBuilder()->setOption('serialize', ['menuItem']);
@@ -242,18 +254,129 @@ class FoodMenuItemsController extends AppController
     }
 
     /**
-     * Reload a saved menu item with its stock link + recipe contained, for
-     * the response payload.
+     * Parse+validate a raw `option_groups` request array into
+     * {name, kind, options: [{label, price_delta, inventory_item_id}]} rows:
+     * `kind` must be choice|addon, name/label are required, price_delta must be
+     * >= 0, and any `inventory_item_id` must exist, belong to this property, and
+     * not be soft-deleted. Groups/options with no name or no label are dropped
+     * silently (mirrors the frontend only sending filled-in rows).
+     *
+     * @return array<int, array{name: string, kind: string, options: array<int, array{label: string, price_delta: float, inventory_item_id: int|null}>}>
+     */
+    private function normalizeOptionGroups(array $raw, int $propertyId): array
+    {
+        $inventoryItems = $this->fetchTable('InventoryItems');
+        $groups = [];
+
+        foreach ($raw as $rawGroup) {
+            $name = trim((string)($rawGroup['name'] ?? ''));
+            $rawOptions = (array)($rawGroup['options'] ?? []);
+            if ($name === '' || $rawOptions === []) {
+                continue;
+            }
+
+            $kind = $rawGroup['kind'] ?? 'choice';
+            if (!in_array($kind, FoodMenuItemOptionGroupsTable::KINDS, true)) {
+                throw new BadRequestException('Option group kind must be choice or addon.');
+            }
+
+            $options = [];
+            foreach ($rawOptions as $rawOption) {
+                $label = trim((string)($rawOption['label'] ?? ''));
+                if ($label === '') {
+                    continue;
+                }
+
+                $priceDelta = (float)($rawOption['price_delta'] ?? 0);
+                if ($priceDelta < 0) {
+                    throw new BadRequestException('Option price cannot be negative.');
+                }
+
+                $inventoryItemId = $rawOption['inventory_item_id'] ?? null;
+                $inventoryItemId = $inventoryItemId !== null && $inventoryItemId !== ''
+                    ? (int)$inventoryItemId
+                    : null;
+                if ($inventoryItemId !== null) {
+                    $exists = $inventoryItems->exists([
+                        'InventoryItems.id' => $inventoryItemId,
+                        'InventoryItems.property_id' => $propertyId,
+                        'InventoryItems.deleted_at IS' => null,
+                    ]);
+                    if (!$exists) {
+                        throw new BadRequestException('One of the selected options\' stock items was not found.');
+                    }
+                }
+
+                $options[] = ['label' => $label, 'price_delta' => $priceDelta, 'inventory_item_id' => $inventoryItemId];
+            }
+
+            if ($options === []) {
+                continue;
+            }
+
+            $groups[] = ['name' => $name, 'kind' => $kind, 'options' => $options];
+        }
+
+        return $groups;
+    }
+
+    /**
+     * Replace a menu item's option groups with the given rows (delete-then-insert
+     * — the list is small and always sent in full from the edit form). Deleting a
+     * group cascades to its options via the table's `dependent => true` association.
+     *
+     * @param array<int, array{name: string, kind: string, options: array<int, array{label: string, price_delta: float, inventory_item_id: int|null}>}> $groups
+     */
+    private function saveOptionGroups(FoodMenuItem $item, array $groups): void
+    {
+        $groupsTable = $this->fetchTable('FoodMenuItemOptionGroups');
+        $optionsTable = $this->fetchTable('FoodMenuItemOptions');
+        $rebuild = function () use ($groupsTable, $optionsTable, $item, $groups): void {
+            $groupsTable->deleteAll(['food_menu_item_id' => $item->id]);
+            foreach ($groups as $group) {
+                $groupEntity = $groupsTable->saveOrFail($groupsTable->newEntity([
+                    'food_menu_item_id' => $item->id,
+                    'name' => $group['name'],
+                    'kind' => $group['kind'],
+                ]));
+                foreach ($group['options'] as $option) {
+                    $optionsTable->saveOrFail($optionsTable->newEntity([
+                        'food_menu_item_option_group_id' => $groupEntity->id,
+                        'label' => $option['label'],
+                        'price_delta' => $option['price_delta'],
+                        'inventory_item_id' => $option['inventory_item_id'],
+                    ]));
+                }
+            }
+        };
+        $groupsTable->getConnection()->transactional($rebuild);
+    }
+
+    /**
+     * Reload a saved menu item with its stock link + recipe + option groups
+     * contained, for the response payload.
      */
     private function reloadWithIngredients(int $id): FoodMenuItem
     {
         return $this->fetchTable('FoodMenuItems')->find()
             ->where(['FoodMenuItems.id' => $id])
-            ->contain([
-                'InventoryItems' => ['InventoryCategories'],
-                'FoodMenuItemIngredients' => ['InventoryItems' => ['InventoryCategories']],
-            ])
+            ->contain($this->menuItemContain())
             ->firstOrFail();
+    }
+
+    /**
+     * The stock link + recipe + option groups contain shared by `index()` and
+     * `reloadWithIngredients()`.
+     *
+     * @return array<string, mixed>
+     */
+    private function menuItemContain(): array
+    {
+        return [
+            'InventoryItems' => ['InventoryCategories'],
+            'FoodMenuItemIngredients' => ['InventoryItems' => ['InventoryCategories']],
+            'FoodMenuItemOptionGroups' => ['FoodMenuItemOptions' => ['InventoryItems' => ['InventoryCategories']]],
+        ];
     }
 
     /**

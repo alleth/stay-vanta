@@ -28,6 +28,7 @@ class FoodMenuItemsTable extends Table
         $this->belongsTo('Properties');
         $this->belongsTo('InventoryItems');
         $this->hasMany('FoodMenuItemIngredients', ['dependent' => true]);
+        $this->hasMany('FoodMenuItemOptionGroups', ['dependent' => true]);
     }
 
     public function validationDefault(Validator $validator): Validator

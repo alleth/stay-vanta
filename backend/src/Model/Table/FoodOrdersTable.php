@@ -13,11 +13,12 @@ use RuntimeException;
 /**
  * FoodOrders model — the order lifecycle and its side effects.
  *
- * Placing an order decrements the linked Food Stock inventory AND every
- * recipe ingredient (FoodMenuItemIngredients) through StockMovementsTable::record()
- * (so the deduction is stamped to the acting receptionist) and, when
- * charge-to-room, mirrors the total onto the guest's invoice. Cancelling
- * reverses all of it.
+ * Placing an order decrements the linked Food Stock inventory, every recipe
+ * ingredient (FoodMenuItemIngredients), and every selected option-group pick
+ * (FoodMenuItemOptionGroups/Options — guest-facing choices, e.g. a free drink
+ * choice or a paid add-on) through StockMovementsTable::record() (so the
+ * deduction is stamped to the acting receptionist) and, when charge-to-room,
+ * mirrors the total onto the guest's invoice. Cancelling reverses all of it.
  *
  * @method \App\Model\Entity\FoodOrder newEmptyEntity()
  * @method \App\Model\Entity\FoodOrder get(mixed $primaryKey, array $options = [])
@@ -65,16 +66,19 @@ class FoodOrdersTable extends Table
 
     /**
      * Place an order. $payload:
-     *   items[]: {food_menu_item_id, quantity} for menu lines, OR
-     *            {description, price, quantity} for custom lines (e.g. cooking
-     *            of guest-brought food — no menu item, no stock deduction);
+     *   items[]: {food_menu_item_id, quantity, selected_options?} for menu lines,
+     *            where selected_options[] is {option_id, quantity} — exactly one
+     *            option per `choice` option group defined on the item is required,
+     *            `addon` group options are optional and may repeat any number of
+     *            units; OR {description, price, quantity} for custom lines (e.g.
+     *            cooking of guest-brought food — no menu item, no stock deduction);
      *   payment_status, payment_method? (required when payment_status is
      *   'paid' — cash|gcash|maya|gotyme), guest_id?, room_id?, reservation_id?;
      *   discount_type? (senior|pwd → 20% off the items subtotal, requires
      *   discount_name + discount_id_number); cooking_charge? (added after the
      *   discount — it's a service fee, not food).
      *
-     * @throws \InvalidArgumentException On bad items/discount/payment input.
+     * @throws \InvalidArgumentException On bad items/discount/payment/option input.
      * @throws \RuntimeException On charge-to-room without a guest (or a guest who
      *   isn't currently checked in), or short stock.
      */
@@ -143,6 +147,7 @@ class FoodOrdersTable extends Table
             ): FoodOrder {
                 $menus = TableRegistry::getTableLocator()->get('FoodMenuItems');
                 $orderItems = TableRegistry::getTableLocator()->get('FoodOrderItems');
+                $orderItemOptions = TableRegistry::getTableLocator()->get('FoodOrderItemOptions');
                 $stock = TableRegistry::getTableLocator()->get('StockMovements');
                 $inventory = TableRegistry::getTableLocator()->get('InventoryItems');
 
@@ -172,19 +177,36 @@ class FoodOrdersTable extends Table
                                 'FoodMenuItems.id' => (int)$line['food_menu_item_id'],
                                 'FoodMenuItems.property_id' => $propertyId,
                             ])
-                            ->contain(['FoodMenuItemIngredients'])
+                            ->contain([
+                                'FoodMenuItemIngredients',
+                                'FoodMenuItemOptionGroups' => ['FoodMenuItemOptions'],
+                            ])
                             ->firstOrFail();
                         $qty = max(1, (int)($line['quantity'] ?? 1));
-                        $lineTotal = (float)$menu->price * $qty;
+
+                        // Resolve+validate this line's selected options against the
+                        // item's own option groups — every `choice` group must have
+                        // exactly one pick, `addon` picks are optional (0+ units).
+                        $selections = $this->resolveSelectedOptions(
+                            $menu->food_menu_item_option_groups,
+                            (array)($line['selected_options'] ?? []),
+                        );
+                        $optionsTotal = array_sum(array_map(
+                            fn(array $s): float => (float)$s['option']->price_delta * $s['quantity'],
+                            $selections,
+                        ));
+
+                        $lineTotal = (float)$menu->price * $qty + $optionsTotal;
                         $subtotal += $lineTotal;
 
-                        $orderItems->saveOrFail($orderItems->newEntity([
+                        $orderItem = $orderItems->newEntity([
                             'food_order_id' => $order->id,
                             'food_menu_item_id' => $menu->id,
                             'quantity' => $qty,
                             'unit_price' => $menu->price,
                             'line_total' => $lineTotal,
-                        ]));
+                        ]);
+                        $orderItems->saveOrFail($orderItem);
 
                         // Decrement the linked Food Stock (stamped to this receptionist).
                         if ($menu->inventory_item_id) {
@@ -204,6 +226,29 @@ class FoodOrdersTable extends Table
                                 'reference_type' => 'food_order',
                                 'reference_id' => $order->id,
                             ]);
+                        }
+
+                        // Decrement each selected option's stock (applies once per
+                        // line, not multiplied by $qty — see resolveSelectedOptions)
+                        // and snapshot what was picked for the receipt + cancel-time restock.
+                        foreach ($selections as $selection) {
+                            $option = $selection['option'];
+                            if ($option->inventory_item_id) {
+                                $item = $inventory->get($option->inventory_item_id);
+                                $stock->record($item, 'out', (float)$selection['quantity'], $receptionistId, [
+                                    'reason' => 'food_order',
+                                    'reference_type' => 'food_order',
+                                    'reference_id' => $order->id,
+                                ]);
+                            }
+                            $orderItemOptions->saveOrFail($orderItemOptions->newEntity([
+                                'food_order_item_id' => $orderItem->id,
+                                'option_id' => $option->id,
+                                'label' => $option->label,
+                                'price_delta' => $option->price_delta,
+                                'quantity' => $selection['quantity'],
+                                'inventory_item_id' => $option->inventory_item_id,
+                            ]));
                         }
                         continue;
                     }
@@ -275,6 +320,67 @@ class FoodOrdersTable extends Table
     }
 
     /**
+     * Resolve+validate a menu line's raw `selected_options` against the item's own
+     * option groups. Applies once for the whole order line (not multiplied by the
+     * line's quantity) — see the `resolveSelectedOptions` docblock note in `place()`.
+     *
+     * - A `choice` group's option is forced to quantity 1 regardless of what the
+     *   client sent (a "pick one" can't be doubled), and every `choice` group
+     *   present on the item must have exactly one option selected.
+     * - An `addon` group's options are optional; only positive quantities are kept.
+     * - Any `option_id` not belonging to one of this item's own groups is rejected.
+     *
+     * @param iterable<\App\Model\Entity\FoodMenuItemOptionGroup> $groups
+     * @param array<int, array{option_id?: mixed, quantity?: mixed}> $rawSelections
+     * @return array<int, array{option: \App\Model\Entity\FoodMenuItemOption, quantity: int}>
+     */
+    private function resolveSelectedOptions(iterable $groups, array $rawSelections): array
+    {
+        $optionMeta = []; // optionId => ['option' => entity, 'groupId' => int, 'kind' => string]
+        $groupHasOptions = [];
+        foreach ($groups as $group) {
+            $groupHasOptions[$group->id] = false;
+            foreach ($group->food_menu_item_options as $option) {
+                $optionMeta[$option->id] = ['option' => $option, 'groupId' => $group->id, 'kind' => $group->kind];
+                $groupHasOptions[$group->id] = true;
+            }
+        }
+
+        $pickedGroups = [];
+        $resolved = [];
+        foreach ($rawSelections as $raw) {
+            $optionId = (int)($raw['option_id'] ?? 0);
+            if (!isset($optionMeta[$optionId])) {
+                throw new InvalidArgumentException('One of the selected options does not belong to this item.');
+            }
+            $meta = $optionMeta[$optionId];
+
+            if ($meta['kind'] === 'choice') {
+                if (isset($pickedGroups[$meta['groupId']])) {
+                    throw new InvalidArgumentException('Only one option can be picked per choice group.');
+                }
+                $pickedGroups[$meta['groupId']] = true;
+                $resolved[] = ['option' => $meta['option'], 'quantity' => 1];
+                continue;
+            }
+
+            $qty = (int)($raw['quantity'] ?? 1);
+            if ($qty < 1) {
+                continue;
+            }
+            $resolved[] = ['option' => $meta['option'], 'quantity' => $qty];
+        }
+
+        foreach ($groups as $group) {
+            if ($group->kind === 'choice' && $groupHasOptions[$group->id] && !isset($pickedGroups[$group->id])) {
+                throw new InvalidArgumentException(sprintf('Please select an option for "%s".', $group->name));
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
      * Cancel an order: restock the inventory it consumed and reverse any
      * charge-to-room invoice lines. Stamped to the cancelling receptionist.
      */
@@ -292,29 +398,41 @@ class FoodOrdersTable extends Table
 
                 $lines = $orderItems->find()
                     ->where(['FoodOrderItems.food_order_id' => $order->id])
-                    ->contain(['FoodMenuItems' => ['FoodMenuItemIngredients']])
+                    ->contain(['FoodMenuItems' => ['FoodMenuItemIngredients'], 'FoodOrderItemOptions'])
                     ->all();
 
                 foreach ($lines as $line) {
-                    if (!$line->food_menu_item) {
-                        continue;
+                    if ($line->food_menu_item) {
+                        if ($line->food_menu_item->inventory_item_id) {
+                            $item = $inventory->get($line->food_menu_item->inventory_item_id);
+                            $stock->record($item, 'in', (float)$line->quantity, $receptionistId, [
+                                'reason' => 'food_order_cancel',
+                                'reference_type' => 'food_order',
+                                'reference_id' => $order->id,
+                            ]);
+                        }
+                        foreach ($line->food_menu_item->food_menu_item_ingredients as $ingredient) {
+                            $item = $inventory->get($ingredient->inventory_item_id);
+                            $restockQty = (float)$ingredient->quantity * (float)$line->quantity;
+                            $stock->record($item, 'in', $restockQty, $receptionistId, [
+                                'reason' => 'food_order_cancel',
+                                'reference_type' => 'food_order',
+                                'reference_id' => $order->id,
+                            ]);
+                        }
                     }
-                    if ($line->food_menu_item->inventory_item_id) {
-                        $item = $inventory->get($line->food_menu_item->inventory_item_id);
-                        $stock->record($item, 'in', (float)$line->quantity, $receptionistId, [
-                            'reason' => 'food_order_cancel',
-                            'reference_type' => 'food_order',
-                            'reference_id' => $order->id,
-                        ]);
-                    }
-                    foreach ($line->food_menu_item->food_menu_item_ingredients as $ingredient) {
-                        $item = $inventory->get($ingredient->inventory_item_id);
-                        $restockQty = (float)$ingredient->quantity * (float)$line->quantity;
-                        $stock->record($item, 'in', $restockQty, $receptionistId, [
-                            'reason' => 'food_order_cancel',
-                            'reference_type' => 'food_order',
-                            'reference_id' => $order->id,
-                        ]);
+
+                    // Restock from each selected option's own snapshot — correct
+                    // even if the live option/group config has since changed.
+                    foreach ($line->food_order_item_options as $selectedOption) {
+                        if ($selectedOption->inventory_item_id) {
+                            $item = $inventory->get($selectedOption->inventory_item_id);
+                            $stock->record($item, 'in', (float)$selectedOption->quantity, $receptionistId, [
+                                'reason' => 'food_order_cancel',
+                                'reference_type' => 'food_order',
+                                'reference_id' => $order->id,
+                            ]);
+                        }
                     }
                 }
 

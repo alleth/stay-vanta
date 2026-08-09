@@ -22,5 +22,6 @@ class FoodOrderItemsTable extends Table
 
         $this->belongsTo('FoodOrders');
         $this->belongsTo('FoodMenuItems');
+        $this->hasMany('FoodOrderItemOptions', ['dependent' => true]);
     }
 }

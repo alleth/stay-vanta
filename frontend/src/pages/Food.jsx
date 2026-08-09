@@ -448,17 +448,18 @@ function MenuCatalog({ menuType, items, canManageMenu, pending, onAdd, onEdit, o
           <thead>
             <tr>
               <th>Item</th><th className="text-right">Price</th><th>Linked stock</th><th>Ingredients</th>
+              <th>Options</th>
               <th>Available</th>{canManageMenu && <th></th>}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={canManageMenu ? 6 : 5} className="py-6 text-center text-muted">No {noun}s yet.</td></tr>
+              <tr><td colSpan={canManageMenu ? 7 : 6} className="py-6 text-center text-muted">No {noun}s yet.</td></tr>
             )}
             {groups.map(([category, groupItems]) => (
               <Fragment key={category}>
                 <tr className="bg-subtle">
-                  <td colSpan={canManageMenu ? 6 : 5} className="text-xs font-semibold uppercase text-muted">
+                  <td colSpan={canManageMenu ? 7 : 6} className="text-xs font-semibold uppercase text-muted">
                     {category}
                   </td>
                 </tr>
@@ -472,6 +473,13 @@ function MenuCatalog({ menuType, items, canManageMenu, pending, onAdd, onEdit, o
                         ? m.food_menu_item_ingredients
                           .map((ing) => `${ing.inventory_item?.name ?? '?'} ×${Number(ing.quantity)}`)
                           .join(', ')
+                        : <span className="text-muted">—</span>}
+                    </td>
+                    <td className="text-xs">
+                      {m.food_menu_item_option_groups?.length
+                        ? m.food_menu_item_option_groups
+                          .map((g) => `${g.name}: ${(g.food_menu_item_options ?? []).map((o) => o.label).join('/')}`)
+                          .join('; ')
                         : <span className="text-muted">—</span>}
                     </td>
                     <td>
@@ -751,8 +759,17 @@ function SettleModal({ id, onClose, onSettled }) {
   )
 }
 
+let cartLineKeySeq = 0
+const newCartLineKey = () => `cl-${++cartLineKeySeq}`
+
 function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved }) {
-  const [cart, setCart] = useState({}) // { menuId: qty }
+  // Cart lines, not a flat { menuId: qty } map: an item with option groups can
+  // be added more than once (e.g. two Breakfast Combos, one with Coffee and
+  // one with Juice) — each becomes its own line with its own qty + picks.
+  // A plain item (no option groups) still collapses repeat adds into one line,
+  // matching the old click-to-bump behavior.
+  // [{ key, menuId, qty, choices: {[groupId]: optionId}, addons: {[optionId]: qty} }]
+  const [cartLines, setCartLines] = useState([])
   const [payment, setPayment] = useState('paid')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [guestId, setGuestId] = useState('')
@@ -769,7 +786,93 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
   // Custom (off-menu) lines, e.g. the guest-brought dish + ingredients used.
   const [custom, setCustom] = useState([]) // [{ key, name, price, qty }]
 
-  const setQty = (id, qty) => setCart((c) => ({ ...c, [id]: Math.max(0, qty) }))
+  const addToCart = (m) => {
+    if (m.food_menu_item_option_groups?.length) {
+      // Always a fresh line — each add gets its own choice/add-on picks.
+      setCartLines((ls) => [...ls, { key: newCartLineKey(), menuId: m.id, qty: 1, choices: {}, addons: {} }])
+      return
+    }
+    setCartLines((ls) => {
+      const existing = ls.find((l) => l.menuId === m.id)
+      return existing
+        ? ls.map((l) => (l.menuId === m.id ? { ...l, qty: l.qty + 1 } : l))
+        : [...ls, { key: newCartLineKey(), menuId: m.id, qty: 1, choices: {}, addons: {} }]
+    })
+  }
+  const setLineQty = (key, qty) => {
+    const next = Math.max(0, qty)
+    setCartLines((ls) => (next === 0 ? ls.filter((l) => l.key !== key) : ls.map((l) => (l.key === key ? { ...l, qty: next } : l))))
+  }
+  const removeLine = (key) => {
+    setCartLines((ls) => ls.filter((l) => l.key !== key))
+    setCollapsedLines((c) => {
+      if (!(key in c)) return c
+      const rest = { ...c }
+      delete rest[key]
+      return rest
+    })
+  }
+  // A configured line starts expanded (fast path: add it, pick its options,
+  // it settles once you're done) and folds to a one-line summary on request —
+  // keeps the cart pane calm once there are several lines to review.
+  const [collapsedLines, setCollapsedLines] = useState({})
+  const toggleCollapsed = (key) => setCollapsedLines((c) => ({ ...c, [key]: !c[key] }))
+  const missingRequiredChoice = (m, cartLine) => (m.food_menu_item_option_groups ?? []).some(
+    (g) => g.kind === 'choice' && g.food_menu_item_options?.length && !cartLine.choices?.[g.id],
+  )
+  const optionsSummary = (m, cartLine) => {
+    const parts = []
+    for (const group of m.food_menu_item_option_groups ?? []) {
+      if (group.kind === 'choice') {
+        const opt = group.food_menu_item_options?.find((o) => String(o.id) === String(cartLine.choices?.[group.id]))
+        if (opt) parts.push(opt.label)
+      } else {
+        for (const opt of group.food_menu_item_options ?? []) {
+          const qty = cartLine.addons?.[opt.id] ?? 0
+          if (qty > 0) parts.push(`+${qty} ${opt.label}`)
+        }
+      }
+    }
+    return parts.join(', ')
+  }
+  const setChoice = (lineKey, groupId, optionId) => setCartLines((ls) => ls.map((l) => (
+    l.key === lineKey ? { ...l, choices: { ...l.choices, [groupId]: optionId } } : l
+  )))
+  const setAddonQty = (lineKey, optionId, qty) => setCartLines((ls) => ls.map((l) => (
+    l.key === lineKey ? { ...l, addons: { ...l.addons, [optionId]: Math.max(0, qty) } } : l
+  )))
+  // An option group's price contributes once per order line, not per unit
+  // ordered — e.g. "+2 extra eggs" on a line of 3 Breakfast Combos adds once.
+  const lineOptionsTotal = (m, cartLine) => {
+    if (!m.food_menu_item_option_groups?.length) return 0
+    let total = 0
+    for (const group of m.food_menu_item_option_groups) {
+      if (group.kind === 'choice') {
+        const opt = group.food_menu_item_options?.find((o) => String(o.id) === String(cartLine.choices?.[group.id]))
+        if (opt) total += Number(opt.price_delta) || 0
+      } else {
+        for (const opt of group.food_menu_item_options ?? []) {
+          total += (Number(opt.price_delta) || 0) * (cartLine.addons?.[opt.id] ?? 0)
+        }
+      }
+    }
+    return total
+  }
+  const selectedOptionsFor = (m, cartLine) => {
+    const result = []
+    for (const group of m.food_menu_item_option_groups ?? []) {
+      if (group.kind === 'choice') {
+        const chosenId = cartLine.choices?.[group.id]
+        if (chosenId) result.push({ option_id: Number(chosenId), quantity: 1 })
+      } else {
+        for (const opt of group.food_menu_item_options ?? []) {
+          const qty = cartLine.addons?.[opt.id] ?? 0
+          if (qty > 0) result.push({ option_id: opt.id, quantity: qty })
+        }
+      }
+    }
+    return result
+  }
 
   const addCustom = () => setCustom((c) => [...c, { key: Date.now(), name: '', price: '', qty: 1 }])
   const setCustomField = (key, field) => (e) =>
@@ -782,25 +885,31 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
   }, [menu, search])
 
   const lines = useMemo(
-    () => menu.filter((m) => (cart[m.id] ?? 0) > 0).map((m) => ({ menu: m, qty: cart[m.id] })),
-    [menu, cart],
+    () => cartLines
+      .map((cl) => ({ cartLine: cl, menu: menu.find((m) => m.id === cl.menuId) }))
+      .filter((l) => l.menu),
+    [menu, cartLines],
   )
   const customLines = custom.filter(
     (c) => c.name.trim() !== '' && Number(c.price) >= 0 && Number(c.qty) > 0,
   )
   const itemsSubtotal =
-    lines.reduce((sum, l) => sum + Number(l.menu.price) * l.qty, 0)
+    lines.reduce((sum, l) => sum + Number(l.menu.price) * l.cartLine.qty + lineOptionsTotal(l.menu, l.cartLine), 0)
     + customLines.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0)
   const discountAmt = discount !== 'none' ? itemsSubtotal * 0.2 : 0
   const cooking = hasCooking ? Number(cookingCharge) || 0 : 0
   const total = itemsSubtotal - discountAmt + cooking
-  const count = lines.reduce((sum, l) => sum + l.qty, 0)
+  const count = lines.reduce((sum, l) => sum + l.cartLine.qty, 0)
     + customLines.reduce((sum, c) => sum + Number(c.qty), 0)
 
   const { run, busy, err } = useSubmit(async () => {
     const payload = {
       items: [
-        ...lines.map((l) => ({ food_menu_item_id: l.menu.id, quantity: l.qty })),
+        ...lines.map((l) => ({
+          food_menu_item_id: l.menu.id,
+          quantity: l.cartLine.qty,
+          selected_options: selectedOptionsFor(l.menu, l.cartLine),
+        })),
         ...customLines.map((c) => ({
           description: c.name.trim(), price: Number(c.price), quantity: Number(c.qty),
         })),
@@ -850,23 +959,31 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                   <div className="py-6 text-center text-sm text-muted">No menu items match.</div>
                 )}
                 {filteredMenu.map((m) => {
-                  const qty = cart[m.id] ?? 0
+                  const hasOptions = m.food_menu_item_option_groups?.length > 0
+                  // A plain item collapses repeat adds into one line (its qty
+                  // shows here); an item with option groups can have several
+                  // independent lines (e.g. one Coffee, one Juice), so its own
+                  // count lives in the cart pane instead — this row is just "Add".
+                  const simpleLine = !hasOptions ? cartLines.find((l) => l.menuId === m.id) : null
+                  const qty = simpleLine?.qty ?? 0
                   return (
                     <div key={m.id} className="flex items-center gap-2 border-b border-line px-2 py-1 last:border-b-0">
                       <button type="button" className="min-w-0 grow text-left"
-                        title="Click to add one" onClick={() => setQty(m.id, qty + 1)}>
+                        title="Click to add one" onClick={() => addToCart(m)}>
                         <div className="text-sm font-semibold">{m.name}</div>
                         <div className="text-sm text-muted">{formatMoney(m.price)}</div>
                       </button>
-                      {qty > 0 ? (
+                      {hasOptions ? (
+                        <Button size="sm" variant="outline-primary" onClick={() => addToCart(m)}>Add</Button>
+                      ) : qty > 0 ? (
                         <InputGroup style={{ width: 116 }}>
-                          <Button size="sm" variant="outline-secondary" onClick={() => setQty(m.id, qty - 1)}>−</Button>
+                          <Button size="sm" variant="outline-secondary" onClick={() => setLineQty(simpleLine.key, qty - 1)}>−</Button>
                           <Form.Control size="sm" className="text-center" value={qty}
-                            onChange={(e) => setQty(m.id, parseInt(e.target.value, 10) || 0)} />
-                          <Button size="sm" variant="outline-secondary" onClick={() => setQty(m.id, qty + 1)}>+</Button>
+                            onChange={(e) => setLineQty(simpleLine.key, parseInt(e.target.value, 10) || 0)} />
+                          <Button size="sm" variant="outline-secondary" onClick={() => setLineQty(simpleLine.key, qty + 1)}>+</Button>
                         </InputGroup>
                       ) : (
-                        <Button size="sm" variant="outline-primary" onClick={() => setQty(m.id, 1)}>Add</Button>
+                        <Button size="sm" variant="outline-primary" onClick={() => addToCart(m)}>Add</Button>
                       )}
                     </div>
                   )
@@ -883,24 +1000,106 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                 <div className="mb-2 max-h-[230px] min-h-[150px] overflow-y-auto rounded-lg border border-line">
                   {lines.length === 0 ? (
                     <div className="py-6 text-center text-sm text-muted">No items yet — add from the menu.</div>
-                  ) : lines.map((l) => (
-                    <div key={l.menu.id} className="flex items-center gap-2 border-b border-line px-2 py-1 last:border-b-0">
-                      <div className="min-w-0 grow">
-                        <div className="text-sm font-semibold">{l.menu.name}</div>
-                        <div className="text-sm text-muted">
-                          {l.qty} × {formatMoney(l.menu.price)} = {formatMoney(Number(l.menu.price) * l.qty)}
+                  ) : lines.map((l) => {
+                    const { cartLine } = l
+                    const optsTotal = lineOptionsTotal(l.menu, cartLine)
+                    const groups = l.menu.food_menu_item_option_groups ?? []
+                    const isConfigured = groups.length > 0
+                    const complete = !isConfigured || !missingRequiredChoice(l.menu, cartLine)
+                    const collapsed = isConfigured && complete && !!collapsedLines[cartLine.key]
+                    const lineTotal = formatMoney(Number(l.menu.price) * cartLine.qty + optsTotal)
+
+                    if (collapsed) {
+                      const summary = optionsSummary(l.menu, cartLine)
+                      return (
+                        <div key={cartLine.key} className="flex items-center gap-2 border-b border-line px-2 py-1 last:border-b-0">
+                          <div className="min-w-0 grow">
+                            <div className="truncate text-sm font-semibold">
+                              {l.menu.name}
+                              {summary && <span className="font-normal text-muted"> — {summary}</span>}
+                            </div>
+                            <div className="text-xs text-muted">{lineTotal}</div>
+                          </div>
+                          <Button size="sm" variant="outline-secondary" onClick={() => toggleCollapsed(cartLine.key)}>Change</Button>
+                          <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                            onClick={() => removeLine(cartLine.key)}>×</button>
                         </div>
+                      )
+                    }
+
+                    return (
+                      <div key={cartLine.key} className="border-b border-line px-2 py-1 last:border-b-0">
+                        <div className="flex items-center gap-2">
+                          <div className="min-w-0 grow">
+                            <div className="text-sm font-semibold">{l.menu.name}</div>
+                            <div className="text-sm text-muted">
+                              {cartLine.qty} × {formatMoney(l.menu.price)}{optsTotal > 0 && ` + ${formatMoney(optsTotal)}`}
+                              {' '}= {lineTotal}
+                            </div>
+                          </div>
+                          {isConfigured ? (
+                            complete ? (
+                              <Button size="sm" variant="outline-secondary" onClick={() => toggleCollapsed(cartLine.key)}>Done</Button>
+                            ) : (
+                              <span className="text-xs text-muted whitespace-nowrap">Pick required options below</span>
+                            )
+                          ) : (
+                            <InputGroup style={{ width: 104 }}>
+                              <Button size="sm" variant="outline-secondary" onClick={() => setLineQty(cartLine.key, cartLine.qty - 1)}>−</Button>
+                              <Form.Control size="sm" className="text-center" value={cartLine.qty}
+                                onChange={(e) => setLineQty(cartLine.key, parseInt(e.target.value, 10) || 0)} />
+                              <Button size="sm" variant="outline-secondary" onClick={() => setLineQty(cartLine.key, cartLine.qty + 1)}>+</Button>
+                            </InputGroup>
+                          )}
+                          <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                            onClick={() => removeLine(cartLine.key)}>×</button>
+                        </div>
+                        {groups.length > 0 && (
+                          <div className="mb-1 mt-1 ml-1 space-y-1 border-l-2 border-line pl-2">
+                            {groups.map((group) => (group.kind === 'choice' ? (
+                              <Form.Group key={group.id} className="mb-0">
+                                <Form.Label className="mb-0.5 text-xs">{group.name}</Form.Label>
+                                <Form.Select size="sm" required
+                                  value={cartLine.choices?.[group.id] ?? ''}
+                                  onChange={(e) => setChoice(cartLine.key, group.id, e.target.value)}>
+                                  <option value="" disabled>Select…</option>
+                                  {group.food_menu_item_options.map((opt) => (
+                                    <option key={opt.id} value={opt.id}>
+                                      {opt.label}
+                                      {Number(opt.price_delta) > 0 ? ` (+${formatMoney(opt.price_delta)})` : ''}
+                                    </option>
+                                  ))}
+                                </Form.Select>
+                              </Form.Group>
+                            ) : (
+                              <div key={group.id}>
+                                <div className="mb-0.5 text-xs text-muted">{group.name}</div>
+                                {group.food_menu_item_options.map((opt) => {
+                                  const oQty = cartLine.addons?.[opt.id] ?? 0
+                                  return (
+                                    <div key={opt.id} className="mb-1 flex items-center justify-between gap-2">
+                                      <span className="text-sm">
+                                        {opt.label}
+                                        {Number(opt.price_delta) > 0 ? ` (+${formatMoney(opt.price_delta)} ea)` : ''}
+                                      </span>
+                                      <InputGroup style={{ width: 96 }}>
+                                        <Button size="sm" variant="outline-secondary"
+                                          onClick={() => setAddonQty(cartLine.key, opt.id, oQty - 1)}>−</Button>
+                                        <Form.Control size="sm" className="text-center" value={oQty}
+                                          onChange={(e) => setAddonQty(cartLine.key, opt.id, parseInt(e.target.value, 10) || 0)} />
+                                        <Button size="sm" variant="outline-secondary"
+                                          onClick={() => setAddonQty(cartLine.key, opt.id, oQty + 1)}>+</Button>
+                                      </InputGroup>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )))}
+                          </div>
+                        )}
                       </div>
-                      <InputGroup style={{ width: 104 }}>
-                        <Button size="sm" variant="outline-secondary" onClick={() => setQty(l.menu.id, l.qty - 1)}>−</Button>
-                        <Form.Control size="sm" className="text-center" value={l.qty}
-                          onChange={(e) => setQty(l.menu.id, parseInt(e.target.value, 10) || 0)} />
-                        <Button size="sm" variant="outline-secondary" onClick={() => setQty(l.menu.id, l.qty + 1)}>+</Button>
-                      </InputGroup>
-                      <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
-                        onClick={() => setQty(l.menu.id, 0)}>×</button>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
                 <div className="mb-2">
                   {custom.map((row) => (
@@ -1099,6 +1298,10 @@ const STOCK_KIND_FOR_TYPE = { food: 'food_stock', linen: 'linen' }
 
 let ingredientKeySeq = 0
 const newIngredientKey = () => `ing-${++ingredientKeySeq}`
+let optionGroupKeySeq = 0
+const newOptionGroupKey = () => `grp-${++optionGroupKeySeq}`
+let optionRowKeySeq = 0
+const newOptionRowKey = () => `opt-${++optionRowKeySeq}`
 
 function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved }) {
   const editing = Boolean(item)
@@ -1131,6 +1334,45 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
     setIngredients(ingredients.map((r) => (r.key === key ? { ...r, [field]: value } : r)))
   }
 
+  // Option groups: guest-facing picks, distinct from the silent recipe above.
+  // A `choice` group is a free pick the guest must choose exactly one of (e.g.
+  // "Choice of Drink"); an `addon` group lets the guest add any number of each
+  // priced option (e.g. "Additional egg"). Either kind can optionally decrement
+  // an inventory item when picked.
+  const [optionGroups, setOptionGroups] = useState(
+    () => (item?.food_menu_item_option_groups ?? []).map((g) => ({
+      key: newOptionGroupKey(),
+      name: g.name,
+      kind: g.kind,
+      options: (g.food_menu_item_options ?? []).map((o) => ({
+        key: newOptionRowKey(),
+        label: o.label,
+        price_delta: o.price_delta,
+        inventory_item_id: String(o.inventory_item_id ?? ''),
+      })),
+    })),
+  )
+  const addOptionGroup = () => setOptionGroups([
+    ...optionGroups, { key: newOptionGroupKey(), name: '', kind: 'choice', options: [] },
+  ])
+  const removeOptionGroup = (key) => setOptionGroups(optionGroups.filter((g) => g.key !== key))
+  const setOptionGroupField = (key, field) => (e) => {
+    const value = e.target.value
+    setOptionGroups(optionGroups.map((g) => (g.key === key ? { ...g, [field]: value } : g)))
+  }
+  const addOption = (groupKey) => setOptionGroups(optionGroups.map((g) => (g.key === groupKey
+    ? { ...g, options: [...g.options, { key: newOptionRowKey(), label: '', price_delta: 0, inventory_item_id: '' }] }
+    : g)))
+  const removeOption = (groupKey, optionKey) => setOptionGroups(optionGroups.map((g) => (g.key === groupKey
+    ? { ...g, options: g.options.filter((o) => o.key !== optionKey) }
+    : g)))
+  const setOptionField = (groupKey, optionKey, field) => (e) => {
+    const value = e.target.value
+    setOptionGroups(optionGroups.map((g) => (g.key === groupKey
+      ? { ...g, options: g.options.map((o) => (o.key === optionKey ? { ...o, [field]: value } : o)) }
+      : g)))
+  }
+
   const stockOptions = useMemo(
     () => inventory.filter((i) => i.inventory_category?.kind === STOCK_KIND_FOR_TYPE[menuType]),
     [inventory, menuType],
@@ -1143,11 +1385,25 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
     const validIngredients = ingredients
       .filter((r) => r.inventory_item_id)
       .map((r) => ({ inventory_item_id: Number(r.inventory_item_id), quantity: Number(r.quantity) || 0 }))
+    const validOptionGroups = optionGroups
+      .filter((g) => g.name.trim() && g.options.length)
+      .map((g) => ({
+        name: g.name,
+        kind: g.kind,
+        options: g.options
+          .filter((o) => o.label.trim())
+          .map((o) => ({
+            label: o.label,
+            price_delta: Number(o.price_delta) || 0,
+            inventory_item_id: o.inventory_item_id || null,
+          })),
+      }))
     const payload = {
       ...form,
       type: menuType,
       inventory_item_id: form.inventory_item_id || null,
       ingredients: validIngredients,
+      option_groups: validOptionGroups,
     }
     if (editing) await updateMenuItem(item.id, payload)
     else await createMenuItem(payload, propertyId)
@@ -1222,6 +1478,57 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
             })}
             <Button size="sm" variant="outline-secondary" onClick={addIngredient}>
               + Add ingredient
+            </Button>
+          </Form.Group>
+          <Form.Group className="mt-4">
+            <Form.Label>
+              Option groups (guest-facing picks — a free Choice the guest must pick one of, or priced Add-ons they can add any number of)
+            </Form.Label>
+            {optionGroups.map((group) => (
+              <Card key={group.key} className="mb-2">
+                <Card.Body className="p-3">
+                  <div className="mb-2 flex items-center gap-1">
+                    <Form.Control size="sm" value={group.name} placeholder="Group name (e.g. Choice of Drink)"
+                      onChange={setOptionGroupField(group.key, 'name')} />
+                    <Form.Select size="sm" style={{ width: 230 }} value={group.kind}
+                      onChange={setOptionGroupField(group.key, 'kind')}>
+                      <option value="choice">Choice — guest picks one, free</option>
+                      <option value="addon">Add-ons — priced extras</option>
+                    </Form.Select>
+                    <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove group"
+                      onClick={() => removeOptionGroup(group.key)}>×</button>
+                  </div>
+                  {group.options.map((option) => {
+                    const rowItem = inventory.find((i) => String(i.id) === option.inventory_item_id)
+                    const rowOutOfStock = rowItem && Number(rowItem.quantity) <= 0
+                    return (
+                      <div key={option.key} className="mb-1 flex items-center gap-1">
+                        <Form.Control size="sm" value={option.label} placeholder="Label (e.g. Coffee)"
+                          onChange={setOptionField(group.key, option.key, 'label')} />
+                        <Form.Control size="sm" type="number" min={0} step="0.01" value={option.price_delta}
+                          onChange={setOptionField(group.key, option.key, 'price_delta')} placeholder="Price"
+                          style={{ width: 90 }} />
+                        <Form.Select size="sm" value={option.inventory_item_id}
+                          onChange={setOptionField(group.key, option.key, 'inventory_item_id')}>
+                          <option value="">Not linked</option>
+                          {stockOptions.map((i) => (
+                            <option key={i.id} value={i.id}>{i.name} ({Number(i.quantity)} {i.unit})</option>
+                          ))}
+                        </Form.Select>
+                        <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove option"
+                          onClick={() => removeOption(group.key, option.key)}>×</button>
+                        {rowOutOfStock && <span className="text-xs text-amber-600 whitespace-nowrap">out of stock</span>}
+                      </div>
+                    )
+                  })}
+                  <Button size="sm" variant="outline-secondary" onClick={() => addOption(group.key)}>
+                    + Add option
+                  </Button>
+                </Card.Body>
+              </Card>
+            ))}
+            <Button size="sm" variant="outline-secondary" onClick={addOptionGroup}>
+              + Add option group
             </Button>
           </Form.Group>
         </Modal.Body>
