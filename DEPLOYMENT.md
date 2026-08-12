@@ -115,3 +115,12 @@ none of the above affects your XAMPP setup. See `README.md` / `CLAUDE.md`.
 - **Build keeps using an old commit.** "Retry deployment" on Railway *and* Cloudflare re-runs
   the original commit. To deploy new code, push a commit (auto-deploys the new HEAD) or use
   "Create deployment", and check the newest entry's commit hash — don't click Retry.
+- **Railway: "Free plan deployments must be serverless. Please go to your service settings
+  and turn on the serverless flag."** Railway's free plan requires services to run in
+  serverless (scale-to-zero) mode. Fix: Service → **Settings → Deploy → Serverless** → turn it
+  on, then redeploy via the command palette (`Cmd/Ctrl+K`) → **"Deploy latest commit"** — a
+  plain "Retry" on the failed deployment doesn't reliably pick up the flag. Safe for this app:
+  it's a stateless JSON API (bearer-token auth, no sessions, no WebSockets), so scale-to-zero
+  doesn't break anything — just expect the first request after idle to be slow (cold start),
+  and note `docker/entrypoint.sh` re-runs `migrations migrate` on every cold start, which is
+  already idempotent.
