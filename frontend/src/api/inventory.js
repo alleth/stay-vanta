@@ -23,6 +23,17 @@ export const deleteCategory = (id) =>
 export const listItems = (propertyId, params = {}) =>
   client.get('/inventory-items', { params: withProp(params, propertyId) }).then((r) => r.data.items)
 
+// Paginated + searchable form for the Inventory tab's Consumables/Reusables
+// tables (mirrors listGuestsPage). Returns { items, children, total, page,
+// limit } — `children` (populated only for a `top_level` consumables
+// request) maps parent id -> that parent's own sub-items, since they ride
+// along with their parent's page instead of needing a second request per
+// expand. listItems() above (no page/limit) keeps returning the wide,
+// effectively-unpaginated window other callers (Food & Orders' stock
+// pickers, this module's own parent-item dropdown) rely on.
+export const listItemsPage = (propertyId, params = {}) =>
+  client.get('/inventory-items', { params: withProp(params, propertyId) }).then((r) => r.data)
+
 export const createItem = (data, propertyId) =>
   client.post('/inventory-items', withProp(data, propertyId)).then((r) => r.data.item)
 
@@ -39,9 +50,11 @@ export const listMovements = (propertyId, params = {}) =>
 export const recordMovement = (data, propertyId) =>
   client.post('/stock-movements', withProp(data, propertyId)).then((r) => r.data)
 
-// Receipt booklet series (physical sales invoice / official receipt numbers).
-export const listReceiptSeries = (propertyId) =>
-  client.get('/receipt-series', { params: withProp({}, propertyId) }).then((r) => r.data.series)
+// Receipt booklet series (physical sales invoice / official receipt
+// numbers). Paginated + searchable (by prefix) like the other Inventory
+// tables: returns { series, total, page, limit }.
+export const listReceiptSeries = (propertyId, params = {}) =>
+  client.get('/receipt-series', { params: withProp(params, propertyId) }).then((r) => r.data)
 
 export const createReceiptSeries = (data, propertyId) =>
   client.post('/receipt-series', withProp(data, propertyId)).then((r) => r.data.series)

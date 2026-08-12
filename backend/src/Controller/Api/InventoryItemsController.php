@@ -13,7 +13,27 @@ use Cake\Http\Exception\ForbiddenException;
 class InventoryItemsController extends AppController
 {
     /**
-     * GET /api/inventory-items
+     * GET /api/inventory-items[?tracking_type=][?q=][?top_level=1][?page=&limit=]
+     *
+     * Paginated (mirrors GuestsController::index): `total`/`page`/`limit` are
+     * always returned, but `limit` only enforces the 5-100 window when a
+     * caller opts in by passing it — callers that don't (Food & Orders'
+     * stock-linking pickers, this controller's own parent-item lookups) get
+     * the same wide, effectively-unpaginated window (1000) the endpoint
+     * always returned before pagination existed.
+     *
+     * Consumables can nest one level deep (parent + sub-items). While
+     * browsing without a search (`top_level=1`, what the Inventory tab's
+     * Consumables table sends), the query pages over top-level items only,
+     * and each returned parent's own sub-items ride along in `children`
+     * (keyed by parent id) so the table's expand/collapse still works without
+     * a second request per row. A text search instead flattens to a direct
+     * name match across both levels — a matching sub-item's parent might not
+     * be on the same page, so nesting doesn't apply — and `children` is
+     * empty. Every returned item also carries `has_children` (a correlated
+     * EXISTS, not a GROUP BY, so it's safe under MySQL 8's
+     * ONLY_FULL_GROUP_BY) regardless of mode, since the edit form needs to
+     * know this for any item it's showing, search results included.
      */
     public function index(): void
     {
@@ -24,14 +44,68 @@ class InventoryItemsController extends AppController
                 ->contain(['InventoryCategories', 'LastReceptionist'])
                 ->orderBy(['InventoryItems.name' => 'ASC'])
         );
+        // select() with explicit fields turns off the query's normal
+        // implicit "all columns" selection, so it has to be turned back on
+        // alongside the computed field, or every real column disappears.
+        $query->select([
+            'has_children' => $query->expr(
+                'EXISTS (SELECT 1 FROM inventory_items ci'
+                    . ' WHERE ci.parent_id = InventoryItems.id AND ci.deleted_at IS NULL)'
+            ),
+        ])->enableAutoFields();
 
         // Optional low-stock filter: ?low_stock=1
         if ($this->request->getQuery('low_stock')) {
             $query->where(['InventoryItems.quantity <=' => $query->identifier('InventoryItems.reorder_level')]);
         }
 
-        $this->set('items', $query->all());
-        $this->viewBuilder()->setOption('serialize', ['items']);
+        $trackingType = $this->request->getQuery('tracking_type');
+        if (in_array($trackingType, ['consumable', 'reusable'], true)) {
+            $query->where(['InventoryItems.tracking_type' => $trackingType]);
+        }
+
+        $search = trim((string)$this->request->getQuery('q'));
+        if ($search !== '') {
+            $query->where(['InventoryItems.name LIKE' => '%' . $search . '%']);
+        }
+
+        $topLevelOnly = (bool)$this->request->getQuery('top_level') && $search === '';
+        if ($topLevelOnly) {
+            $query->where(['InventoryItems.parent_id IS' => null]);
+        }
+
+        $total = $query->count();
+        $requestedLimit = $this->request->getQuery('limit');
+        $limit = $requestedLimit !== null ? min(100, max(5, (int)$requestedLimit)) : 1000;
+        $page = max(1, (int)($this->request->getQuery('page') ?? 1));
+        $query->limit($limit)->offset(($page - 1) * $limit);
+
+        $pageItems = $query->all();
+
+        $children = [];
+        if ($topLevelOnly) {
+            $parentIds = array_map(fn ($it) => $it->id, $pageItems->toArray());
+            if ($parentIds) {
+                $kids = $this->scopeToProperty(
+                    $items->find()
+                        ->where(['InventoryItems.parent_id IN' => $parentIds, 'InventoryItems.deleted_at IS' => null])
+                        ->contain(['InventoryCategories', 'LastReceptionist'])
+                        ->orderBy(['InventoryItems.name' => 'ASC'])
+                )->all();
+                foreach ($kids as $kid) {
+                    $children[$kid->parent_id][] = $kid;
+                }
+            }
+        }
+
+        $this->set([
+            'items' => $pageItems,
+            'children' => $children,
+            'total' => $total,
+            'page' => $page,
+            'limit' => $limit,
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['items', 'children', 'total', 'page', 'limit']);
     }
 
     /**

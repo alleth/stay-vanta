@@ -15,7 +15,12 @@ use Cake\Http\Exception\ForbiddenException;
 class ReceiptSeriesController extends AppController
 {
     /**
-     * GET /api/receipt-series
+     * GET /api/receipt-series[?q=][?page=&limit=]
+     *
+     * Paginated + searchable (by prefix) like the other Inventory tables
+     * (mirrors InventoryItemsController::index): `total`/`page`/`limit` are
+     * always returned; `limit` defaults to a generous 100 (booklet series are
+     * few) and is otherwise clamped 5-100.
      */
     public function index(): void
     {
@@ -24,8 +29,24 @@ class ReceiptSeriesController extends AppController
             $table->find()->orderBy(['ReceiptSeries.type' => 'ASC', 'ReceiptSeries.id' => 'ASC']),
         );
 
-        $this->set('series', $query->all());
-        $this->viewBuilder()->setOption('serialize', ['series']);
+        $search = trim((string)$this->request->getQuery('q'));
+        if ($search !== '') {
+            $query->where(['ReceiptSeries.prefix LIKE' => '%' . $search . '%']);
+        }
+
+        $total = $query->count();
+        $requestedLimit = $this->request->getQuery('limit');
+        $limit = $requestedLimit !== null ? min(100, max(5, (int)$requestedLimit)) : 100;
+        $page = max(1, (int)($this->request->getQuery('page') ?? 1));
+        $query->limit($limit)->offset(($page - 1) * $limit);
+
+        $this->set([
+            'series' => $query->all(),
+            'total' => $total,
+            'page' => $page,
+            'limit' => $limit,
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['series', 'total', 'page', 'limit']);
     }
 
     /**

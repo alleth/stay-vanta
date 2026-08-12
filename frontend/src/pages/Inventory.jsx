@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
-  Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ButtonGroup,
+  Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ButtonGroup, InputGroup, Pagination,
 } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
-import { SkeletonTable } from '../components/Skeleton'
+import { SkeletonTable, SkeletonTableRows } from '../components/Skeleton'
 import {
   listCategories, createCategory, deleteCategory,
-  listItems, createItem, updateItem, deleteItem, listMovements, recordMovement,
+  listItems, listItemsPage, createItem, updateItem, deleteItem, listMovements, recordMovement,
   listReceiptSeries, createReceiptSeries, updateReceiptSeries, deleteReceiptSeries,
 } from '../api/inventory'
 
@@ -34,6 +34,8 @@ const fmtDate = (s) =>
 const fmtDateTime = (s) =>
   s ? new Date(s).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
 
+const ITEMS_PER_PAGE = 20
+
 export default function Inventory() {
   const { role } = useAuth()
   const { propertyId } = useProperty()
@@ -41,32 +43,37 @@ export default function Inventory() {
   // manual stock moves, no edits. Stock leaves via Food & Orders instead.
   const canManage = role === 'owner' || role === 'admin'
   const [categories, setCategories] = useState([])
-  const [items, setItems] = useState([])
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [view, setView] = useState('consumable') // consumable | reusable | receipts
   const [expanded, setExpanded] = useState(() => new Set()) // parent items with sub-items open
-  const [series, setSeries] = useState([]) // receipt booklet series
+
+  // The Consumables/Reusables table is server-paginated and searchable (the
+  // catalogue can grow large). `children` maps a top-level consumable's id to
+  // its own sub-items, riding along with its page — see listItemsPage.
+  const [items, setItems] = useState([])
+  const [itemsChildren, setItemsChildren] = useState({})
+  const [itemsTotal, setItemsTotal] = useState(0)
+  const [itemsLoading, setItemsLoading] = useState(false)
+  const [itemsPage, setItemsPage] = useState(1)
+  const [itemsSearch, setItemsSearch] = useState('') // raw input, debounced below
+  const [itemsQ, setItemsQ] = useState('') // debounced value actually sent to the server
 
   const [modal, setModal] = useState(null) // 'category' | 'categories' | 'item' | 'move'
   const [moveTarget, setMoveTarget] = useState(null)
   const [editTarget, setEditTarget] = useState(null) // item being edited (null = new)
   const [pending, setPending] = useState(null) // key of the in-flight inline action
 
-  const refresh = useCallback(async () => {
+  const loadBase = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [c, i, m, s] = await Promise.all([
+      const [c, m] = await Promise.all([
         listCategories(propertyId),
-        listItems(propertyId),
         listMovements(propertyId),
-        listReceiptSeries(propertyId),
       ])
       setCategories(c)
-      setItems(i)
       setMovements(m)
-      setSeries(s)
       setError(null)
     } catch {
       setError('Could not load inventory.')
@@ -75,28 +82,73 @@ export default function Inventory() {
     }
   }, [propertyId])
 
-  useEffect(() => {
-    // refresh() only updates state after awaiting the network, but the lint
-    // rule can't see through the async boundary. Safe data-loading effect.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh()
-  }, [refresh])
-
-  const shown = useMemo(() => items.filter((it) => trackingOf(it) === view), [items, view])
-  const reusable = view === 'reusable'
-
-  // Consumables can be itemized: sub-items nest under a parent (one level).
-  const childrenByParent = useMemo(() => {
-    const m = new Map()
-    for (const it of items) {
-      if (it.parent_id) {
-        if (!m.has(it.parent_id)) m.set(it.parent_id, [])
-        m.get(it.parent_id).push(it)
-      }
+  const loadItems = useCallback(async () => {
+    if (!propertyId || view === 'receipts') return
+    setItemsLoading(true)
+    try {
+      const params = { tracking_type: view, page: itemsPage, limit: ITEMS_PER_PAGE }
+      if (view === 'consumable') params.top_level = 1
+      if (itemsQ) params.q = itemsQ
+      const data = await listItemsPage(propertyId, params)
+      setItems(data.items ?? [])
+      setItemsChildren(data.children ?? {})
+      setItemsTotal(data.total ?? 0)
+      setError(null)
+    } catch {
+      setError('Could not load inventory items.')
+    } finally {
+      setItemsLoading(false)
     }
-    return m
-  }, [items])
-  const topLevel = useMemo(() => shown.filter((it) => !it.parent_id), [shown])
+  }, [propertyId, view, itemsPage, itemsQ])
+
+  useEffect(() => {
+    // loadBase()/loadItems() only update state after awaiting the network,
+    // but the lint rule can't see through the async boundary. Safe
+    // data-loading effects.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadBase()
+  }, [loadBase])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadItems()
+  }, [loadItems])
+
+  // Debounce the search box; jump back to page 1 whenever the effective
+  // search text changes.
+  useEffect(() => {
+    const t = setTimeout(() => { setItemsQ(itemsSearch.trim()); setItemsPage(1) }, 300)
+    return () => clearTimeout(t)
+  }, [itemsSearch])
+
+  // Switching tabs resets paging/search/expansion immediately. Not a
+  // network-triggering effect (no async boundary), so the setState-in-effect
+  // rule applies for real here — these mirror derived state off `view`
+  // rather than syncing with an external system, which is what the rule
+  // actually guards against; disabling is the documented escape hatch.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setItemsPage(1)
+    setItemsSearch('')
+    setItemsQ('')
+    setExpanded(new Set())
+  }, [view])
+
+  // Deleting the last item on a page (other than the first) would otherwise
+  // strand the view on an empty page.
+  useEffect(() => {
+    if (!itemsLoading && items.length === 0 && itemsPage > 1) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setItemsPage((p) => p - 1)
+    }
+  }, [itemsLoading, items, itemsPage])
+
+  function refresh() {
+    loadBase()
+    loadItems()
+  }
+
+  const reusable = view === 'reusable'
+  const itemsTotalPages = Math.max(1, Math.ceil(itemsTotal / ITEMS_PER_PAGE))
 
   const toggleExpanded = (id) =>
     setExpanded((prev) => {
@@ -114,7 +166,7 @@ export default function Inventory() {
     setError(null)
     try {
       await deleteItem(item.id)
-      await refresh()
+      refresh()
     } catch (ex) {
       setError(ex?.response?.data?.message ?? 'Could not delete the item.')
     } finally {
@@ -163,16 +215,25 @@ export default function Inventory() {
         ))}
       </ButtonGroup>
 
-      {loading ? (
+      {view === 'receipts' ? (
+        <ReceiptBooklets canManage={canManage} propertyId={propertyId} />
+      ) : loading ? (
         <SkeletonTable rows={6} />
-      ) : view === 'receipts' ? (
-        <ReceiptBooklets series={series} canManage={canManage} propertyId={propertyId} onChanged={refresh} />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           <div className="lg:col-span-8">
             <Card className="shadow-sm">
-              <Card.Header>
-                {reusable ? 'Reusable items (issued & returned)' : 'Consumable items'}
+              <Card.Header className="flex flex-wrap items-center gap-2">
+                <span>{reusable ? 'Reusable items (issued & returned)' : 'Consumable items'}</span>
+                <InputGroup className="ml-auto" style={{ maxWidth: 260 }}>
+                  <InputGroup.Text>Search</InputGroup.Text>
+                  <Form.Control
+                    value={itemsSearch}
+                    onChange={(e) => setItemsSearch(e.target.value)}
+                    placeholder="Item name"
+                  />
+                </InputGroup>
+                <span className="text-sm font-normal text-muted">{itemsTotal} item(s)</span>
               </Card.Header>
               <Table hover>
                 <thead>
@@ -194,22 +255,25 @@ export default function Inventory() {
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.length === 0 && (
+                  {itemsLoading && <SkeletonTableRows rows={5} cols={reusable ? 8 : 6} />}
+                  {!itemsLoading && items.length === 0 && (
                     <tr>
                       <td colSpan={reusable ? 8 : 6} className="py-6 text-center text-muted">
-                        No {reusable ? 'reusable' : 'consumable'} items yet.
+                        {itemsQ
+                          ? 'No items match your search.'
+                          : `No ${reusable ? 'reusable' : 'consumable'} items yet.`}
                       </td>
                     </tr>
                   )}
-                  {(reusable ? shown : topLevel)
+                  {!itemsLoading && items
                     .flatMap((p) => [
                       { it: p, isChild: false },
-                      ...(!reusable && expanded.has(p.id)
-                        ? (childrenByParent.get(p.id) ?? []).map((c) => ({ it: c, isChild: true }))
+                      ...(!reusable && !itemsQ && expanded.has(p.id)
+                        ? (itemsChildren[p.id] ?? []).map((c) => ({ it: c, isChild: true }))
                         : []),
                     ])
                     .map(({ it, isChild }) => {
-                    const kids = reusable ? [] : childrenByParent.get(it.id) ?? []
+                    const kids = (!reusable && !itemsQ) ? (itemsChildren[it.id] ?? []) : []
                     const isOpen = expanded.has(it.id)
                     const available = Number(it.quantity)
                     const total = Number(it.total_quantity ?? 0)
@@ -235,7 +299,12 @@ export default function Inventory() {
                               <Badge bg="secondary">{kids.length}</Badge>
                             </button>
                           ) : (
-                            it.name
+                            <>
+                              {it.parent_id && itemsQ && (
+                                <span className="mr-1.5 text-[10px] text-muted" title="Sub-item">↳</span>
+                              )}
+                              {it.name}
+                            </>
                           )}
                         </td>
                         <td>{it.inventory_category?.name ?? '—'}</td>
@@ -292,6 +361,19 @@ export default function Inventory() {
                   })}
                 </tbody>
               </Table>
+              {itemsTotalPages > 1 && (
+                <Card.Footer className="flex items-center justify-between px-4 py-3">
+                  <span className="text-sm text-muted">
+                    Page {itemsPage} of {itemsTotalPages} · {itemsTotal} item(s)
+                  </span>
+                  <Pagination>
+                    <Pagination.Prev disabled={itemsPage <= 1 || itemsLoading}
+                      onClick={() => setItemsPage((p) => Math.max(1, p - 1))} />
+                    <Pagination.Next disabled={itemsPage >= itemsTotalPages || itemsLoading}
+                      onClick={() => setItemsPage((p) => Math.min(itemsTotalPages, p + 1))} />
+                  </Pagination>
+                </Card.Footer>
+              )}
             </Card>
           </div>
 
@@ -346,7 +428,7 @@ export default function Inventory() {
       {modal === 'categories' && (
         <CategoriesModal
           categories={categories}
-          items={items}
+          propertyId={propertyId}
           onClose={() => setModal(null)}
           onChanged={refresh}
         />
@@ -355,7 +437,6 @@ export default function Inventory() {
         <ItemModal
           propertyId={propertyId}
           categories={categories}
-          items={items}
           item={editTarget}
           defaultTracking={view === 'reusable' ? 'reusable' : 'consumable'}
           onClose={() => { setModal(null); setEditTarget(null) }}
@@ -407,10 +488,31 @@ function CategoryModal({ propertyId, onClose, onSaved }) {
   )
 }
 
-function CategoriesModal({ categories, items, onClose, onChanged }) {
+function CategoriesModal({ categories, propertyId, onClose, onChanged }) {
   const [busyId, setBusyId] = useState(null)
   const [err, setErr] = useState(null)
-  const countFor = (id) => items.filter((i) => i.inventory_category_id === id).length
+  // Per-category item counts: fetched once when the modal opens (rather than
+  // kept loaded on every Inventory page view) since the catalogue can grow
+  // large. Capped at the same generous, effectively-unpaginated window
+  // listItems() always returns.
+  const [itemCounts, setItemCounts] = useState({})
+  const [countsLoading, setCountsLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    listItems(propertyId)
+      .then((rows) => {
+        if (cancelled) return
+        const counts = {}
+        for (const r of rows) counts[r.inventory_category_id] = (counts[r.inventory_category_id] ?? 0) + 1
+        setItemCounts(counts)
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setCountsLoading(false) })
+    return () => { cancelled = true }
+  }, [propertyId])
+
+  const countFor = (id) => itemCounts[id] ?? 0
 
   async function remove(c) {
     if (!window.confirm(`Delete category "${c.name}"?`)) return
@@ -442,9 +544,9 @@ function CategoriesModal({ categories, items, onClose, onChanged }) {
                   <span>
                     <span className="font-semibold">{c.name}</span>
                     <span className="ml-2 text-sm text-muted">{c.kind?.replace('_', ' ')}</span>
-                    {used > 0 && <span className="ml-2 text-sm text-muted">· {used} item(s)</span>}
+                    {!countsLoading && used > 0 && <span className="ml-2 text-sm text-muted">· {used} item(s)</span>}
                   </span>
-                  <Button size="sm" variant="outline-danger" disabled={busyId !== null || used > 0}
+                  <Button size="sm" variant="outline-danger" disabled={busyId !== null || countsLoading || used > 0}
                     title={used > 0 ? 'Move or delete its items first' : 'Delete category'}
                     onClick={() => remove(c)}>
                     {busyId === c.id ? <Spinner size="sm" /> : 'Delete'}
@@ -462,7 +564,7 @@ function CategoriesModal({ categories, items, onClose, onChanged }) {
   )
 }
 
-function ItemModal({ propertyId, categories, items = [], item, defaultTracking, onClose, onSaved }) {
+function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onSaved }) {
   const editing = Boolean(item)
   const [form, setForm] = useState({
     inventory_category_id: item?.inventory_category_id ?? categories[0]?.id ?? '',
@@ -476,13 +578,22 @@ function ItemModal({ propertyId, categories, items = [], item, defaultTracking, 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const reusable = form.tracking_type === 'reusable'
   const typeChanged = editing && form.tracking_type !== item.tracking_type
-  // Valid parents: top-level consumables (one level deep), never itself. An
-  // item that already has sub-items can't become one — the backend enforces
-  // the same.
-  const hasChildren = editing && items.some((i) => i.parent_id === item.id)
-  const parentOptions = items.filter(
-    (i) => trackingOf(i) === 'consumable' && !i.parent_id && i.id !== item?.id,
-  )
+  const hasChildren = editing && Boolean(item.has_children)
+
+  // Valid parents: top-level consumables (one level deep), never itself. The
+  // catalogue can grow large, so this is fetched once when the modal opens
+  // rather than kept loaded on every Inventory page view.
+  const [parentOptions, setParentOptions] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    listItems(propertyId, { tracking_type: 'consumable', top_level: 1 })
+      .then((rows) => {
+        if (!cancelled) setParentOptions(rows.filter((i) => i.id !== item?.id))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [propertyId, item?.id])
+
   const { run, busy, err } = useSubmit(async () => {
     const payload = { ...form, parent_id: reusable ? null : form.parent_id || null }
     if (editing) {
@@ -641,21 +752,57 @@ function MoveModal({ propertyId, target, onClose, onSaved }) {
 /* ---- Receipt booklets: registered physical invoice / OR number series ---- */
 
 const SERIES_TYPE_LABEL = { invoice: 'Physical Invoice', official_receipt: 'Official Receipt' }
+const SERIES_PER_PAGE = 10
 
 // A number the way it reads on the physical page (prefix + zero-padded digits).
 const seriesNumber = (s, n) => `${s.prefix ?? ''}${String(n).padStart(s.pad_length ?? 0, '0')}`
 
-function ReceiptBooklets({ series, canManage, propertyId, onChanged }) {
+function ReceiptBooklets({ canManage, propertyId }) {
   const [modal, setModal] = useState(false)
   const [pending, setPending] = useState(null)
   const [err, setErr] = useState(null)
+
+  // Server-paginated and searchable (by prefix), like the other Inventory tables.
+  const [series, setSeries] = useState([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [q, setQ] = useState('')
+
+  useEffect(() => {
+    const t = setTimeout(() => { setQ(search.trim()); setPage(1) }, 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const load = useCallback(async () => {
+    if (!propertyId) return
+    setLoading(true)
+    try {
+      const params = { page, limit: SERIES_PER_PAGE }
+      if (q) params.q = q
+      const data = await listReceiptSeries(propertyId, params)
+      setSeries(data.series ?? [])
+      setTotal(data.total ?? 0)
+      setErr(null)
+    } catch {
+      setErr('Could not load receipt booklets.')
+    } finally {
+      setLoading(false)
+    }
+  }, [propertyId, page, q])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load()
+  }, [load])
 
   async function act(key, fn) {
     setPending(key)
     setErr(null)
     try {
       await fn()
-      await onChanged()
+      await load()
     } catch (ex) {
       setErr(ex?.response?.data?.message ?? 'Action failed.')
     } finally {
@@ -663,14 +810,21 @@ function ReceiptBooklets({ series, canManage, propertyId, onChanged }) {
     }
   }
 
+  const totalPages = Math.max(1, Math.ceil(total / SERIES_PER_PAGE))
+
   return (
     <div>
       {err && <Alert variant="danger">{err}</Alert>}
       <Card className="shadow-sm">
-        <Card.Header className="flex items-center justify-between px-4 py-3">
+        <Card.Header className="flex flex-wrap items-center gap-2 px-4 py-3">
           <span>Receipt booklets</span>
+          <InputGroup style={{ maxWidth: 220 }}>
+            <InputGroup.Text>Search</InputGroup.Text>
+            <Form.Control value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Prefix" />
+          </InputGroup>
+          <span className="text-sm font-normal text-muted">{total} series</span>
           {canManage && (
-            <Button size="sm" onClick={() => setModal(true)}>Register series</Button>
+            <Button size="sm" className="ml-auto" onClick={() => setModal(true)}>Register series</Button>
           )}
         </Card.Header>
         <Table hover>
@@ -682,14 +836,15 @@ function ReceiptBooklets({ series, canManage, propertyId, onChanged }) {
             </tr>
           </thead>
           <tbody>
-            {series.length === 0 && (
+            {loading && <SkeletonTableRows rows={4} cols={canManage ? 6 : 5} />}
+            {!loading && series.length === 0 && (
               <tr>
                 <td colSpan={canManage ? 6 : 5} className="py-6 text-center text-muted">
-                  No booklet series registered yet.
+                  {q ? 'No booklet series match your search.' : 'No booklet series registered yet.'}
                 </td>
               </tr>
             )}
-            {series.map((s) => {
+            {!loading && series.map((s) => {
               const remaining = Math.max(0, s.end_number - s.next_number + 1)
               const exhausted = remaining === 0
               return (
@@ -732,6 +887,17 @@ function ReceiptBooklets({ series, canManage, propertyId, onChanged }) {
             })}
           </tbody>
         </Table>
+        {totalPages > 1 && (
+          <Card.Footer className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-muted">Page {page} of {totalPages} · {total} series</span>
+            <Pagination>
+              <Pagination.Prev disabled={page <= 1 || loading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))} />
+              <Pagination.Next disabled={page >= totalPages || loading}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))} />
+            </Pagination>
+          </Card.Footer>
+        )}
       </Card>
       <p className="mt-2 mb-0 text-sm text-muted">
         Register your pre-printed <strong>Sales Invoice</strong> and <strong>Official Receipt</strong> booklets
@@ -744,7 +910,7 @@ function ReceiptBooklets({ series, canManage, propertyId, onChanged }) {
         <SeriesModal
           propertyId={propertyId}
           onClose={() => setModal(false)}
-          onSaved={async () => { setModal(false); await onChanged() }}
+          onSaved={async () => { setModal(false); await load() }}
         />
       )}
     </div>
