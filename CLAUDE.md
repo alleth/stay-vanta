@@ -390,7 +390,7 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   under it (one level deep — `Inventory.jsx`'s consumables table shows the parent with a
   ▶/▼ expand toggle revealing its sub-items, each tracked with its own stock/quantity). Inventory
   also has a **Receipt Booklets** tab (`Inventory.jsx`) managing `receipt_series` — see below.
-- **Front Desk** (UI name for "Room Monitoring") — rooms, room rates, reservations, OTA
+- **Front Desk** *(implemented)* (UI name for "Room Monitoring") — rooms, room rates, reservations, OTA
   sources (`reservations.source`: cocotel/agoda/trip_com/tripadvisor), senior/PWD/referral
   discounts, additional beds.
 - **Guests** *(implemented)* — registry + counts (`GuestsController::stats` → total / local / foreign /
