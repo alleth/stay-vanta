@@ -28,9 +28,13 @@ class FoodOrdersTable extends Table
     public const STATUSES = ['open', 'served', 'cancelled'];
     public const PAYMENT_STATUSES = ['paid', 'charge_to_room', 'unpaid'];
     public const PAYMENT_METHODS = ['cash', 'gcash', 'maya', 'gotyme'];
-    public const DISCOUNT_TYPES = ['none', 'senior', 'pwd'];
+    public const BENEFICIARY_TYPES = ['senior', 'pwd'];
 
-    /** Statutory Senior Citizen / PWD discount, applied to the items subtotal. */
+    /**
+     * Statutory Senior Citizen / PWD discount. Legally it only covers a
+     * qualified diner's own share of the bill, not the whole table — see
+     * place()'s discount math.
+     */
     public const STATUTORY_DISCOUNT = 0.20;
 
     public function initialize(array $config): void
@@ -51,6 +55,7 @@ class FoodOrdersTable extends Table
             'foreignKey' => 'receptionist_id',
         ]);
         $this->hasMany('FoodOrderItems');
+        $this->hasMany('FoodOrderDiscounts', ['dependent' => true]);
     }
 
     public function validationDefault(Validator $validator): Validator
@@ -74,8 +79,13 @@ class FoodOrdersTable extends Table
      *            cooking of guest-brought food — no menu item, no stock deduction);
      *   payment_status, payment_method? (required when payment_status is
      *   'paid' — cash|gcash|maya|gotyme), guest_id?, room_id?, reservation_id?;
-     *   discount_type? (senior|pwd → 20% off the items subtotal, requires
-     *   discount_name + discount_id_number); cooking_charge? (added after the
+     *   total_diners? (default 1); discount_beneficiaries? ([{discount_type:
+     *   senior|pwd, name, id_number}, ...] — zero or more Senior/PWD diners on
+     *   this order, e.g. two seniors at the same table; each needs a name +
+     *   ID number and the statutory 20% only covers that beneficiary's own
+     *   even share of the items subtotal — subtotal * (beneficiaries /
+     *   total_diners) * 20%, capped at the full subtotal since beneficiaries
+     *   can never exceed total_diners); cooking_charge? (added after the
      *   discount — it's a service fee, not food).
      *
      * @throws \InvalidArgumentException On bad items/discount/payment/option input.
@@ -116,14 +126,24 @@ class FoodOrdersTable extends Table
             $paymentMethod = null;
         }
 
-        $discountType = $payload['discount_type'] ?? 'none';
-        if (!in_array($discountType, self::DISCOUNT_TYPES, true)) {
-            throw new InvalidArgumentException('Unknown discount type.');
+        $totalDiners = max(1, (int)($payload['total_diners'] ?? 1));
+        $beneficiaries = [];
+        foreach ((array)($payload['discount_beneficiaries'] ?? []) as $raw) {
+            $type = $raw['discount_type'] ?? null;
+            if (!in_array($type, self::BENEFICIARY_TYPES, true)) {
+                throw new InvalidArgumentException('Unknown discount type.');
+            }
+            $name = trim((string)($raw['name'] ?? ''));
+            $idNumber = trim((string)($raw['id_number'] ?? ''));
+            if ($name === '' || $idNumber === '') {
+                throw new InvalidArgumentException(
+                    'Each Senior/PWD discount needs the beneficiary name and ID number.',
+                );
+            }
+            $beneficiaries[] = ['discount_type' => $type, 'name' => $name, 'id_number' => $idNumber];
         }
-        $discountName = trim((string)($payload['discount_name'] ?? ''));
-        $discountIdNumber = trim((string)($payload['discount_id_number'] ?? ''));
-        if ($discountType !== 'none' && ($discountName === '' || $discountIdNumber === '')) {
-            throw new InvalidArgumentException('The Senior/PWD discount needs the beneficiary name and ID number.');
+        if (count($beneficiaries) > $totalDiners) {
+            throw new InvalidArgumentException('The number of discount beneficiaries cannot exceed the total diners.');
         }
 
         $cookingCharge = round((float)($payload['cooking_charge'] ?? 0), 2);
@@ -138,9 +158,8 @@ class FoodOrdersTable extends Table
                 $paymentStatus,
                 $paymentMethod,
                 $guestId,
-                $discountType,
-                $discountName,
-                $discountIdNumber,
+                $totalDiners,
+                $beneficiaries,
                 $cookingCharge,
                 $propertyId,
                 $receptionistId,
@@ -148,6 +167,7 @@ class FoodOrdersTable extends Table
                 $menus = TableRegistry::getTableLocator()->get('FoodMenuItems');
                 $orderItems = TableRegistry::getTableLocator()->get('FoodOrderItems');
                 $orderItemOptions = TableRegistry::getTableLocator()->get('FoodOrderItemOptions');
+                $orderDiscounts = TableRegistry::getTableLocator()->get('FoodOrderDiscounts');
                 $stock = TableRegistry::getTableLocator()->get('StockMovements');
                 $inventory = TableRegistry::getTableLocator()->get('InventoryItems');
 
@@ -160,9 +180,7 @@ class FoodOrdersTable extends Table
                     'status' => 'open',
                     'payment_status' => $paymentStatus,
                     'payment_method' => $paymentMethod,
-                    'discount_type' => $discountType,
-                    'discount_name' => $discountType !== 'none' ? $discountName : null,
-                    'discount_id_number' => $discountType !== 'none' ? $discountIdNumber : null,
+                    'total_diners' => $totalDiners,
                     'cooking_charge' => $cookingCharge,
                     'total' => 0,
                 ]);
@@ -276,11 +294,38 @@ class FoodOrdersTable extends Table
                     ]));
                 }
 
-                $discount = $discountType !== 'none' ? round($subtotal * self::STATUTORY_DISCOUNT, 2) : 0.0;
+                // The statutory discount only covers each beneficiary's own
+                // even share of the bill: subtotal * (beneficiaries /
+                // total_diners) * 20%. Computed in whole cents up front, then
+                // handed out evenly across beneficiaries (any leftover cent
+                // to the first ones) so their individually-saved `amount`s
+                // always sum to exactly this total — no off-by-a-cent gap
+                // between the order total and its itemized invoice lines.
+                $beneficiaryCount = count($beneficiaries);
+                $totalDiscountCents = $beneficiaryCount > 0
+                    ? (int)round($subtotal * $beneficiaryCount / $totalDiners * self::STATUTORY_DISCOUNT * 100)
+                    : 0;
+                $discount = $totalDiscountCents / 100;
                 $total = $subtotal - $discount + $cookingCharge;
 
                 $order->set('total', $total);
                 $this->saveOrFail($order);
+
+                $savedDiscounts = [];
+                if ($beneficiaryCount > 0) {
+                    $baseCents = intdiv($totalDiscountCents, $beneficiaryCount);
+                    $remainderCents = $totalDiscountCents % $beneficiaryCount;
+                    foreach ($beneficiaries as $i => $beneficiary) {
+                        $amount = ($baseCents + ($i < $remainderCents ? 1 : 0)) / 100;
+                        $savedDiscounts[] = $orderDiscounts->saveOrFail($orderDiscounts->newEntity([
+                            'food_order_id' => $order->id,
+                            'discount_type' => $beneficiary['discount_type'],
+                            'beneficiary_name' => $beneficiary['name'],
+                            'id_number' => $beneficiary['id_number'],
+                            'amount' => $amount,
+                        ]));
+                    }
+                }
 
                 if ($paymentStatus === 'charge_to_room') {
                     $invoices = TableRegistry::getTableLocator()->get('Invoices');
@@ -289,16 +334,24 @@ class FoodOrdersTable extends Table
                         (int)$guestId,
                         $payload['reservation_id'] ?? null,
                     );
-                    // Itemized: the subtotal, then the discount (if any) as its
-                    // own negative line, so the folio shows exactly what was
-                    // charged and what was taken off — not a single net figure.
+                    // Itemized: the subtotal, then each beneficiary's own
+                    // discount as its own negative line, so the folio shows
+                    // exactly what was charged and what was taken off for
+                    // whom — not a single net figure.
                     $invoices->addLine($invoice, 'Food order #' . $order->id, $subtotal, 'food_order', (int)$order->id);
-                    if ($discount > 0) {
-                        $label = $discountType === 'senior' ? 'Senior' : 'PWD';
+                    foreach ($savedDiscounts as $d) {
+                        $label = $d->discount_type === 'senior' ? 'Senior' : 'PWD';
                         $invoices->addLine(
                             $invoice,
-                            sprintf('%s discount (20%%) — %s, ID %s', $label, $discountName, $discountIdNumber),
-                            -$discount,
+                            sprintf(
+                                '%s discount (20%%, 1 of %d diner%s) — %s, ID %s',
+                                $label,
+                                $totalDiners,
+                                $totalDiners === 1 ? '' : 's',
+                                $d->beneficiary_name,
+                                $d->id_number,
+                            ),
+                            -(float)$d->amount,
                             'food_order',
                             (int)$order->id,
                         );

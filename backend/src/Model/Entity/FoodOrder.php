@@ -13,6 +13,11 @@ use Cake\ORM\Entity;
  * mirrored onto the guest's invoice. `payment_method` records how a `paid`
  * order was actually settled (cash/e-wallet); null otherwise.
  *
+ * `total_diners` + `food_order_discounts` replace a single `discount_type`:
+ * an order can carry several Senior/PWD beneficiaries (e.g. two seniors at
+ * the same table), and the statutory 20% only covers their own even share of
+ * the bill — see FoodOrdersTable::place().
+ *
  * @property int $id
  * @property int $property_id
  * @property int|null $guest_id
@@ -23,6 +28,7 @@ use Cake\ORM\Entity;
  * @property string $payment_status paid | charge_to_room | unpaid
  * @property string|null $payment_method cash | gcash | maya | gotyme
  * @property string $total
+ * @property int $total_diners
  */
 class FoodOrder extends Entity
 {
@@ -36,10 +42,9 @@ class FoodOrder extends Entity
         'payment_status' => true,
         'payment_method' => true,
         'total' => true,
-        'discount_type' => true,
-        'discount_name' => true,
-        'discount_id_number' => true,
+        'total_diners' => true,
         'cooking_charge' => true,
         'food_order_items' => true,
+        'food_order_discounts' => true,
     ];
 }

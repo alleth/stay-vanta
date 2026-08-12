@@ -206,10 +206,12 @@ export default function Food() {
                       <td>{o.guest?.full_name ?? '—'}{o.room ? ` (Rm ${o.room.room_number})` : ''}</td>
                       <td className="text-right">
                         {formatMoney(o.total)}
-                        {o.discount_type && o.discount_type !== 'none' && (
+                        {o.food_order_discounts?.length > 0 && (
                           <div className="whitespace-nowrap text-[11px] text-muted"
-                            title={`${o.discount_name ?? ''} · ID ${o.discount_id_number ?? ''}`}>
-                            −20% {o.discount_type}
+                            title={o.food_order_discounts
+                              .map((d) => `${d.beneficiary_name} (${d.discount_type}) · ID ${d.id_number}`)
+                              .join(', ')}>
+                            −20% × {o.food_order_discounts.length} ({o.total_diners} diner{o.total_diners === 1 ? '' : 's'})
                           </div>
                         )}
                         {Number(o.cooking_charge) > 0 && (
@@ -774,11 +776,19 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [guestId, setGuestId] = useState('')
   const [search, setSearch] = useState('')
-  // Senior/PWD statutory discount — 20% off the items subtotal, with the
-  // beneficiary's name + ID number (kept on the order and shown on invoices).
-  const [discount, setDiscount] = useState('none')
-  const [discountName, setDiscountName] = useState('')
-  const [discountId, setDiscountId] = useState('')
+  // Senior/PWD statutory discount — an order can carry several beneficiaries
+  // (e.g. two senior citizens at the same table); the 20% only covers each
+  // beneficiary's own even share of the items subtotal, so it also needs the
+  // total diner count. [{key, discount_type, name, id_number}]
+  const [beneficiaries, setBeneficiaries] = useState([])
+  const [totalDiners, setTotalDiners] = useState(1)
+  const addBeneficiary = () => {
+    setBeneficiaries((bs) => [...bs, { key: Date.now(), discount_type: 'senior', name: '', id_number: '' }])
+    setTotalDiners((td) => Math.max(td, beneficiaries.length + 1))
+  }
+  const removeBeneficiary = (key) => setBeneficiaries((bs) => bs.filter((b) => b.key !== key))
+  const setBeneficiaryField = (key, field) => (e) =>
+    setBeneficiaries((bs) => bs.map((b) => (b.key === key ? { ...b, [field]: e.target.value } : b)))
   // Cooking charge: guests who bring their own food to be cooked. The amount
   // depends on what was brought, so it's typed per order.
   const [hasCooking, setHasCooking] = useState(false)
@@ -896,7 +906,9 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
   const itemsSubtotal =
     lines.reduce((sum, l) => sum + Number(l.menu.price) * l.cartLine.qty + lineOptionsTotal(l.menu, l.cartLine), 0)
     + customLines.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0)
-  const discountAmt = discount !== 'none' ? itemsSubtotal * 0.2 : 0
+  const discountAmt = beneficiaries.length > 0
+    ? itemsSubtotal * (beneficiaries.length / Math.max(1, totalDiners)) * 0.2
+    : 0
   const cooking = hasCooking ? Number(cookingCharge) || 0 : 0
   const total = itemsSubtotal - discountAmt + cooking
   const count = lines.reduce((sum, l) => sum + l.cartLine.qty, 0)
@@ -916,12 +928,13 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
       ],
       payment_status: payment,
       payment_method: payment === 'paid' ? paymentMethod : undefined,
-      discount_type: discount,
       cooking_charge: cooking,
     }
-    if (discount !== 'none') {
-      payload.discount_name = discountName
-      payload.discount_id_number = discountId
+    if (beneficiaries.length > 0) {
+      payload.total_diners = totalDiners
+      payload.discount_beneficiaries = beneficiaries.map((b) => ({
+        discount_type: b.discount_type, name: b.name, id_number: b.id_number,
+      }))
     }
     if (guestId) payload.guest_id = Number(guestId)
     await createOrder(payload, propertyId)
@@ -1127,7 +1140,7 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                       </div>
                       {discountAmt > 0 && (
                         <div className="flex justify-between text-muted">
-                          <span>{discount === 'senior' ? 'Senior' : 'PWD'} discount (20%)</span>
+                          <span>Senior/PWD discount (20%, {beneficiaries.length}/{totalDiners} diners)</span>
                           <span>−{formatMoney(discountAmt)}</span>
                         </div>
                       )}
@@ -1143,21 +1156,41 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                   </div>
                 </div>
                 <Form.Group className="mb-2">
-                  <Form.Label className="mb-1">Discount</Form.Label>
-                  <Form.Select size="sm" value={discount} onChange={(e) => setDiscount(e.target.value)}>
-                    <option value="none">None</option>
-                    <option value="senior">Senior citizen (20%)</option>
-                    <option value="pwd">PWD (20%)</option>
-                  </Form.Select>
-                </Form.Group>
-                {discount !== 'none' && (
-                  <div className="mb-2 grid grid-cols-2 gap-2">
-                    <Form.Control size="sm" value={discountName} onChange={(e) => setDiscountName(e.target.value)}
-                      placeholder="Beneficiary name" required />
-                    <Form.Control size="sm" value={discountId} onChange={(e) => setDiscountId(e.target.value)}
-                      placeholder="Senior/PWD ID number" required />
+                  <div className="mb-1 flex items-center justify-between">
+                    <Form.Label className="mb-0">
+                      Senior/PWD discount <span className="font-normal text-muted">(optional — any number)</span>
+                    </Form.Label>
+                    <Button size="sm" variant="outline-secondary" onClick={addBeneficiary}>+ Add beneficiary</Button>
                   </div>
-                )}
+                  {beneficiaries.map((b) => (
+                    <div key={b.key} className="mb-1 flex items-center gap-1">
+                      <Form.Select size="sm" style={{ width: 90 }} value={b.discount_type}
+                        onChange={setBeneficiaryField(b.key, 'discount_type')}>
+                        <option value="senior">Senior</option>
+                        <option value="pwd">PWD</option>
+                      </Form.Select>
+                      <Form.Control size="sm" value={b.name} onChange={setBeneficiaryField(b.key, 'name')}
+                        placeholder="Beneficiary name" required />
+                      <Form.Control size="sm" value={b.id_number} onChange={setBeneficiaryField(b.key, 'id_number')}
+                        placeholder="ID number" required />
+                      <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                        onClick={() => removeBeneficiary(b.key)}>×</button>
+                    </div>
+                  ))}
+                  {beneficiaries.length > 0 && (
+                    <div className="mt-1">
+                      <Form.Label className="mb-1">Total diners on this order</Form.Label>
+                      <Form.Control size="sm" type="number" min={beneficiaries.length} style={{ width: 100 }}
+                        value={totalDiners}
+                        onChange={(e) => setTotalDiners(Math.max(beneficiaries.length, parseInt(e.target.value, 10) || beneficiaries.length))}
+                        required />
+                      <Form.Text muted>
+                        Each beneficiary's 20% only covers their own share of the bill — {beneficiaries.length} of{' '}
+                        {totalDiners} diner{totalDiners === 1 ? '' : 's'} qualify.
+                      </Form.Text>
+                    </div>
+                  )}
+                </Form.Group>
                 <Form.Check className="mb-2" label="Add cooking charge (guest-brought food)"
                   checked={hasCooking} onChange={(e) => setHasCooking(e.target.checked)} />
                 {hasCooking && (

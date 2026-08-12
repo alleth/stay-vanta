@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
+use Cake\ORM\Query\SelectQuery;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -22,8 +23,10 @@ class FoodOrdersController extends AppController
         $orders = $this->fetchTable('FoodOrders');
         $query = $this->scopeToProperty(
             $orders->find()
-                ->contain(['Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems']])
-                ->orderBy(['FoodOrders.created' => 'DESC'])
+                ->contain([
+                    'Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems'], 'FoodOrderDiscounts',
+                ])
+                ->orderBy(['FoodOrders.created' => 'DESC']),
         );
 
         $status = $this->request->getQuery('status');
@@ -53,7 +56,7 @@ class FoodOrdersController extends AppController
      * Restrict a query to a single calendar day on $column unless $date is empty
      * or 'all'. $date must be YYYY-MM-DD.
      */
-    private function applyDateFilter(\Cake\ORM\Query\SelectQuery $query, string $column, ?string $date): void
+    private function applyDateFilter(SelectQuery $query, string $column, ?string $date): void
     {
         if ($date === null || $date === 'all' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             return;
@@ -69,7 +72,7 @@ class FoodOrdersController extends AppController
     {
         $orders = $this->fetchTable('FoodOrders');
         $order = $this->scopeToProperty($orders->find()->where(['FoodOrders.id' => $id]))
-            ->contain(['Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems']])
+            ->contain(['Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems'], 'FoodOrderDiscounts'])
             ->firstOrFail();
 
         $this->set('order', $order);
@@ -79,7 +82,7 @@ class FoodOrdersController extends AppController
     /**
      * POST /api/food-orders
      * { items:[{food_menu_item_id, quantity}], payment_status,
-     *   guest_id?, room_id?, reservation_id? }
+     *   guest_id?, room_id?, reservation_id?, total_diners?, discount_beneficiaries? }
      */
     public function add(): void
     {
@@ -100,13 +103,12 @@ class FoodOrdersController extends AppController
                     'guest_id' => $this->request->getData('guest_id'),
                     'room_id' => $this->request->getData('room_id'),
                     'reservation_id' => $this->request->getData('reservation_id'),
-                    'discount_type' => $this->request->getData('discount_type') ?? 'none',
-                    'discount_name' => $this->request->getData('discount_name'),
-                    'discount_id_number' => $this->request->getData('discount_id_number'),
+                    'total_diners' => $this->request->getData('total_diners') ?? 1,
+                    'discount_beneficiaries' => $this->request->getData('discount_beneficiaries') ?? [],
                     'cooking_charge' => $this->request->getData('cooking_charge') ?? 0,
                 ],
                 $propertyId,
-                (int)$this->currentUser->id
+                (int)$this->currentUser->id,
             );
         } catch (InvalidArgumentException | RuntimeException $e) {
             // e.g. no items, charge-to-room without guest, or insufficient stock.
@@ -166,7 +168,9 @@ class FoodOrdersController extends AppController
     private function respondWith(int $orderId, int $status): void
     {
         $orders = $this->fetchTable('FoodOrders');
-        $order = $orders->get($orderId, contain: ['Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems']]);
+        $order = $orders->get($orderId, contain: [
+            'Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems'], 'FoodOrderDiscounts',
+        ]);
 
         $this->response = $this->response->withStatus($status);
         $this->set('order', $order);
