@@ -3,7 +3,7 @@
 // Modal show/onHide, Form.* compound components — so the call sites keep
 // their shape, but every style below is a plain Tailwind class. Bootstrap's
 // CSS is not loaded anywhere.
-import { Children, createContext, useContext, useEffect, useState } from 'react'
+import { Children, createContext, useContext, useEffect, useRef, useState } from 'react'
 
 const cx = (...parts) => parts.filter(Boolean).join(' ')
 
@@ -389,6 +389,86 @@ InputGroup.Text = InputGroupText
 export function ButtonGroup({ className = '', children }) {
   return <div className={cx('sv-group', className)}>{children}</div>
 }
+
+/* ------------------------------------------------------------- Dropdown */
+
+// Lightweight kebab-style action menu — a table row's actions collapse behind
+// one trigger instead of a row of buttons crowding the column. Click the
+// trigger to open; click outside, Escape, or an item closes it. Not
+// portal-based (same tradeoff as Modal above) — fine for a menu anchored to
+// its own row.
+const DropdownCtx = createContext(null)
+
+export function Dropdown({ toggle, align = 'end', disabled, className = '', children }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <DropdownCtx.Provider value={() => setOpen(false)}>
+      <div ref={ref} className={cx('relative inline-block text-left', className)}>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={() => setOpen((o) => !o)}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted transition-colors hover:bg-subtle hover:text-body disabled:pointer-events-none disabled:opacity-60"
+        >
+          {toggle ?? <span className="text-lg leading-none">⋮</span>}
+        </button>
+        {open && (
+          <div
+            role="menu"
+            className={cx(
+              'absolute z-20 mt-1 min-w-[10rem] rounded-lg border border-line bg-surface py-1 shadow-lg',
+              align === 'end' ? 'right-0' : 'left-0',
+            )}
+          >
+            {children}
+          </div>
+        )}
+      </div>
+    </DropdownCtx.Provider>
+  )
+}
+
+function DropdownItem({ danger, className = '', onClick, children, ...rest }) {
+  const close = useContext(DropdownCtx)
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={(e) => { onClick?.(e); close?.() }}
+      className={cx(
+        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
+        danger ? 'text-red-600 hover:bg-red-50' : 'text-body hover:bg-subtle',
+        className,
+      )}
+      {...rest}
+    >
+      {children}
+    </button>
+  )
+}
+
+function DropdownDivider({ className = '' }) {
+  return <div className={cx('my-1 border-t border-line', className)} />
+}
+
+Dropdown.Item = DropdownItem
+Dropdown.Divider = DropdownDivider
 
 /* ------------------------------------------------------------ Pagination */
 

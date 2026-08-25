@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ButtonGroup, InputGroup, Pagination,
+  Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ButtonGroup, InputGroup, Pagination, Dropdown,
 } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
@@ -330,31 +330,28 @@ export default function Inventory() {
                         </td>
                         <td className="whitespace-nowrap text-right">
                           {canManage && (
-                            <Button size="sm" variant="outline-primary" className="mr-1"
-                              disabled={pending !== null}
-                              onClick={() => { setEditTarget(it); setModal('item') }}>Edit</Button>
-                          )}
-                          {canManage && (
-                            <Button size="sm" variant="outline-danger" className="mr-1"
-                              disabled={pending !== null}
-                              onClick={() => doDeleteItem(it)}>
-                              {pending === `item-${it.id}` ? <Spinner size="sm" /> : 'Delete'}
-                            </Button>
-                          )}
-                          {canManage && (reusable ? (
-                            <ButtonGroup className="inline-flex align-middle">
-                              {Object.entries(REUSABLE_ACTIONS).map(([key, a]) => (
-                                <Button key={key} size="sm" variant={a.variant} onClick={() => openMove(it, key)}>
+                            <Dropdown
+                              align="end"
+                              disabled={pending === `item-${it.id}`}
+                              toggle={pending === `item-${it.id}` ? <Spinner size="sm" /> : undefined}
+                            >
+                              {Object.entries(reusable ? REUSABLE_ACTIONS : CONSUMABLE_ACTIONS).map(([key, a]) => (
+                                <Dropdown.Item key={key} onClick={() => openMove(it, key)}>
+                                  <span className={a.direction === 'in' ? 'text-emerald-600' : 'text-red-600'}>
+                                    {a.direction === 'in' ? '↓' : '↑'}
+                                  </span>
                                   {a.label}
-                                </Button>
+                                </Dropdown.Item>
                               ))}
-                            </ButtonGroup>
-                          ) : (
-                            <ButtonGroup className="inline-flex align-middle">
-                              <Button size="sm" variant="outline-success" onClick={() => openMove(it, 'in')}>In</Button>
-                              <Button size="sm" variant="outline-danger" onClick={() => openMove(it, 'out')}>Out</Button>
-                            </ButtonGroup>
-                          ))}
+                              <Dropdown.Divider />
+                              <Dropdown.Item onClick={() => { setEditTarget(it); setModal('item') }}>
+                                Edit
+                              </Dropdown.Item>
+                              <Dropdown.Item danger onClick={() => doDeleteItem(it)}>
+                                Delete
+                              </Dropdown.Item>
+                            </Dropdown>
+                          )}
                         </td>
                       </tr>
                     )
