@@ -36,7 +36,8 @@ different origins in production (CORS), same origin in dev (Vite proxy).
   domain logic is covered; don't assume a green run validates business rules.
 - Style: `composer cs-check` / `composer cs-fix` (phpcs / phpcbf, CakePHP standard). A
   `phpstan.neon` exists but PHPStan is only a `suggest` (not installed / no `composer stan`
-  script) — run it only after adding `phpstan/phpstan` to `require-dev`.
+  script) — run it only after adding `phpstan/phpstan` to `require-dev`. Same story for
+  `psalm.xml`/Psalm: config present, not installed (only pulled in transitively by dev deps).
 
 ### Frontend (`cd frontend`)
 - Dev server: `npm run dev` (http://localhost:5173, proxies `/api` → backend)
