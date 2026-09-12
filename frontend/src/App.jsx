@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import Hub from './pages/Hub'
 import Dashboard from './pages/Dashboard'
 import Inventory from './pages/Inventory'
 import FrontDesk from './pages/FrontDesk'
@@ -29,9 +30,11 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        {/* Dashboard is owner + admin; receptionists are redirected to Front Desk
-            from within the Dashboard component. */}
-        <Route index element={<Dashboard />} />
+        {/* "/" is the post-login Hub — a role-scoped icon grid (src/pages/Hub.jsx)
+            that replaces a persistent tab bar; every module lives at its own
+            path and the header's Home link is the only way back here. */}
+        <Route index element={<Hub />} />
+        <Route path="dashboard" element={<Dashboard />} />
         <Route
           path="inventory"
           element={

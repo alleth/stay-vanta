@@ -1,25 +1,7 @@
-import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Button, Badge } from './ui'
+import { HomeIcon } from './icons'
 import { useAuth } from '../context/AuthContext'
-
-// Navigation items, scoped by role. Owner = platform operator (revenue +
-// subscribers); admin = hotel/resort head (operations); receptionist = the
-// front-line tabs they act on.
-const NAV = [
-  { to: '/', label: 'Dashboard', end: true, roles: ['owner', 'admin', 'receptionist'] },
-  { to: '/subscribers', label: 'Subscribers', roles: ['owner'] },
-  { to: '/inventory', label: 'Inventory', roles: ['admin', 'receptionist'] },
-  { to: '/front-desk', label: 'Front Desk', roles: ['admin', 'receptionist'] },
-  { to: '/guests', label: 'Guests', roles: ['admin', 'receptionist'] },
-  { to: '/food', label: 'Food & Orders', roles: ['admin', 'receptionist'] },
-  { to: '/staff', label: 'Staff', roles: ['admin'] },
-]
-
-const navLinkClass = ({ isActive }) =>
-  `rounded-lg px-3 py-1.5 text-sm font-medium no-underline transition-colors ${
-    isActive ? 'bg-subtle text-body' : 'text-muted hover:text-body'
-  }`
 
 // First letters of up to the first two words — for the header's avatar chip.
 function initials(name) {
@@ -28,53 +10,46 @@ function initials(name) {
   return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase()
 }
 
+// No persistent tab bar: navigation is the post-login Hub (src/pages/Hub.jsx,
+// a role-scoped icon grid at "/"). The header here only ever needs to get
+// back there — see src/nav.js for the module list itself.
 export default function Layout() {
   const { user, logout, role } = useAuth()
   const navigate = useNavigate()
-  const [open, setOpen] = useState(false)
 
   function handleLogout() {
     logout()
     navigate('/login')
   }
 
-  const items = NAV.filter((n) => !n.roles || n.roles.includes(role))
-
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-30 border-b border-line bg-surface/95 px-4 py-2.5 backdrop-blur-sm lg:px-8">
-        <nav className="flex flex-wrap items-center">
+        <nav className="flex flex-wrap items-center gap-3">
           <NavLink to="/" className="sv-serif text-2xl font-bold text-body no-underline">
             Stay<span className="sv-accent">Vanta</span>
           </NavLink>
-          <button
-            type="button"
-            aria-label="Toggle navigation"
-            aria-expanded={open}
-            className="ml-auto rounded-lg border border-line px-3 py-1.5 text-sm lg:hidden"
-            onClick={() => setOpen((o) => !o)}
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium no-underline transition-colors ${
+                isActive ? 'bg-subtle text-body' : 'text-muted hover:bg-subtle hover:text-body'
+              }`
+            }
           >
-            ☰
-          </button>
-          <div className={`${open ? 'flex' : 'hidden'} w-full flex-col gap-3 pt-3 lg:flex lg:w-auto lg:flex-1 lg:flex-row lg:items-center lg:pt-0`}>
-            <div className="flex flex-col gap-1 lg:mr-auto lg:ml-6 lg:flex-row">
-              {items.map((n) => (
-                <NavLink key={n.to} to={n.to} end={n.end} className={navLinkClass}>
-                  {n.label}
-                </NavLink>
-              ))}
-            </div>
-            <div className="flex items-center gap-3 border-line lg:border-l lg:pl-4">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
-                {initials(user?.name)}
-              </span>
-              <span className="whitespace-nowrap text-sm">
-                {user?.name} <Badge bg="secondary" className="ml-1">{role}</Badge>
-              </span>
-              <Button size="sm" variant="outline-secondary" onClick={handleLogout}>
-                Logout
-              </Button>
-            </div>
+            <HomeIcon className="h-4 w-4" /> Home
+          </NavLink>
+          <div className="ml-auto flex items-center gap-3 lg:border-l lg:border-line lg:pl-4">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+              {initials(user?.name)}
+            </span>
+            <span className="hidden whitespace-nowrap text-sm sm:inline">
+              {user?.name} <Badge bg="secondary" className="ml-1">{role}</Badge>
+            </span>
+            <Button size="sm" variant="outline-secondary" onClick={handleLogout}>
+              Logout
+            </Button>
           </div>
         </nav>
       </header>

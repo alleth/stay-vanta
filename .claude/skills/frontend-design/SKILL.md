@@ -26,7 +26,7 @@ markup for something that looks like a button, card, form field, table, dialog, 
   | outline-secondary | outline-success | outline-danger | link`; `size="sm"` for compact. Default
   `type="button"` (forms must opt in explicitly if a button should submit).
 - `Card`: plain `<Card>` + `Card.Header`/`Card.Body`/`Card.Footer`. Body defaults to `p-4` padding
-  unless the className already sets `p*-`.
+  unless the className already sets `p*-`. Carries `shadow-sm` by default — don't re-add it.
 - `Table`: wraps in its own horizontal-scroll container and applies `.sv-table` styling (see Rule 2)
   — pass `hover` for row-hover highlighting. Don't add your own `overflow-x-auto` wrapper.
 - `Modal`: controlled via `show`/`onHide` (not a portal-managed open state of its own); `size` is
@@ -37,6 +37,10 @@ markup for something that looks like a button, card, form field, table, dialog, 
 - `Tabs`/`Tab`: tab state lives in the *parent* page (`Tabs` just reads `eventKey`/`title` off each
   `<Tab>` child) — don't add separate state management inside a page for which tab is active if
   `Tabs` already owns it via `defaultActiveKey`.
+
+Icons: hand-rolled inline SVGs in `components/icons.jsx` (24x24, stroke-based, `className`-sized)
+— reuse one of these or add a new one there in the same style before reaching for an icon npm
+library. `src/nav.js` pairs each Hub module with its icon; see Rule 3 for the Hub itself.
 
 ## Rule 2 — use the design tokens, not arbitrary colors
 
@@ -75,12 +79,17 @@ use the plain form — match this for any new module page:
 ```jsx
 <h1 className="mb-0 text-2xl font-bold">Page Name</h1>
 ```
-Dashboard, Login, and Subscribers use a heavier hero treatment instead — only reach for this on a
-landing/auth-style screen, not a routine module page:
+Dashboard, Login, Subscribers, and the post-login Hub (`src/pages/Hub.jsx`) use a heavier hero
+treatment instead — only reach for this on a landing/auth-style screen, not a routine module page:
 ```jsx
 <h1 className="sv-serif mb-1 text-[2rem] font-bold">Page Name</h1>
 <p className="mb-6 text-muted">One-line subtitle.</p>
 ```
+
+**No persistent tab nav** — the app navigates through `Hub.jsx`'s icon-tile grid (`src/nav.js`
+lists the modules), not a header tab bar; `Layout.jsx`'s header only ever has a Home link back to
+`/`. Don't add cross-module links inside a page — that's the one thing this pattern intentionally
+doesn't offer.
 
 **Section labels** inside a page (grouping a block of cards/tables under a heading), per
 `Dashboard.jsx`'s `SectionTitle`:

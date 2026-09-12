@@ -76,7 +76,7 @@ When building any endpoint that changes inventory/asset state, stamp the acting 
 ### Roles
 Three roles on `users.role`: `owner` | `admin` | `receptionist` (see `UsersTable::ROLES`).
 `owner` has `property_id = null`; `admin`/`receptionist` belong to a property. The React
-side mirrors this in `Layout.jsx` (nav visibility) and `ProtectedRoute` (`roles` prop).
+side mirrors this in `src/nav.js` (Hub tile visibility) and `ProtectedRoute` (`roles` prop).
 Enforce role checks on the **backend** too — frontend guards are UX only.
 
 ### Backend request flow
@@ -110,8 +110,16 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `src/context/AuthContext.jsx` — `useAuth()` provides `{ user, role, login, logout }`;
   resolves the current user from a stored token on boot via `/auth/me`.
 - `src/components/ProtectedRoute.jsx` wraps authed routes; pass `roles={[...]}` to restrict.
+- **No persistent tab nav** — `/` renders `src/pages/Hub.jsx`, a role-scoped grid of icon tiles
+  (one per module) that's the post-login landing screen; `src/components/Layout.jsx`'s header
+  keeps only the brand mark, an explicit Home link back to `/`, and the user/logout chip.
+  `src/nav.js` is the single source of truth for the module list (`{to, label, blurb, roles,
+  icon}`) that `Hub.jsx` renders — icons live in `src/components/icons.jsx` (hand-rolled inline
+  SVGs, no icon library). This is deliberate, not an oversight: every module-to-module switch
+  goes back through the Hub (no shortcut nav inside a module) — if you're tempted to add a tab
+  bar back into `Layout.jsx`, that reintroduces exactly what this replaced.
 - All five domain module pages in `src/pages/` are implemented (see below); no page is a
-  placeholder.
+  placeholder. Dashboard lives at `/dashboard` (not `/`, which is the Hub above).
 - **Public routes** `/privacy` and `/terms` (`PrivacyPolicy.jsx`, `TermsOfService.jsx`) render
   outside `ProtectedRoute`/`Layout` (no auth, no nav) — they're linkable from the login page.
 - **Loading states use Tailwind skeletons, not spinners**, for initial data loads:
@@ -169,8 +177,9 @@ Implemented frontend pages (all five modules): `src/pages/Inventory.jsx` (Consum
 `src/pages/Subscribers.jsx` (owner-only) manages subscribing hotels/resorts + their admins + fee.
 
 ### Navigation & dashboards are role-scoped
-Nav visibility is driven by `roles` per item in `Layout.jsx`; **enforce the same on the backend
-and via `ProtectedRoute roles=` in `App.jsx`** (frontend guards are UX only):
+Nav visibility is driven by `roles` per item in `src/nav.js` (rendered as tiles by `Hub.jsx` —
+see "Frontend structure" above); **enforce the same on the backend and via `ProtectedRoute
+roles=` in `App.jsx`** (frontend guards are UX only):
 - **owner** (platform operator) → Dashboard + Subscribers only. Dashboard = subscription revenue
   (week/month/YTD) + active-user counts (`/reports/owner-dashboard`).
 - **admin** (hotel/resort head) → Dashboard, Inventory, Front Desk, Guests, Food & Orders, Staff.
