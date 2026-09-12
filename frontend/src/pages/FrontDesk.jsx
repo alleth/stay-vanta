@@ -348,7 +348,7 @@ export default function FrontDesk() {
                 New reservation
               </Button>
             </div>
-            <Card className="shadow-sm">
+            <Card>
               <Table hover>
                 <thead>
                   <tr>
@@ -468,7 +468,7 @@ export default function FrontDesk() {
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
               {rooms.length === 0 && <p className="text-muted">No rooms yet.</p>}
               {rooms.map((room) => (
-                <Card key={room.id} className="h-full shadow-sm">
+                <Card key={room.id} className="h-full">
                   <Card.Body>
                     <div className="flex items-start justify-between">
                       <div className="text-2xl font-bold">{room.room_number}</div>
@@ -510,7 +510,7 @@ export default function FrontDesk() {
                 <Button onClick={() => setModal({ type: 'rate' })}>Add rate</Button>
               </div>
             )}
-            <Card className="shadow-sm">
+            <Card>
               <Table hover>
                 <thead>
                   <tr>
@@ -548,7 +548,7 @@ export default function FrontDesk() {
                 <Button onClick={() => setModal({ type: 'promo' })}>Add promo rate</Button>
               </div>
             )}
-            <Card className="shadow-sm">
+            <Card>
               <Table hover>
                 <thead>
                   <tr>
@@ -594,7 +594,7 @@ export default function FrontDesk() {
 
           {/* ---- Calendar / availability by date ---- */}
           <Tab eventKey="calendar" title="Calendar">
-            <Card className="mb-4 shadow-sm">
+            <Card className="mb-4">
               <Card.Body className="flex flex-wrap items-center gap-4 p-4">
                 <Form.Group className="mb-0 flex items-center gap-2">
                   <Form.Label className="mb-0 font-semibold">Date</Form.Label>
@@ -608,7 +608,7 @@ export default function FrontDesk() {
             </Card>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
               <div className="lg:col-span-5">
-                <Card className="h-full shadow-sm">
+                <Card className="h-full">
                   <Card.Header>Available rooms</Card.Header>
                   {availableOnDate.length === 0 ? (
                     <Card.Body><p className="mb-0 text-muted">No rooms free on this date.</p></Card.Body>
@@ -631,7 +631,7 @@ export default function FrontDesk() {
                 </Card>
               </div>
               <div className="lg:col-span-7">
-                <Card className="h-full shadow-sm">
+                <Card className="h-full">
                   <Card.Header>Reservations on this date</Card.Header>
                   <Table hover>
                     <thead>
@@ -662,7 +662,7 @@ export default function FrontDesk() {
               <div className="mb-2 flex justify-end">
                 <Button onClick={() => setModal({ type: 'charge' })}>Add charge</Button>
               </div>
-              <Card className="shadow-sm">
+              <Card>
                 <Table hover>
                   <thead>
                     <tr>
@@ -775,7 +775,7 @@ export default function FrontDesk() {
 
 function SummaryCard({ label, value, variant }) {
   return (
-    <Card className="h-full shadow-sm">
+    <Card className="h-full">
       <Card.Body>
         <div className="text-sm text-muted">{label}</div>
         <div className={`text-3xl font-bold ${VALUE_COLOR[variant] ?? ''}`}>{value}</div>

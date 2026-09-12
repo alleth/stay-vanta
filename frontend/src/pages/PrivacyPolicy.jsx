@@ -27,7 +27,7 @@ export default function PrivacyPolicy() {
         <Button as={Link} to="/" variant="outline-secondary" size="sm">Back</Button>
       </div>
 
-      <Card className="shadow-sm">
+      <Card>
         <Card.Body className="p-6 md:p-12">
           <h1 className="mb-1 text-2xl font-bold">Privacy Policy</h1>
           <p className="mb-6 text-sm text-muted">Last updated: {LAST_UPDATED}</p>

@@ -96,7 +96,7 @@ export function Badge({ bg = 'secondary', className = '', children }) {
 
 export function Card({ className = '', style, children }) {
   return (
-    <div style={style} className={cx('rounded-xl border border-line bg-surface', className)}>
+    <div style={style} className={cx('rounded-xl border border-line bg-surface shadow-sm', className)}>
       {children}
     </div>
   )

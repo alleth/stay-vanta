@@ -21,6 +21,13 @@ const navLinkClass = ({ isActive }) =>
     isActive ? 'bg-subtle text-body' : 'text-muted hover:text-body'
   }`
 
+// First letters of up to the first two words — for the header's avatar chip.
+function initials(name) {
+  if (!name) return ''
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase()
+}
+
 export default function Layout() {
   const { user, logout, role } = useAuth()
   const navigate = useNavigate()
@@ -35,7 +42,7 @@ export default function Layout() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="border-b border-line bg-surface px-4 py-2 lg:px-6">
+      <header className="sticky top-0 z-30 border-b border-line bg-surface/95 px-4 py-2.5 backdrop-blur-sm lg:px-8">
         <nav className="flex flex-wrap items-center">
           <NavLink to="/" className="sv-serif text-2xl font-bold text-body no-underline">
             Stay<span className="sv-accent">Vanta</span>
@@ -57,7 +64,10 @@ export default function Layout() {
                 </NavLink>
               ))}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 border-line lg:border-l lg:pl-4">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+                {initials(user?.name)}
+              </span>
               <span className="whitespace-nowrap text-sm">
                 {user?.name} <Badge bg="secondary" className="ml-1">{role}</Badge>
               </span>
@@ -69,7 +79,7 @@ export default function Layout() {
         </nav>
       </header>
 
-      <main className="mx-auto w-full max-w-[1200px] grow px-4 py-6 lg:py-12">
+      <main className="mx-auto w-full max-w-[1200px] grow px-4 py-6 lg:px-8 lg:py-12">
         <Outlet />
       </main>
 

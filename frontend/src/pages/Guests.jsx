@@ -103,7 +103,7 @@ export default function Guests() {
         <StatCard label="Currently in-house" value={stats.inHouse} variant="success" />
       </div>
 
-      <Card className="shadow-sm">
+      <Card>
         <Card.Header className="flex flex-wrap items-center gap-2 px-4 py-3">
           <InputGroup style={{ maxWidth: 280 }}>
             <InputGroup.Text>Search</InputGroup.Text>
@@ -187,7 +187,7 @@ export default function Guests() {
 
 function StatCard({ label, value, variant }) {
   return (
-    <Card className="h-full shadow-sm">
+    <Card className="h-full">
       <Card.Body>
         <div className="text-sm text-muted">{label}</div>
         <div className={`text-3xl font-bold ${VALUE_COLOR[variant] ?? ''}`}>{value}</div>

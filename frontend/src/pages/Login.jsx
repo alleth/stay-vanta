@@ -27,7 +27,7 @@ export default function Login() {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
-      <Card className="w-full max-w-[400px] shadow-sm">
+      <Card className="w-full max-w-[400px]">
         <Card.Body className="p-10">
           <h1 className="sv-serif mb-1 text-center text-[2rem] font-bold">
             Stay<span className="sv-accent">Vanta</span>

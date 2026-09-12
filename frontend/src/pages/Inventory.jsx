@@ -222,7 +222,7 @@ export default function Inventory() {
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           <div className="lg:col-span-8">
-            <Card className="shadow-sm">
+            <Card>
               <Card.Header className="flex flex-wrap items-center gap-2">
                 <span>{reusable ? 'Reusable items (issued & returned)' : 'Consumable items'}</span>
                 <InputGroup className="ml-auto" style={{ maxWidth: 260 }}>
@@ -375,7 +375,7 @@ export default function Inventory() {
           </div>
 
           <div className="lg:col-span-4">
-            <Card className="shadow-sm">
+            <Card>
               <Card.Header>Recent movements</Card.Header>
               <Card.Body className="max-h-[460px] overflow-y-auto p-0">
                 {movements.length === 0 ? (
@@ -812,7 +812,7 @@ function ReceiptBooklets({ canManage, propertyId }) {
   return (
     <div>
       {err && <Alert variant="danger">{err}</Alert>}
-      <Card className="shadow-sm">
+      <Card>
         <Card.Header className="flex flex-wrap items-center gap-2 px-4 py-3">
           <span>Receipt booklets</span>
           <InputGroup style={{ maxWidth: 220 }}>

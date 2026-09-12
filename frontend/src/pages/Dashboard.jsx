@@ -18,14 +18,14 @@ const MONTHS = [
 
 function Tiles({ tiles, money = false }) {
   return (
-    <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {tiles.map((t) => (
         <Card key={t.label} className="h-full">
           <Card.Body className="p-6">
             <div className="text-sm uppercase tracking-[0.04em] text-muted">
               {t.label}
             </div>
-            <div className={`sv-serif mt-2 font-bold ${money ? 'text-[1.75rem]' : 'text-[2.25rem]'}`}>
+            <div className={`sv-serif tabular-nums mt-2 font-bold ${money ? 'text-[1.75rem]' : 'text-[2.25rem]'}`}>
               {money ? formatMoney(t.value) : t.value}
             </div>
           </Card.Body>
@@ -298,10 +298,10 @@ function SeasonalityChart() {
   }
 
   return (
-    <Card className="mb-6">
+    <Card className="mb-10">
       <Card.Body className="flex flex-wrap items-center justify-between gap-3 p-6 pb-0">
         <div>
-          <div className="sv-serif text-[1.75rem] font-bold">
+          <div className="sv-serif tabular-nums text-[1.75rem] font-bold">
             {data ? (metric === 'revenue' ? formatMoney(total) : total.toLocaleString()) : '—'}
           </div>
           <div className="text-sm text-muted">{metric === 'revenue' ? 'Revenue' : 'Reservations'} in {year}</div>

@@ -158,7 +158,7 @@ export default function Food() {
         <Tabs defaultActiveKey="orders" className="mb-4">
           {/* ---- Orders ---- */}
           <Tab eventKey="orders" title={`Orders (${ordersTotal})`}>
-            <Card className="mb-2 shadow-sm">
+            <Card className="mb-2">
               <Card.Body className="flex flex-wrap items-end gap-4 p-4">
                 <Form.Group>
                   <Form.Label className="mb-1 text-muted">Status</Form.Label>
@@ -182,7 +182,7 @@ export default function Food() {
                 </div>
               </Card.Body>
             </Card>
-            <Card className="shadow-sm">
+            <Card>
               <Table hover>
                 <thead>
                   <tr>
@@ -289,7 +289,7 @@ export default function Food() {
 
           {/* ---- Invoices ---- */}
           <Tab eventKey="invoices" title={`Invoices (${invoices.length})`}>
-            <Card className="mb-2 shadow-sm">
+            <Card className="mb-2">
               <Card.Body className="flex flex-wrap items-end gap-4 p-4">
                 <Form.Group>
                   <Form.Label className="mb-1 text-muted">Date</Form.Label>
@@ -301,7 +301,7 @@ export default function Food() {
                 <span className="mb-1 text-sm text-muted">Open tabs always show.</span>
               </Card.Body>
             </Card>
-            <Card className="shadow-sm">
+            <Card>
               <Table hover>
                 <thead>
                   <tr>
@@ -423,7 +423,7 @@ function MenuCatalog({ menuType, items, canManageMenu, pending, onAdd, onEdit, o
 
   return (
     <>
-      <Card className="mb-2 shadow-sm">
+      <Card className="mb-2">
         <Card.Body className="flex flex-wrap items-end gap-4 p-4">
           <Form.Group>
             <Form.Label className="mb-1 text-muted">Search</Form.Label>
@@ -445,7 +445,7 @@ function MenuCatalog({ menuType, items, canManageMenu, pending, onAdd, onEdit, o
           )}
         </Card.Body>
       </Card>
-      <Card className="shadow-sm">
+      <Card>
         <Table hover>
           <thead>
             <tr>

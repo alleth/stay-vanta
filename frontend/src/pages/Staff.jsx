@@ -78,7 +78,7 @@ export default function Staff() {
       {loading ? (
         <SkeletonTable rows={5} />
       ) : (
-        <Card className="shadow-sm">
+        <Card>
           <Table hover>
             <thead>
               <tr>
