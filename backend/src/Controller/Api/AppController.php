@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\UnauthorizedException;
@@ -10,10 +11,11 @@ use Cake\Http\Exception\UnauthorizedException;
 /**
  * Base controller for all JSON API endpoints.
  *
- * Implements a lightweight bearer-token authentication scheme: the token is
- * stored on the users row (api_token) and matched on each request. The
- * authenticated user is exposed via $this->currentUser so actions can stamp
- * the acting receptionist for accountability.
+ * Implements a lightweight bearer-token authentication scheme: a SHA-256
+ * digest of the token is stored on the users row (api_token) and the digest of
+ * the presented token is matched on each request — the token itself is never
+ * persisted. The authenticated user is exposed via $this->currentUser so
+ * actions can stamp the acting receptionist for accountability.
  *
  * NOTE: This is a foundation-level scheme. For production, migrate to the
  * cakephp/authentication plugin (JWT or session) — see CLAUDE.md.
@@ -115,9 +117,14 @@ class AppController extends Controller
             return null;
         }
 
+        // Match on the digest: `users.api_token` stores the hash, never the
+        // token itself (see UsersTable::hashToken).
         $users = $this->fetchTable('Users');
         $user = $users->find()
-            ->where(['api_token' => $m[1], 'is_active' => true])
+            ->where([
+                'api_token' => UsersTable::hashToken($m[1]),
+                'is_active' => true,
+            ])
             ->first();
 
         if ($user === null) {

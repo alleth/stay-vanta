@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\Table\UsersTable;
 use Cake\I18n\DateTime;
 
 /**
@@ -34,13 +35,17 @@ class AuthController extends AppController
             return;
         }
 
-        // Issue a fresh opaque token (30-day expiry).
-        $user->api_token = bin2hex(random_bytes(32));
-        $user->token_expires = (new DateTime())->modify('+30 days');
+        // Issue a fresh opaque token. Only its digest is stored — the
+        // plaintext below is the client's single copy and is never persisted
+        // or recoverable from the database.
+        [$token, $digest] = UsersTable::issueToken();
+        $user->api_token = $digest;
+        $user->token_expires = (new DateTime())
+            ->modify('+' . UsersTable::TOKEN_LIFETIME_DAYS . ' days');
         $users->saveOrFail($user);
 
         $this->set([
-            'token' => $user->api_token,
+            'token' => $token,
             'user' => $this->publicUser($user),
         ]);
         $this->viewBuilder()->setOption('serialize', ['token', 'user']);

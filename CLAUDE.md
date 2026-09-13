@@ -99,7 +99,11 @@ Enforce role checks on the **backend** too — frontend guards are UX only.
   `src/Model/Table/` — there is no auto-generated fallback.
 
 ### Auth is foundation-level, not production-grade
-Login issues an opaque token stored on `users.api_token` (30-day expiry); passwords use PHP
+Login issues an opaque 256-bit token (30-day expiry); `users.api_token` stores only its
+**SHA-256 digest** (`UsersTable::issueToken`/`hashToken`) and `AppController` matches the digest
+of the presented token, so a leaked database yields no usable sessions — the plaintext exists
+only in the client's localStorage. A plain hash is deliberate: the token is already random, so
+there's nothing to brute-force and a work factor would only tax every request. Passwords use PHP
 `password_hash`/`password_verify` (see `User::_setPassword`/`verifyPassword`). This avoids
 extra dependencies for the skeleton. **For production, migrate to the `cakephp/authentication`
 plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
