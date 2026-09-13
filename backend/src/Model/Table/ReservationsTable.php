@@ -4,8 +4,10 @@ declare(strict_types=1);
 namespace App\Model\Table;
 
 use App\Model\Entity\Reservation;
+use Cake\ORM\Query\SelectQuery;
 use Cake\ORM\RulesChecker;
 use Cake\ORM\Table;
+use Cake\ORM\TableRegistry;
 use Cake\Validation\Validator;
 use Closure;
 
@@ -18,6 +20,12 @@ use Closure;
 class ReservationsTable extends Table
 {
     public const STATUSES = ['booked', 'checked_in', 'checked_out', 'cancelled'];
+
+    /**
+     * Statuses that actually hold a room. A checked-out or cancelled booking
+     * releases it, so only these two can collide with a new one.
+     */
+    public const HOLDS_ROOM = ['booked', 'checked_in'];
     public const DISCOUNT_TYPES = ['none', 'senior', 'pwd'];
     public const PAYMENT_STATUSES = ['unpaid', 'paid'];
 
@@ -114,7 +122,84 @@ class ReservationsTable extends Table
             'message' => 'That guest does not belong to this property.',
         ]);
 
+        $rules->add(
+            function (Reservation $reservation): bool {
+                // A booking that no longer holds the room can't collide.
+                if (
+                    $reservation->room_id === null
+                    || !in_array($reservation->status, self::HOLDS_ROOM, true)
+                    || !$reservation->check_in
+                    || !$reservation->check_out
+                ) {
+                    return true;
+                }
+
+                return !$this->conflicting(
+                    (int)$reservation->room_id,
+                    $reservation->check_in,
+                    $reservation->check_out,
+                    $reservation->isNew() ? null : (int)$reservation->id,
+                )->count();
+            },
+            'roomAvailable',
+            [
+                'errorField' => 'room_id',
+                'message' => 'That room is already booked for those dates.',
+            ],
+        );
+
         return $rules;
+    }
+
+    /**
+     * Bookings that hold `$roomId` for any night in `[$checkIn, $checkOut)`.
+     *
+     * Occupancy is the nights stayed, not the dates touched: a booking that
+     * checks out on the 14th frees the room for someone checking in that same
+     * day, which is why the comparisons are strict. (The Front Desk calendar
+     * derives availability the same way.)
+     *
+     * @param \Cake\I18n\Date|string $checkIn
+     * @param \Cake\I18n\Date|string $checkOut
+     */
+    public function conflicting(
+        int $roomId,
+        mixed $checkIn,
+        mixed $checkOut,
+        ?int $excludeId = null,
+    ): SelectQuery {
+        $query = $this->find()->where([
+            'Reservations.room_id' => $roomId,
+            'Reservations.status IN' => self::HOLDS_ROOM,
+            'Reservations.check_in <' => $checkOut,
+            'Reservations.check_out >' => $checkIn,
+        ]);
+
+        if ($excludeId !== null) {
+            $query->where(['Reservations.id !=' => $excludeId]);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Take a write lock on a room for the rest of the current transaction.
+     *
+     * The rule above closes the gap between two requests only if they can't
+     * both pass it at once — checking availability and then inserting is two
+     * steps, and two receptionists booking the same room at the same moment
+     * would otherwise both find it free. Locking the room row serialises them:
+     * the second waits, then re-runs the rule and sees the first booking.
+     *
+     * Only meaningful inside a transaction — the lock is released when that
+     * transaction ends. Same idiom as ReceiptSeriesTable::assignNext().
+     */
+    public function lockRoom(int $roomId): void
+    {
+        TableRegistry::getTableLocator()->get('Rooms')->find()
+            ->where(['Rooms.id' => $roomId])
+            ->epilog('FOR UPDATE')
+            ->first();
     }
 
     /**

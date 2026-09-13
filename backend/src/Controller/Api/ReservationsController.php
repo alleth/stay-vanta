@@ -95,6 +95,12 @@ class ReservationsController extends AppController
                 $source = $this->request->getData('source') ?? BookingSourcesTable::WALK_IN;
                 $roomId = $this->request->getData('room_id');
 
+                // Serialise bookings for this room so two receptionists can't
+                // both pass the availability rule before either has saved.
+                if ($roomId) {
+                    $reservations->lockRoom((int)$roomId);
+                }
+
                 if (
                     $source !== BookingSourcesTable::WALK_IN
                     && !$this->fetchTable('BookingSources')->exists([
@@ -224,26 +230,52 @@ class ReservationsController extends AppController
 
         $discountType = $this->request->getData('discount_type') ?? $reservation->discount_type;
 
-        $reservations->patchEntity($reservation, [
-            'room_id' => $roomId,
-            'check_in' => $this->request->getData('check_in') ?? $reservation->check_in,
-            'check_out' => $this->request->getData('check_out') ?? $reservation->check_out,
-            'source' => $source,
-            'discount_type' => $discountType,
-            'discount_amount' => $this->resolveReferralAmount(),
-            'promo_rate' => $promoRate,
-            'additional_beds' => (int)($this->request->getData('additional_beds') ?? $reservation->additional_beds),
-            'receptionist_id' => (int)$this->currentUser->id,
-        ], ['accessibleFields' => ['property_id' => false]]);
+        // Transactional for the same reason add() is: lockRoom() only holds
+        // for the life of a transaction, and moving a booking to a different
+        // room (or different dates) races exactly like creating one.
+        $saved = $reservations->getConnection()->transactional(
+            function () use (
+                $reservations,
+                $reservation,
+                $propertyId,
+                $roomId,
+                $source,
+                $promoRate,
+                $discountType,
+            ): bool {
+                if ($roomId) {
+                    $reservations->lockRoom((int)$roomId);
+                }
 
-        if ($reservations->save($reservation) === false) {
+                $reservations->patchEntity($reservation, [
+                    'room_id' => $roomId,
+                    'check_in' => $this->request->getData('check_in') ?? $reservation->check_in,
+                    'check_out' => $this->request->getData('check_out') ?? $reservation->check_out,
+                    'source' => $source,
+                    'discount_type' => $discountType,
+                    'discount_amount' => $this->resolveReferralAmount(),
+                    'promo_rate' => $promoRate,
+                    'additional_beds' => (int)($this->request->getData('additional_beds')
+                        ?? $reservation->additional_beds),
+                    'receptionist_id' => (int)$this->currentUser->id,
+                ], ['accessibleFields' => ['property_id' => false]]);
+
+                if ($reservations->save($reservation) === false) {
+                    return false;
+                }
+
+                if ($reservation->guest_id !== null) {
+                    $this->collectAdvanceDownpayment($reservation, $propertyId, (int)$reservation->guest_id);
+                }
+
+                return true;
+            },
+        );
+
+        if (!$saved) {
             $this->validationFailed($reservation->getErrors());
 
             return;
-        }
-
-        if ($reservation->guest_id !== null) {
-            $this->collectAdvanceDownpayment($reservation, $propertyId, (int)$reservation->guest_id);
         }
 
         $this->respondWithReservation($reservation, 200);
