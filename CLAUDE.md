@@ -112,10 +112,12 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `src/components/ProtectedRoute.jsx` wraps authed routes; pass `roles={[...]}` to restrict.
 - **No persistent tab nav** — `/` renders `src/pages/Hub.jsx`, a role-scoped grid of icon tiles
   (one per module) that's the post-login landing screen; `src/components/Layout.jsx`'s header
-  keeps only a two-level **breadcrumb** (`StayVanta / <module>`, where the brand is the link
-  back to `/` and the trailing crumb names the current page — labels read from `src/nav.js`,
-  so they can't drift from the Hub tile that was clicked), the theme toggle, and the
-  user/logout chip.
+  keeps only the brand mark (itself the link back to `/`), the theme toggle, and the user/logout
+  chip. Getting back is a two-level **breadcrumb** (`Home / <module>`) rendered at the top of
+  the page body, not in the header — the header is global chrome and doesn't change as you move
+  around, so page-level context doesn't belong in it. Crumb labels are read from `src/nav.js`,
+  so they can't drift from the Hub tile that was clicked; the Hub itself renders no crumb,
+  being the trail's root.
   `src/nav.js` is the single source of truth for the module list (`{to, label, blurb, roles,
   icon}`) that `Hub.jsx` renders — icons live in `src/components/icons.jsx` (hand-rolled inline
   SVGs, no icon library). This is deliberate, not an oversight: every module-to-module switch
