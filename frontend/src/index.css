@@ -124,6 +124,38 @@
   }
   .sv-group > *:focus { position: relative; z-index: 1; }
 
+  /* Landing-page light flares (src/pages/Landing.jsx).
+     Three things separate light from paint here: layered gradients so the
+     falloff isn't linear (a hot core, a broad halo, a faint wash), a blur so
+     no edge is ever crisp, and `screen` blending so overlapping layers add
+     up the way light does instead of covering each other.
+     Only transform and opacity are animated, which keeps the drift on the
+     compositor rather than repainting a 700px gradient every frame. */
+  .sv-flare {
+    position: absolute;
+    pointer-events: none;
+    mix-blend-mode: screen;
+    will-change: transform, opacity;
+  }
+
+  /* The halo and the core drift at different rates and in different
+     directions — that mismatch is what reads as depth, and stops the whole
+     thing sliding around as one flat sticker. */
+  .sv-flare-halo {
+    filter: blur(24px);
+    animation: sv-flare-halo 32s ease-in-out infinite;
+  }
+  .sv-flare-core {
+    filter: blur(16px);
+    animation: sv-flare-core 24s ease-in-out infinite;
+  }
+  /* The anamorphic smear — the giveaway that a bright source is hitting a
+     lens. Very low opacity: it should be felt more than seen. */
+  .sv-flare-streak {
+    filter: blur(12px);
+    animation: sv-flare-streak 28s ease-in-out infinite;
+  }
+
   /* Boot splash (components/BrandSplash.jsx; duplicated inline in index.html
      for the pre-JS gap — keep both in sync): staggered letter wave + a
      sliding accent bar. */
@@ -139,6 +171,34 @@
 @keyframes sv-wave {
   0%, 40%, 100% { transform: translateY(0); }
   20% { transform: translateY(-0.3em); }
+}
+
+/* Slow, wide, and never returning to centre at the same moment — three
+   different periods so the layers don't visibly sync up. */
+@keyframes sv-flare-halo {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.85; }
+  50%      { transform: translate3d(-3%, 4%, 0) scale(1.12); opacity: 1; }
+}
+
+@keyframes sv-flare-core {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.9; }
+  35%      { transform: translate3d(4%, -3%, 0) scale(1.06); opacity: 1; }
+  70%      { transform: translate3d(-2%, 3%, 0) scale(0.95); opacity: 0.75; }
+}
+
+@keyframes sv-flare-streak {
+  0%, 100% { transform: translate3d(0, 0, 0) scaleX(1); opacity: 0.35; }
+  45%      { transform: translate3d(6%, 0, 0) scaleX(1.25); opacity: 0.6; }
+}
+
+/* Ambient decoration is exactly what motion sensitivity reacts to: hold the
+   flares at their resting frame rather than removing them. */
+@media (prefers-reduced-motion: reduce) {
+  .sv-flare-halo,
+  .sv-flare-core,
+  .sv-flare-streak {
+    animation: none;
+  }
 }
 
 @keyframes sv-bar-slide {
