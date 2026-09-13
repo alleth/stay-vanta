@@ -24,54 +24,18 @@ export default function Landing() {
       className="relative flex min-h-screen flex-col overflow-hidden"
       style={{ background: INK, fontFamily: "'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif" }}
     >
-      {/* The reference's two glows, built up as light rather than flat fills:
-          each is a broad halo, a hot near-white core, and a faint horizontal
-          smear, drifting on three different periods. See .sv-flare in
-          index.css for why they blend and blur the way they do. */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        {/* Top-right — the brighter source. */}
-        <div
-          className="sv-flare sv-flare-halo -right-40 -top-40 h-[680px] w-[680px] rounded-full"
-          style={{
-            background:
-              'radial-gradient(circle, rgba(233,162,60,0.20) 0%, rgba(233,162,60,0.09) 32%,'
-              + ' rgba(233,162,60,0.03) 55%, transparent 72%)',
-          }}
-        />
-        <div
-          className="sv-flare sv-flare-core right-0 -top-16 h-[240px] w-[240px] rounded-full"
-          style={{
-            background:
-              'radial-gradient(circle, rgba(255,236,196,0.34) 0%, rgba(233,162,60,0.20) 38%, transparent 70%)',
-          }}
-        />
-        <div
-          className="sv-flare sv-flare-streak -right-24 top-24 h-[3px] w-[560px] rounded-full"
-          style={{
-            background:
-              'linear-gradient(90deg, transparent, rgba(233,162,60,0.35) 35%,'
-              + ' rgba(255,236,196,0.55) 50%, rgba(233,162,60,0.35) 65%, transparent)',
-          }}
-        />
-
-        {/* Bottom-left — dimmer and cooler, so the two don't read as twins. */}
-        <div
-          className="sv-flare sv-flare-halo -bottom-56 -left-56 h-[700px] w-[700px] rounded-full"
-          style={{
-            animationDelay: '-11s',
-            background:
-              'radial-gradient(circle, rgba(233,162,60,0.13) 0%, rgba(233,162,60,0.06) 35%, transparent 70%)',
-          }}
-        />
-        <div
-          className="sv-flare sv-flare-core -bottom-10 left-10 h-[200px] w-[200px] rounded-full"
-          style={{
-            animationDelay: '-7s',
-            background:
-              'radial-gradient(circle, rgba(255,236,196,0.20) 0%, rgba(233,162,60,0.12) 40%, transparent 72%)',
-          }}
-        />
-      </div>
+      {/* Ambient glows from the reference, scaled to a page rather than a
+          square. Pointer-events off so they never eat a click. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(233,162,60,0.14), transparent 70%)' }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-56 -left-56 h-[560px] w-[560px] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(233,162,60,0.10), transparent 70%)' }}
+      />
 
       <header className="relative z-10 flex items-center justify-between px-6 py-5 lg:px-12">
         <div className="flex items-center gap-3">
