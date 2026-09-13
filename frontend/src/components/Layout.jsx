@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Button, Badge } from './ui'
 import { HomeIcon } from './icons'
+import BrandMark from './BrandMark'
 import ThemeToggle from './ThemeToggle'
 import { useAuth } from '../context/AuthContext'
 
@@ -27,8 +28,12 @@ export default function Layout() {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-30 border-b border-line bg-surface/95 px-4 py-2.5 backdrop-blur-sm lg:px-8">
         <nav className="flex flex-wrap items-center gap-3">
-          <NavLink to="/" className="sv-serif text-2xl font-bold text-body no-underline">
-            Stay<span className="sv-accent">Vanta</span>
+          <NavLink
+            to="/"
+            className="sv-serif flex items-center gap-2 text-2xl font-bold text-body no-underline"
+          >
+            <BrandMark className="h-6 w-6 shrink-0" />
+            <span>Stay<span className="sv-accent">Vanta</span></span>
           </NavLink>
           <NavLink
             to="/"

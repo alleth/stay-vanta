@@ -2,8 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- The full mark, plus the design's simplified diamond for a 16px tab
+         (browsers pick by the `sizes` hint; the chevron's two strokes blur
+         together at that size). Both live in public/. -->
+    <link rel="icon" type="image/svg+xml" sizes="16x16" href="/favicon-16.svg" />
+    <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg" />
+    <!-- Safari ignores the SVG favicons above for "Add to Home Screen" / Reading List and wants a raster PNG. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Tints the mobile browser chrome to match the app background. Light is
+         the default here; the script below corrects it before first paint and
+         ThemeContext keeps it in step with the toggle after that. Deliberately
+         not two `media`-scoped tags: those follow the OS, which is the wrong
+         answer for a user whose stored choice differs from it. -->
+    <meta name="theme-color" content="#f7f7f8" />
     <title>StayVanta — All-in-One Hotel & Resort Management Platform</title>
     <!-- Boot splash for the gap before the JS bundle loads. React replaces
          #root with the identical BrandSplash component while the session
@@ -23,6 +35,10 @@
               : 'light';
           }
           document.documentElement.setAttribute('data-theme', t);
+          // Same two values as --sv-boot-bg below; the stylesheet hasn't been
+          // parsed at this point, so they can't be read back from the token.
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', t === 'dark' ? '#121317' : '#f7f7f8');
         } catch (e) {
           /* storage blocked (private mode): light is the default */
         }

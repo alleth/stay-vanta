@@ -37,7 +37,17 @@ export function ThemeProvider({ children }) {
 
   // The single write of the attribute every token override keys off.
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
+    const root = document.documentElement
+    root.dataset.theme = theme
+
+    // Keep the mobile browser chrome matching the app background. Read the
+    // token back rather than keeping a third copy of the hex: getComputedStyle
+    // forces the recalc, so this is the value the line above just applied.
+    // (index.html sets the same tag pre-paint, where the stylesheet doesn't
+    // exist yet and the literals are unavoidable.)
+    const canvas = getComputedStyle(root).getPropertyValue('--color-canvas').trim()
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta && canvas) meta.setAttribute('content', canvas)
   }, [theme])
 
   const setTheme = useCallback((next) => {

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Card, Form, Button, Alert, Spinner } from '../components/ui'
+import BrandMark from '../components/BrandMark'
 import ThemeToggle from '../components/ThemeToggle'
 import { useAuth } from '../context/AuthContext'
 
@@ -33,6 +34,7 @@ export default function Login() {
       <ThemeToggle className="absolute right-4 top-4" />
       <Card className="w-full max-w-[400px]">
         <Card.Body className="p-10">
+          <BrandMark className="mx-auto mb-3 h-12 w-12" />
           <h1 className="sv-serif mb-1 text-center text-[2rem] font-bold">
             Stay<span className="sv-accent">Vanta</span>
           </h1>

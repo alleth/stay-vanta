@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="StayVanta">
+  <title>StayVanta</title>
+  <!-- The simplified mark from the design reference, for a 16px tab where the
+       two-stroke chevron collapses into mush. One solid amber diamond holds
+       its shape at any size and needs no dark-mode variant. -->
+  <polygon points="32,8 56,32 32,56 8,32" fill="#e9a23c" />
+</svg>
