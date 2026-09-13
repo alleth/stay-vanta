@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ListGroup,
+  Tab, Tabs, Card, Table, Button, ButtonGroup, Badge, Modal, Form, Alert, Spinner, ListGroup,
 } from '../components/ui'
 import { useProperty } from '../context/PropertyContext'
 import { useAuth } from '../context/AuthContext'
@@ -776,11 +776,18 @@ function ReservationModal({
 }) {
   const editing = Boolean(reservation)
   const firstAvailable = rooms.find((r) => r.status === 'available')
+  // New bookings start as a walk-in, since that's the common case at a desk —
+  // but opening the form from a future date on the Calendar clearly isn't one,
+  // so that defaults to a channel instead (and keeps the date that was picked).
+  const forFutureDate = Boolean(defaultCheckIn) && defaultCheckIn > todayStr()
   const [form, setForm] = useState({
     room_id: reservation?.room_id ?? defaultRoomId ?? firstAvailable?.id ?? '',
-    check_in: reservation?.check_in ?? defaultCheckIn ?? '',
+    // Never blank: a walk-in's date field is disabled, so an empty default
+    // would leave a required field nobody can fill.
+    check_in: reservation?.check_in ?? defaultCheckIn ?? todayStr(),
     check_out: reservation?.check_out ?? '',
-    source: reservation?.source ?? WALK_IN,
+    source: reservation?.source
+      ?? (forFutureDate ? bookingSources[0]?.code ?? WALK_IN : WALK_IN),
     discount_type: reservation?.discount_type ?? 'none',
     referral: Boolean(reservation?.discount_amount),
     discount_amount: reservation?.discount_amount ?? '',
@@ -789,6 +796,23 @@ function ReservationModal({
     contact_number: '', email: '', address: '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+
+  // `source` stays the single value that gets submitted — walk_in or a
+  // channel code. The two controls above it are just a clearer way to pick
+  // one: a walk-in and an OTA booking are different situations, not two
+  // neighbours in one long list.
+  const isWalkIn = form.source === WALK_IN
+  const hasChannels = bookingSources.length > 0
+
+  // A walk-in is someone at the desk right now, so the stay starts today and
+  // the date isn't the receptionist's to choose. The backend decides this for
+  // itself too — this only keeps the form from disagreeing with the result.
+  function setBookingType(type) {
+    setForm((f) => (type === WALK_IN
+      ? { ...f, source: WALK_IN, check_in: todayStr() }
+      : { ...f, source: bookingSources[0]?.code ?? '' }))
+  }
+
   // The promo rate is read-only here: the room's original rate × the admin's
   // multiplier for the picked source (the backend computes the same on booking).
   const baseRate = resolveBaseRate(rates, form.room_id)
@@ -947,7 +971,8 @@ function ReservationModal({
             <Form.Group className="mb-4 md:col-span-3">
               <Form.Label>Check-in</Form.Label>
               <Form.Control type="date" value={form.check_in} onChange={set('check_in')}
-                min={todayStr()} required />
+                min={todayStr()} required disabled={isWalkIn && !editing} />
+              {isWalkIn && !editing && <Form.Text muted>Today — the guest is here.</Form.Text>}
             </Form.Group>
             <Form.Group className="mb-4 md:col-span-3">
               <Form.Label>Check-out</Form.Label>
@@ -957,12 +982,45 @@ function ReservationModal({
           </div>
           <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
             <Form.Group className="mb-4 md:col-span-4">
-              <Form.Label>Source</Form.Label>
-              <Form.Select value={form.source} onChange={set('source')}>
-                <option value={WALK_IN}>Walk-in</option>
-                {bookingSources.map((bs) => <option key={bs.id} value={bs.code}>{bs.name}</option>)}
-              </Form.Select>
+              <Form.Label>Booking type</Form.Label>
+              <ButtonGroup>
+                <Button
+                  size="sm"
+                  variant={isWalkIn ? 'secondary' : 'outline-secondary'}
+                  disabled={editing}
+                  onClick={() => setBookingType(WALK_IN)}
+                >
+                  Walk-in
+                </Button>
+                <Button
+                  size="sm"
+                  variant={!isWalkIn ? 'secondary' : 'outline-secondary'}
+                  disabled={editing || !hasChannels}
+                  onClick={() => setBookingType('online')}
+                >
+                  Online booking
+                </Button>
+              </ButtonGroup>
+              {isWalkIn && !editing && (
+                <Form.Text muted>Arriving now — checks in as soon as you save.</Form.Text>
+              )}
+              {!hasChannels && (
+                <Form.Text muted>
+                  No online channels yet — add one on the Promo Rates tab.
+                </Form.Text>
+              )}
+              {editing && (
+                <Form.Text muted>A booking can&apos;t change type after it&apos;s made.</Form.Text>
+              )}
             </Form.Group>
+            {!isWalkIn && (
+              <Form.Group className="mb-4 md:col-span-4">
+                <Form.Label>Channel</Form.Label>
+                <Form.Select value={form.source} onChange={set('source')} required>
+                  {bookingSources.map((bs) => <option key={bs.id} value={bs.code}>{bs.name}</option>)}
+                </Form.Select>
+              </Form.Group>
+            )}
             <Form.Group className="mb-4 md:col-span-4">
               <Form.Label>Discount</Form.Label>
               <Form.Select value={form.discount_type} onChange={set('discount_type')}>

@@ -125,15 +125,27 @@ class ReservationsController extends AppController
                     }
                 }
 
+                // A walk-in is a guest standing at the desk, so it isn't a
+                // future booking at all: the stay starts today and they take
+                // the room on save, rather than being booked and then checked
+                // in a moment later. The date is decided here rather than
+                // trusted from the form — "walk-in" and "arriving next week"
+                // can't both be true.
+                $isWalkIn = $source === BookingSourcesTable::WALK_IN;
+                $checkIn = $isWalkIn
+                    ? Date::today()->format('Y-m-d')
+                    : $this->request->getData('check_in');
+
                 $discountType = $this->request->getData('discount_type') ?? 'none';
                 $reservation = $reservations->newEntity([
                     'property_id' => $propertyId,
                     'room_id' => $roomId,
                     'guest_id' => $guestId,
                     'receptionist_id' => (int)$this->currentUser->id,
-                    'check_in' => $this->request->getData('check_in'),
+                    'check_in' => $checkIn,
                     'check_out' => $this->request->getData('check_out'),
-                    'status' => 'booked',
+                    'status' => $isWalkIn ? 'checked_in' : 'booked',
+                    'checked_in_at' => $isWalkIn ? new DateTime() : null,
                     'source' => $source,
                     'discount_type' => $discountType,
                     'discount_amount' => $this->resolveReferralAmount(),
@@ -145,6 +157,19 @@ class ReservationsController extends AppController
                     return false;
                 }
 
+                // The room is taken from this moment, exactly as transition()
+                // does on check-in. No early check-in fee: that charge is for
+                // arriving ahead of a booked date, which a walk-in has none of,
+                // and there is no confirmation step here to ask about it.
+                if ($isWalkIn && $reservation->room_id) {
+                    $rooms = $this->fetchTable('Rooms');
+                    $room = $rooms->get($reservation->room_id);
+                    $room->set('status', 'occupied');
+                    $rooms->saveOrFail($room);
+                }
+
+                // Only an advance booking takes a downpayment, so this is a
+                // no-op for a walk-in — its stay starts today.
                 if ($guestId !== null) {
                     $this->collectAdvanceDownpayment($reservation, $propertyId, $guestId);
                 }
