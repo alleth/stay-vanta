@@ -116,6 +116,19 @@ return [
         ],
 
         /*
+         * Failed sign-in counters (App\Auth\LoginThrottle). The duration is
+         * the lockout length: an entry that ages out *is* the pause ending,
+         * so the two must stay in step with LoginThrottle::LOCKOUT_SECONDS.
+         */
+        'login_throttle' => [
+            'className' => FileEngine::class,
+            'prefix' => 'sv_login_',
+            'path' => CACHE,
+            'serialize' => true,
+            'duration' => '+15 minutes',
+        ],
+
+        /*
          * Configure the cache used for general framework caching.
          * Translation cache files are stored with this configuration.
          * Duration will be set to '+2 minutes' in bootstrap.php when debug = true

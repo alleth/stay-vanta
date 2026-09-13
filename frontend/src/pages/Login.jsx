@@ -20,8 +20,13 @@ export default function Login() {
     try {
       await login(email, password)
       navigate('/')
-    } catch {
-      setError('Invalid email or password.')
+    } catch (err) {
+      // Surface what the API actually said. A rate-limited attempt comes back
+      // as 429 with how long the pause has left — telling that user their
+      // password is wrong, for fifteen minutes, would be actively misleading.
+      // Login answers with {error}; other endpoints use {message}.
+      const data = err?.response?.data
+      setError(data?.error ?? data?.message ?? 'Invalid email or password.')
     } finally {
       setBusy(false)
     }
