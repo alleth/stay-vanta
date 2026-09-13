@@ -1,0 +1,129 @@
+import { Link } from 'react-router-dom'
+import BrandMark from '../components/BrandMark'
+
+// The public landing page, adapted from the SocialPromo design reference.
+//
+// That reference is a 1080×1080 promo square, so what carries over is its
+// identity — ink ground, amber mark and rules, Manrope, the two soft radial
+// glows, the headline/eyebrow treatment — rather than its layout.
+//
+// Deliberately single-theme: it commits to the dark promo look instead of
+// following the app's light/dark tokens, so every colour here is written out
+// rather than taken from a token. That's also why it doesn't use the ui kit —
+// this page shares the brand, not the admin interface's surfaces.
+const INK = '#111827'
+const AMBER = '#e9a23c'
+const SUBHEAD = '#c7ccd6'
+
+// Named in the reference's own subhead — the four things the platform covers.
+const COVERS = ['Owner insights', 'Front desk', 'Inventory', 'Staff']
+
+export default function Landing() {
+  return (
+    <div
+      className="relative flex min-h-screen flex-col overflow-hidden"
+      style={{ background: INK, fontFamily: "'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif" }}
+    >
+      {/* Ambient glows from the reference, scaled to a page rather than a
+          square. Pointer-events off so they never eat a click. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(233,162,60,0.14), transparent 70%)' }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-56 -left-56 h-[560px] w-[560px] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(233,162,60,0.10), transparent 70%)' }}
+      />
+
+      <header className="relative z-10 flex items-center justify-between px-6 py-5 lg:px-12">
+        <div className="flex items-center gap-3">
+          <BrandMark className="h-8 w-8 shrink-0" style={{ '--color-body': AMBER, '--color-accent': AMBER }} />
+          <span
+            className="text-xl font-extrabold tracking-[-0.02em] sm:text-2xl"
+            style={{ color: AMBER }}
+          >
+            StayVanta
+          </span>
+        </div>
+        <Link
+          to="/login"
+          className="rounded-lg border px-4 py-2 text-sm font-semibold no-underline transition-colors"
+          style={{ borderColor: 'rgba(233,162,60,0.45)', color: AMBER }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(233,162,60,0.12)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+        >
+          Sign in
+        </Link>
+      </header>
+
+      <main className="relative z-10 flex grow flex-col items-center justify-center px-6 py-16 text-center lg:px-12">
+        <div className="flex items-center gap-3.5">
+          <span className="hidden h-px w-7 sm:block" style={{ background: AMBER }} />
+          <span
+            className="text-[11px] font-bold uppercase tracking-[0.3em] sm:text-[13px]"
+            style={{ color: AMBER }}
+          >
+            Hotel &amp; Resort Management, Simplified
+          </span>
+          <span className="hidden h-px w-7 sm:block" style={{ background: AMBER }} />
+        </div>
+
+        <h1
+          className="mt-10 max-w-[820px] text-balance text-[2.25rem] font-extrabold leading-[1.14] tracking-[-0.02em] sm:text-[3rem] lg:text-[4rem]"
+          style={{ color: '#ffffff' }}
+        >
+          One Dashboard.
+          <br />
+          Every Property.
+        </h1>
+
+        <p
+          className="mt-8 max-w-[660px] text-base font-medium leading-[1.55] sm:text-lg lg:text-[1.375rem]"
+          style={{ color: SUBHEAD }}
+        >
+          Owner insights, front-desk operations, inventory, and staff — unified in a single
+          hotel &amp; resort platform.
+        </p>
+
+        {/* No destination yet — a placeholder for whatever sign-up flow comes
+            later. Inert on purpose rather than pointing somewhere wrong. */}
+        <button
+          type="button"
+          className="mt-12 rounded-lg px-7 py-3 text-base font-bold transition-opacity hover:opacity-90"
+          style={{ background: AMBER, color: INK }}
+        >
+          Get Started
+        </button>
+
+        <ul className="mt-16 flex list-none flex-wrap items-center justify-center gap-x-8 gap-y-3 p-0">
+          {COVERS.map((c) => (
+            <li
+              key={c}
+              className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]"
+              style={{ color: 'rgba(199,204,214,0.7)' }}
+            >
+              <span className="h-1 w-1 rounded-full" style={{ background: AMBER }} />
+              {c}
+            </li>
+          ))}
+        </ul>
+      </main>
+
+      <footer
+        className="relative z-10 px-6 py-6 text-center text-sm lg:px-12"
+        style={{ color: 'rgba(199,204,214,0.55)' }}
+      >
+        <span className="mr-2">&copy; {new Date().getFullYear()} StayVanta</span>·
+        <Link to="/privacy" className="mx-2 no-underline hover:underline" style={{ color: 'inherit' }}>
+          Privacy Policy
+        </Link>
+        ·
+        <Link to="/terms" className="ml-2 no-underline hover:underline" style={{ color: 'inherit' }}>
+          Terms of Service
+        </Link>
+      </footer>
+    </div>
+  )
+}

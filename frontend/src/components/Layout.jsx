@@ -37,7 +37,7 @@ export default function Layout() {
       <header className="sticky top-0 z-30 border-b border-line bg-surface/95 px-4 py-2.5 backdrop-blur-sm lg:px-8">
         <div className="flex flex-wrap items-center gap-3">
           <NavLink
-            to="/"
+            to="/hub"
             className="sv-serif flex items-center gap-2 text-lg font-bold text-body no-underline"
           >
             <BrandMark className="h-6 w-6 shrink-0" />
@@ -66,7 +66,7 @@ export default function Layout() {
           <nav aria-label="Breadcrumb" className="mb-4">
             <ol className="flex items-center gap-2 text-sm">
               <li className="flex">
-                <NavLink to="/" className="text-muted no-underline hover:text-body">
+                <NavLink to="/hub" className="text-muted no-underline hover:text-body">
                   Home
                 </NavLink>
               </li>

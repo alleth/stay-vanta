@@ -8,7 +8,8 @@ export default function ProtectedRoute({ children, roles }) {
 
   if (loading) return <BrandSplash />
   if (!user) return <Navigate to="/login" replace />
-  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />
+  // Wrong role for this module — back to the Hub, not the landing page.
+  if (roles && !roles.includes(user.role)) return <Navigate to="/hub" replace />
 
   return children
 }

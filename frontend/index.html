@@ -16,6 +16,16 @@
          not two `media`-scoped tags: those follow the OS, which is the wrong
          answer for a user whose stored choice differs from it. -->
     <meta name="theme-color" content="#f7f7f8" />
+    <!-- Manrope is the landing page's face only (src/pages/Landing.jsx); the
+         app itself stays on the system stack. The stylesheet is a small
+         request on every load, but the font files are fetched only where the
+         family is actually rendered. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap"
+    />
     <title>StayVanta — All-in-One Hotel & Resort Management Platform</title>
     <!-- Boot splash for the gap before the JS bundle loads. React replaces
          #root with the identical BrandSplash component while the session

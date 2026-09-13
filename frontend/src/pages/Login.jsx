@@ -19,7 +19,7 @@ export default function Login() {
     setBusy(true)
     try {
       await login(email, password)
-      navigate('/')
+      navigate('/hub')
     } catch (err) {
       // Surface what the API actually said. A rate-limited attempt comes back
       // as 429 with how long the pause has left — telling that user their
