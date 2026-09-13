@@ -70,6 +70,50 @@ class FoodOrdersTable extends Table
     }
 
     /**
+     * The statutory discount for an order, split across its beneficiaries.
+     *
+     * The discount only covers each qualified diner's own even share of the
+     * bill — `subtotal * (beneficiaries / total_diners) * 20%` — because
+     * RA 9994 and the PWD Magna Carta don't discount a whole table just
+     * because one diner qualifies.
+     *
+     * The total is computed in whole cents first and then handed out evenly,
+     * any leftover cent going to the earliest beneficiaries, so the shares
+     * always sum to exactly the total: each is snapshotted onto its own
+     * `food_order_discounts` row and posted as its own invoice line, and a
+     * third of a cent lost in rounding would leave the folio disagreeing with
+     * the order total.
+     *
+     * Extracted from place() so it can be tested without a database — it is
+     * the arithmetic most expensive to get wrong and the least convenient to
+     * exercise through a whole transaction.
+     *
+     * @return array{total: float, shares: list<float>}
+     */
+    public function splitStatutoryDiscount(float $subtotal, int $totalDiners, int $beneficiaryCount): array
+    {
+        if ($beneficiaryCount < 1 || $totalDiners < 1) {
+            return ['total' => 0.0, 'shares' => []];
+        }
+
+        $totalCents = (int)round(
+            $subtotal * $beneficiaryCount / $totalDiners * self::STATUTORY_DISCOUNT * 100,
+        );
+        $baseCents = intdiv($totalCents, $beneficiaryCount);
+        $remainder = $totalCents % $beneficiaryCount;
+
+        // Cast deliberately: PHP's `/` hands back an int when the division is
+        // exact, so an even 200.00 discount would come out as int(200) while
+        // 6.67 came out as a float. Callers are promised floats throughout.
+        $shares = [];
+        for ($i = 0; $i < $beneficiaryCount; $i++) {
+            $shares[] = (float)(($baseCents + ($i < $remainder ? 1 : 0)) / 100);
+        }
+
+        return ['total' => (float)($totalCents / 100), 'shares' => $shares];
+    }
+
+    /**
      * Place an order. $payload:
      *   items[]: {food_menu_item_id, quantity, selected_options?} for menu lines,
      *            where selected_options[] is {option_id, quantity} — exactly one
@@ -83,10 +127,9 @@ class FoodOrdersTable extends Table
      *   senior|pwd, name, id_number}, ...] — zero or more Senior/PWD diners on
      *   this order, e.g. two seniors at the same table; each needs a name +
      *   ID number and the statutory 20% only covers that beneficiary's own
-     *   even share of the items subtotal — subtotal * (beneficiaries /
-     *   total_diners) * 20%, capped at the full subtotal since beneficiaries
-     *   can never exceed total_diners); cooking_charge? (added after the
-     *   discount — it's a service fee, not food).
+     *   even share of the items subtotal, split by splitStatutoryDiscount()
+     *   above); cooking_charge? (added after the discount — it's a service
+     *   fee, not food).
      *
      * @throws \InvalidArgumentException On bad items/discount/payment/option input.
      * @throws \RuntimeException On charge-to-room without a guest (or a guest who
@@ -294,37 +337,22 @@ class FoodOrdersTable extends Table
                     ]));
                 }
 
-                // The statutory discount only covers each beneficiary's own
-                // even share of the bill: subtotal * (beneficiaries /
-                // total_diners) * 20%. Computed in whole cents up front, then
-                // handed out evenly across beneficiaries (any leftover cent
-                // to the first ones) so their individually-saved `amount`s
-                // always sum to exactly this total — no off-by-a-cent gap
-                // between the order total and its itemized invoice lines.
-                $beneficiaryCount = count($beneficiaries);
-                $totalDiscountCents = $beneficiaryCount > 0
-                    ? (int)round($subtotal * $beneficiaryCount / $totalDiners * self::STATUTORY_DISCOUNT * 100)
-                    : 0;
-                $discount = $totalDiscountCents / 100;
+                $split = $this->splitStatutoryDiscount($subtotal, $totalDiners, count($beneficiaries));
+                $discount = $split['total'];
                 $total = $subtotal - $discount + $cookingCharge;
 
                 $order->set('total', $total);
                 $this->saveOrFail($order);
 
                 $savedDiscounts = [];
-                if ($beneficiaryCount > 0) {
-                    $baseCents = intdiv($totalDiscountCents, $beneficiaryCount);
-                    $remainderCents = $totalDiscountCents % $beneficiaryCount;
-                    foreach ($beneficiaries as $i => $beneficiary) {
-                        $amount = ($baseCents + ($i < $remainderCents ? 1 : 0)) / 100;
-                        $savedDiscounts[] = $orderDiscounts->saveOrFail($orderDiscounts->newEntity([
-                            'food_order_id' => $order->id,
-                            'discount_type' => $beneficiary['discount_type'],
-                            'beneficiary_name' => $beneficiary['name'],
-                            'id_number' => $beneficiary['id_number'],
-                            'amount' => $amount,
-                        ]));
-                    }
+                foreach ($beneficiaries as $i => $beneficiary) {
+                    $savedDiscounts[] = $orderDiscounts->saveOrFail($orderDiscounts->newEntity([
+                        'food_order_id' => $order->id,
+                        'discount_type' => $beneficiary['discount_type'],
+                        'beneficiary_name' => $beneficiary['name'],
+                        'id_number' => $beneficiary['id_number'],
+                        'amount' => $split['shares'][$i],
+                    ]));
                 }
 
                 if ($paymentStatus === 'charge_to_room') {
