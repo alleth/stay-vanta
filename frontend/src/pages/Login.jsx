@@ -34,6 +34,13 @@ export default function Login() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4">
+      {/* Sign-in is reachable straight from the landing page's header, so it
+          needs a way back out. Mirrors the Back on Privacy/Terms, and sits
+          opposite the toggle. */}
+      <Button as={Link} to="/" variant="outline-secondary" size="sm"
+        className="absolute left-4 top-4">
+        ← Back
+      </Button>
       {/* Login renders outside Layout, so it needs its own toggle — otherwise
           the theme can only be changed after signing in. */}
       <ThemeToggle className="absolute right-4 top-4" />
