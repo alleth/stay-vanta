@@ -101,9 +101,10 @@ treatment instead — only reach for this on a landing/auth-style screen, not a 
 ```
 
 **No persistent tab nav** — the app navigates through `Hub.jsx`'s icon-tile grid (`src/nav.js`
-lists the modules), not a header tab bar; `Layout.jsx`'s header only ever has a Home link back to
-`/`. Don't add cross-module links inside a page — that's the one thing this pattern intentionally
-doesn't offer.
+lists the modules), not a header tab bar; `Layout.jsx`'s header carries a two-level breadcrumb
+(`StayVanta / <module>`) whose brand half is the only way back to `/`. Don't add cross-module
+links inside a page, and don't deepen the crumb trail for a tab or modal within a module — that's
+the one thing this pattern intentionally doesn't offer.
 
 **Section labels** inside a page (grouping a block of cards/tables under a heading), per
 `Dashboard.jsx`'s `SectionTitle`:

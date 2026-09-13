@@ -1,5 +1,5 @@
 // Minimal line-icon set for the post-login Hub (src/pages/Hub.jsx) and the
-// header's Home affordance. Deliberately hand-rolled rather than an npm icon
+// header's theme toggle. Deliberately hand-rolled rather than an npm icon
 // library (see frontend-design skill: no new UI dependencies) — plain
 // primitives (rect/circle/line) kept simple on purpose so they read clearly
 // at small sizes. All 24x24 viewBox, stroke-based, sized via className.
@@ -10,16 +10,6 @@ const BASE = {
   strokeWidth: 1.6,
   strokeLinecap: 'round',
   strokeLinejoin: 'round',
-}
-
-export function HomeIcon({ className }) {
-  return (
-    <svg {...BASE} className={className}>
-      <path d="M3 11l9-7 9 7" />
-      <rect x="5" y="11" width="14" height="9" rx="1" />
-      <rect x="10" y="14" width="4" height="6" />
-    </svg>
-  )
 }
 
 export function DashboardIcon({ className }) {

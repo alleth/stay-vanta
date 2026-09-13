@@ -32,7 +32,7 @@ export default function App() {
       >
         {/* "/" is the post-login Hub — a role-scoped icon grid (src/pages/Hub.jsx)
             that replaces a persistent tab bar; every module lives at its own
-            path and the header's Home link is the only way back here. */}
+            path, and the brand crumb in the header is the way back here. */}
         <Route index element={<Hub />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route
