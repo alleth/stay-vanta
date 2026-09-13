@@ -49,10 +49,15 @@ export default function Login() {
           >
             <span aria-hidden="true">←</span> Back
           </Link>
-          <BrandMark className="mx-auto mb-3 h-12 w-12" />
-          <h1 className="sv-serif mb-1 text-center text-[2rem] font-bold">
-            Stay<span className="sv-accent">Vanta</span>
-          </h1>
+          {/* Mark beside the wordmark, the same lockup the landing header and
+              the app header use — sized at roughly 1.3× the type, which is
+              the ratio those two already sit at. */}
+          <div className="mb-1 flex items-center justify-center gap-2.5">
+            <BrandMark className="h-10 w-10 shrink-0" />
+            <h1 className="sv-serif text-[2rem] font-bold">
+              Stay<span className="sv-accent">Vanta</span>
+            </h1>
+          </div>
           <p className="mb-6 text-center text-sm text-muted">
             All-in-One Hotel &amp; Resort Management
           </p>
