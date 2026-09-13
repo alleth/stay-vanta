@@ -91,6 +91,19 @@ class ReservationsTable extends Table
             ->nonNegativeInteger('additional_beds')
             ->allowEmptyString('additional_beds');
 
+        $validator
+            ->scalar('booking_reference')
+            ->maxLength('booking_reference', 100)
+            ->allowEmptyString('booking_reference');
+
+        // What the channel sold the night for, gross. Not part of pricing —
+        // promo_rate is still what the property charges — so it only has to
+        // be a sensible figure when it's given at all.
+        $validator
+            ->numeric('sold_rate')
+            ->greaterThan('sold_rate', 0, 'Enter the rate the channel sold it for, or leave it blank.')
+            ->allowEmptyString('sold_rate');
+
         return $validator;
     }
 
@@ -121,6 +134,20 @@ class ReservationsTable extends Table
             'errorField' => 'guest_id',
             'message' => 'That guest does not belong to this property.',
         ]);
+
+        // An online booking is the channel's booking too: without its
+        // reference number there's nothing to quote back when a stay is
+        // disputed or a remittance doesn't add up. A walk-in has no channel,
+        // so it never carries one.
+        $rules->add(
+            fn(Reservation $reservation): bool => $reservation->source === BookingSourcesTable::WALK_IN
+                || trim((string)$reservation->booking_reference) !== '',
+            'bookingReferenceRequired',
+            [
+                'errorField' => 'booking_reference',
+                'message' => "Enter the channel's booking ID for an online booking.",
+            ],
+        );
 
         $rules->add(
             function (Reservation $reservation): bool {

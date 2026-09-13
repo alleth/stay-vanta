@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Tab, Tabs, Card, Table, Button, ButtonGroup, Badge, Modal, Form, Alert, Spinner, ListGroup,
+  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ListGroup,
 } from '../components/ui'
 import { useProperty } from '../context/PropertyContext'
 import { useAuth } from '../context/AuthContext'
@@ -35,6 +35,15 @@ const dateOf = (ts) => (ts ? new Date(ts).toISOString().slice(0, 10) : null)
 // `booking_sources` (admin-managed on this tab), replacing what used to be a
 // hardcoded OTA list.
 const WALK_IN = 'walk_in'
+const ONLINE = 'online'
+
+// The two ways a booking reaches the desk. An online one carries the
+// channel's own paperwork — its booking ID and the rate it sold at — which a
+// walk-in has no equivalent of.
+const BOOKING_TYPES = [
+  { id: WALK_IN, label: 'Walk-in', hint: 'Guest is here now' },
+  { id: ONLINE, label: 'Online booking', hint: 'Agoda, Cocotel, …' },
+]
 const sourceLabel = (bookingSources, code) =>
   (code === WALK_IN ? 'Walk-in' : bookingSources.find((s) => s.code === code)?.name ?? code)
 
@@ -788,6 +797,8 @@ function ReservationModal({
     check_out: reservation?.check_out ?? '',
     source: reservation?.source
       ?? (forFutureDate ? bookingSources[0]?.code ?? WALK_IN : WALK_IN),
+    booking_reference: reservation?.booking_reference ?? '',
+    sold_rate: reservation?.sold_rate ?? '',
     discount_type: reservation?.discount_type ?? 'none',
     referral: Boolean(reservation?.discount_amount),
     discount_amount: reservation?.discount_amount ?? '',
@@ -811,42 +822,6 @@ function ReservationModal({
     setForm((f) => (type === WALK_IN
       ? { ...f, source: WALK_IN, check_in: todayStr() }
       : { ...f, source: bookingSources[0]?.code ?? '' }))
-  }
-
-  // Section rail. Editing scopes the form to booking details, so there's no
-  // Guest section to jump to then.
-  const sections = editing
-    ? [{ id: 'stay', label: 'Stay' }, { id: 'pricing', label: 'Pricing' }]
-    : [{ id: 'stay', label: 'Stay' }, { id: 'guest', label: 'Guest' }, { id: 'pricing', label: 'Pricing' }]
-  const paneRef = useRef(null)
-  const [activeSection, setActiveSection] = useState('stay')
-
-  // Highlight whichever section the reader is actually looking at. The bottom
-  // margin keeps the last section from claiming the highlight the moment it
-  // peeks into view.
-  useEffect(() => {
-    const root = paneRef.current
-    if (!root || typeof IntersectionObserver === 'undefined') return undefined
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const seen = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
-        if (seen[0]) setActiveSection(seen[0].target.id)
-      },
-      { root, rootMargin: '0px 0px -60% 0px' },
-    )
-    root.querySelectorAll('[data-section]').forEach((el) => observer.observe(el))
-    return () => observer.disconnect()
-  }, [editing])
-
-  function goToSection(id) {
-    const el = paneRef.current?.querySelector(`#${id}`)
-    if (!el) return
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
-    setActiveSection(id)
   }
 
   // The promo rate is read-only here: the room's original rate × the admin's
@@ -984,32 +959,54 @@ function ReservationModal({
           <Modal.Title>{editing ? 'Edit reservation' : 'New reservation'}</Modal.Title>
         </Modal.Header>
         <Modal.Body className="p-0">
-         <div className="flex">
-          {/* Section rail. It scrolls the pane rather than swapping panels:
-              this is one required form, and fields hidden in an inactive
-              panel are either unmounted (so `required` never fires and an
-              incomplete booking saves) or hidden (so the browser refuses to
-              submit and shows nothing). Everything stays mounted. */}
-          <nav
-            aria-label="Form sections"
-            className="hidden w-44 shrink-0 flex-col gap-1 self-start border-r border-line p-4 md:flex"
-          >
-            {sections.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => goToSection(s.id)}
-                aria-current={activeSection === s.id ? 'true' : undefined}
-                className={`rounded-lg px-3 py-1.5 text-left text-sm font-medium transition-colors ${
-                  activeSection === s.id
-                    ? 'bg-subtle text-body'
-                    : 'text-muted hover:bg-subtle hover:text-body'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-            <div className="mt-4 border-t border-line pt-3">
+         <div className="flex flex-col md:flex-row">
+          {/* The rail is the booking type. Unlike tabs over one required
+              form, hiding the channel fields for a walk-in is correct: a
+              walk-in has no channel, so those fields don't exist for it —
+              they're not skipped, they don't apply. */}
+          <div className="w-full shrink-0 border-b border-line p-4 md:w-52 md:border-b-0 md:border-r">
+            <div className="mb-2 text-xs font-medium uppercase tracking-[0.04em] text-muted">
+              Booking type
+            </div>
+            <div
+              role="radiogroup"
+              aria-label="Booking type"
+              className="flex gap-2 md:flex-col"
+            >
+              {BOOKING_TYPES.map((t) => {
+                const selected = isWalkIn === (t.id === WALK_IN)
+                const blocked = editing || (t.id !== WALK_IN && !hasChannels)
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={blocked}
+                    onClick={() => setBookingType(t.id)}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-left text-sm font-medium transition-colors md:flex-none ${
+                      selected
+                        ? 'border-ink bg-subtle text-body'
+                        : 'border-line text-muted hover:bg-subtle hover:text-body'
+                    } ${blocked ? 'pointer-events-none opacity-50' : ''}`}
+                  >
+                    {t.label}
+                    <span className="mt-0.5 block text-xs font-normal text-muted">{t.hint}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {!hasChannels && (
+              <p className="mt-2 mb-0 text-xs text-muted">
+                No channels yet — add one on the Promo Rates tab.
+              </p>
+            )}
+            {editing && (
+              <p className="mt-2 mb-0 text-xs text-muted">
+                A booking can&apos;t change type after it&apos;s made.
+              </p>
+            )}
+            <div className="mt-4 hidden border-t border-line pt-3 md:block">
               <div className="text-xs font-medium uppercase tracking-[0.04em] text-muted">
                 Est. total
               </div>
@@ -1020,9 +1017,9 @@ function ReservationModal({
                 <div className="text-xs text-muted">{nights} night{nights === 1 ? '' : 's'}</div>
               )}
             </div>
-          </nav>
+          </div>
 
-          <div ref={paneRef} className="min-w-0 flex-1 p-4 md:max-h-[70vh] md:overflow-y-auto">
+          <div className="min-w-0 flex-1 p-4 md:max-h-[70vh] md:overflow-y-auto">
           {err && <Alert variant="danger">{err}</Alert>}
           {editing && (
             <div className="mb-4 flex items-center gap-2">
@@ -1059,50 +1056,44 @@ function ReservationModal({
           </div>
           <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
             <Form.Group className="mb-4 md:col-span-4">
-              <Form.Label>Booking type</Form.Label>
-              <ButtonGroup>
-                <Button
-                  size="sm"
-                  variant={isWalkIn ? 'secondary' : 'outline-secondary'}
-                  disabled={editing}
-                  onClick={() => setBookingType(WALK_IN)}
-                >
-                  Walk-in
-                </Button>
-                <Button
-                  size="sm"
-                  variant={!isWalkIn ? 'secondary' : 'outline-secondary'}
-                  disabled={editing || !hasChannels}
-                  onClick={() => setBookingType('online')}
-                >
-                  Online booking
-                </Button>
-              </ButtonGroup>
-              {isWalkIn && !editing && (
-                <Form.Text muted>Arriving now — checks in as soon as you save.</Form.Text>
-              )}
-              {!hasChannels && (
-                <Form.Text muted>
-                  No online channels yet — add one on the Promo Rates tab.
-                </Form.Text>
-              )}
-              {editing && (
-                <Form.Text muted>A booking can&apos;t change type after it&apos;s made.</Form.Text>
-              )}
+              <Form.Label>Extra beds</Form.Label>
+              <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
             </Form.Group>
-            {!isWalkIn && (
+            {isWalkIn && !editing && (
+              <div className="mb-4 md:col-span-8">
+                <Form.Text muted>Arriving now — checks in as soon as you save.</Form.Text>
+              </div>
+            )}
+          </div>
+
+          {/* The channel's own paperwork. Only an online booking has any of
+              it, which is why these appear with the type rather than sitting
+              greyed out for every walk-in. */}
+          {!isWalkIn && (
+            <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
               <Form.Group className="mb-4 md:col-span-4">
-                <Form.Label>Channel</Form.Label>
+                <Form.Label>Booking source</Form.Label>
                 <Form.Select value={form.source} onChange={set('source')} required>
                   {bookingSources.map((bs) => <option key={bs.id} value={bs.code}>{bs.name}</option>)}
                 </Form.Select>
               </Form.Group>
-            )}
-            <Form.Group className="mb-4 md:col-span-4">
-              <Form.Label>Extra beds</Form.Label>
-              <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
-            </Form.Group>
-          </div>
+              <Form.Group className="mb-4 md:col-span-4">
+                <Form.Label>Booking ID</Form.Label>
+                <Form.Control value={form.booking_reference} onChange={set('booking_reference')}
+                  required placeholder="e.g. 4821993077" />
+                <Form.Text muted>The channel&apos;s confirmation number.</Form.Text>
+              </Form.Group>
+              <Form.Group className="mb-4 md:col-span-4">
+                <Form.Label>Sales stayed (based rate)</Form.Label>
+                <Form.Control type="number" min={0.01} step="0.01" value={form.sold_rate}
+                  onChange={set('sold_rate')} placeholder="Optional" />
+                <Form.Text muted>
+                  What the channel sold the night for, before commission — recorded for
+                  reconciliation, not used to bill the guest.
+                </Form.Text>
+              </Form.Group>
+            </div>
+          )}
           </section>
 
           {!editing && (

@@ -147,6 +147,11 @@ class ReservationsController extends AppController
                     'status' => $isWalkIn ? 'checked_in' : 'booked',
                     'checked_in_at' => $isWalkIn ? new DateTime() : null,
                     'source' => $source,
+                    // Both belong to the channel, so a walk-in never carries
+                    // them however the form was filled in before the type was
+                    // switched.
+                    'booking_reference' => $isWalkIn ? null : $this->trimmedOrNull('booking_reference'),
+                    'sold_rate' => $isWalkIn ? null : $this->trimmedOrNull('sold_rate'),
                     'discount_type' => $discountType,
                     'discount_amount' => $this->resolveReferralAmount(),
                     'promo_rate' => $promoRate,
@@ -277,9 +282,15 @@ class ReservationsController extends AppController
                     'check_in' => $this->request->getData('check_in') ?? $reservation->check_in,
                     'check_out' => $this->request->getData('check_out') ?? $reservation->check_out,
                     'source' => $source,
+                    'booking_reference' => $source === BookingSourcesTable::WALK_IN
+                        ? null
+                        : $this->trimmedOrNull('booking_reference') ?? $reservation->booking_reference,
                     'discount_type' => $discountType,
                     'discount_amount' => $this->resolveReferralAmount(),
                     'promo_rate' => $promoRate,
+                    'sold_rate' => $source === BookingSourcesTable::WALK_IN
+                        ? null
+                        : $this->trimmedOrNull('sold_rate') ?? $reservation->sold_rate,
                     'additional_beds' => (int)($this->request->getData('additional_beds')
                         ?? $reservation->additional_beds),
                     'receptionist_id' => (int)$this->currentUser->id,
@@ -600,9 +611,22 @@ class ReservationsController extends AppController
      */
     private function resolveReferralAmount(): ?string
     {
-        $raw = $this->request->getData('discount_amount');
+        return $this->trimmedOrNull('discount_amount');
+    }
 
-        return ($raw === null || $raw === '') ? null : (string)$raw;
+    /**
+     * A request field as a trimmed string, or null when it was absent or
+     * blank — so an empty form input lands as NULL rather than "".
+     */
+    private function trimmedOrNull(string $field): ?string
+    {
+        $raw = $this->request->getData($field);
+        if ($raw === null) {
+            return null;
+        }
+        $value = trim((string)$raw);
+
+        return $value === '' ? null : $value;
     }
 
     /**
