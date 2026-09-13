@@ -34,18 +34,21 @@ export default function Login() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4">
-      {/* Sign-in is reachable straight from the landing page's header, so it
-          needs a way back out. Mirrors the Back on Privacy/Terms, and sits
-          opposite the toggle. */}
-      <Button as={Link} to="/" variant="outline-secondary" size="sm"
-        className="absolute left-4 top-4">
-        ← Back
-      </Button>
       {/* Login renders outside Layout, so it needs its own toggle — otherwise
           the theme can only be changed after signing in. */}
       <ThemeToggle className="absolute right-4 top-4" />
       <Card className="w-full max-w-[400px]">
         <Card.Body className="p-10">
+          {/* Sign-in is reachable straight from the landing page's header, so
+              it needs a way back out. A quiet text link rather than a button:
+              it's the one thing on this card that isn't the task, and the
+              footer links here are styled the same way. */}
+          <Link
+            to="/"
+            className="-ml-1 mb-6 inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm text-muted no-underline transition-colors hover:text-body"
+          >
+            <span aria-hidden="true">←</span> Back
+          </Link>
           <BrandMark className="mx-auto mb-3 h-12 w-12" />
           <h1 className="sv-serif mb-1 text-center text-[2rem] font-bold">
             Stay<span className="sv-accent">Vanta</span>
