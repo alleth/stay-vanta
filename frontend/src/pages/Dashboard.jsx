@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Card, Alert, Form, Table, Button, Badge } from '../components/ui'
+import { Card, Alert, Form, Table, Button, ButtonGroup, Badge } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { ownerDashboard, adminDashboard, dailyCollection, monthlySummary } from '../api/reports'
@@ -173,23 +173,31 @@ function CollectionReport({ allowMonthly }) {
 // the chart can't inherit the theme the way every other surface does. Both
 // themes' values are mirrored here; keep in sync with @theme and
 // :root[data-theme='dark'] in src/index.css.
+// Tall enough that the y-axis band doesn't squeeze the plot into a strip.
+const CHART_HEIGHT = 260
+
 const CHART_COLORS = {
-  light: { accent: '#d99211', muted: '#6b7280', surface: '#ffffff' },
-  dark: { accent: '#e9a62c', muted: '#9ba1aa', surface: '#191b20' },
+  light: { accent: '#d99211', muted: '#6b7280', surface: '#ffffff', line: '#e8e8ec', body: '#1a1a1e' },
+  dark: { accent: '#e9a62c', muted: '#9ba1aa', surface: '#191b20', line: '#2a2d34', body: '#e7e7ea' },
 }
 
 // Seasonality: one year at a time, toggled between two metrics — non-
 // cancelled reservations by check-in date ("Guests"), or collected revenue
 // ("Revenue", the same settled-invoices + paid-food-orders definition as
-// adminDashboard's revenue buckets). A stat-card widget matching Flowbite's
-// area-chart example (headline number + a vs-last-year change badge in the
-// header, a minimal smooth gradient-fill area chart, a footer with the
-// period control) — rendered with ApexCharts via react-apexcharts, the same
-// engine Flowbite's own charts use. Month labels stay on the x-axis (unlike
-// the reference, which shows none) since knowing *which* month is the point
-// of this chart; the busiest month always gets a point annotation, and in
-// Revenue mode the lowest month gets one too. A table-view toggle is the
-// accessible twin, reachable from the footer like the reference's link.
+// adminDashboard's revenue buckets). Rendered with ApexCharts via
+// react-apexcharts.
+//
+// The anatomy, top to bottom: a headline total with a vs-last-year change
+// badge and the metric/year controls that scope this card; a smooth area
+// chart — 2px line over a 20%-opacity wash, hairline horizontal grid, ticks
+// anchored at zero; then a footer naming the busiest and slowest months with
+// the table-view toggle.
+//
+// Two deliberate choices worth keeping: the y-axis stays *visible* (a chart
+// whose values can only be read by hovering fails anyone who doesn't), and
+// direct labels are limited to the peak and trough — a number on all twelve
+// points is noise. The colour lives on the marks; every label wears a text
+// token.
 function SeasonalityChart() {
   const { theme } = useTheme()
   const chartColors = CHART_COLORS[theme] ?? CHART_COLORS.light
@@ -221,13 +229,32 @@ function SeasonalityChart() {
     return () => { active = false }
   }, [year])
 
-  const data = result?.year === year ? result.data : null
+  // Keep showing the last successful payload while a new year is in flight —
+  // the card dims rather than collapsing back to a skeleton, so switching
+  // years doesn't bounce the page's layout. Only the very first load has
+  // nothing to hold. `dataYear` is the year actually on screen, which is what
+  // the header labels, so a dimmed chart never claims to be the new year.
+  const data = result?.data ?? null
+  const dataYear = result?.year ?? year
   const error = result?.year === year ? result.error : null
-  const prevMonths = result?.year === year ? result.prevMonths : null
+  const refreshing = Boolean(data) && result?.year !== year
+  const prevMonths = result?.prevMonths ?? null
 
   const years = Array.from({ length: 6 }, (_, i) => nowYear - i)
+  const metricLabel = metric === 'revenue' ? 'Revenue' : 'Guests'
   const pick = (m) => (metric === 'revenue' ? m.revenue : m.count)
   const formatValue = (v) => (metric === 'revenue' ? formatMoney(v) : `${v} visit${v === 1 ? '' : 's'}`)
+
+  // Axis ticks are compact and rounded — the exact figure is a hover, a
+  // direct label or the table view away, and long peso strings would crowd
+  // the plot.
+  const axisLabel = (v) => {
+    if (metric !== 'revenue') return Math.round(v).toLocaleString()
+    const abs = Math.abs(v)
+    if (abs >= 1_000_000) return `₱${(v / 1_000_000).toFixed(1)}M`
+    if (abs >= 1_000) return `₱${Math.round(v / 1_000).toLocaleString()}k`
+    return `₱${Math.round(v)}`
+  }
 
   const months = data?.months ?? []
   const values = months.map(pick)
@@ -235,14 +262,22 @@ function SeasonalityChart() {
   const maxVal = values.length ? Math.max(...values) : 0
   const minVal = values.length ? Math.min(...values) : 0
   const peakIndex = maxVal > 0 ? values.indexOf(maxVal) : -1
-  // The low point is only worth calling out for Revenue (a slow month to
-  // watch for), and only if it's actually distinct from the peak.
-  const troughIndex = metric === 'revenue' && maxVal > 0 && minVal !== maxVal ? values.indexOf(minVal) : -1
+  // The slow month is worth calling out for either metric, but only when
+  // it's actually distinct from the peak.
+  const troughIndex = maxVal > 0 && minVal !== maxVal ? values.indexOf(minVal) : -1
 
   const prevTotal = prevMonths ? prevMonths.reduce((s, m) => s + pick(m), 0) : null
   const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : null
 
-  const series = [{ name: metric === 'revenue' ? 'Revenue' : 'Reservations', data: values }]
+  const series = [{ name: metricLabel, data: values }]
+
+  // Direct labels on the two months worth calling out. The dot wears the
+  // series colour; the text stays in a text token — a light amber label is
+  // hard to read against the surface, and colouring text is what the marker
+  // beside it is for.
+  // A label centred on January or December hangs half its width off the plot
+  // and gets clipped — anchor the end months' labels inward instead.
+  const labelAnchor = (i) => (i === 0 ? 'start' : i === months.length - 1 ? 'end' : 'middle')
 
   const annotationPoints = []
   if (peakIndex >= 0) {
@@ -254,7 +289,8 @@ function SeasonalityChart() {
         text: `${months[peakIndex].label} · ${formatValue(values[peakIndex])}`,
         borderWidth: 0,
         offsetY: -8,
-        style: { color: chartColors.accent, fontSize: '11px', fontWeight: 600, background: 'transparent' },
+        textAnchor: labelAnchor(peakIndex),
+        style: { color: chartColors.body, fontSize: '11px', fontWeight: 600, background: 'transparent' },
       },
     })
   }
@@ -267,6 +303,7 @@ function SeasonalityChart() {
         text: `${months[troughIndex].label} · ${formatValue(values[troughIndex])}`,
         borderWidth: 0,
         offsetY: -8,
+        textAnchor: labelAnchor(troughIndex),
         style: { color: chartColors.muted, fontSize: '11px', fontWeight: 600, background: 'transparent' },
       },
     })
@@ -275,7 +312,7 @@ function SeasonalityChart() {
   const chartOptions = {
     chart: {
       type: 'area',
-      height: 220,
+      height: CHART_HEIGHT,
       toolbar: { show: false },
       zoom: { enabled: false },
       fontFamily: 'inherit',
@@ -287,98 +324,149 @@ function SeasonalityChart() {
     theme: { mode: theme },
     colors: [chartColors.accent],
     dataLabels: { enabled: false },
-    stroke: { curve: 'smooth', width: 2 },
+    stroke: { curve: 'smooth', width: 2, lineCap: 'round' },
+    // A wash, not a saturated block: the line carries the shape, the fill
+    // only hints at the volume under it.
     fill: {
       type: 'gradient',
-      gradient: { opacityFrom: 0.35, opacityTo: 0, shadeIntensity: 1, stops: [0, 100] },
+      gradient: { opacityFrom: 0.2, opacityTo: 0, shadeIntensity: 1, stops: [0, 100] },
     },
-    grid: { show: false, padding: { left: 8, right: 8 } },
+    // Hairline horizontal rules, one step off the surface — enough to read a
+    // value off the axis without the grid competing with the data. Solid,
+    // never dashed (dashes read as "threshold" when it's just a grid).
+    grid: {
+      show: true,
+      borderColor: chartColors.line,
+      strokeDashArray: 0,
+      xaxis: { lines: { show: false } },
+      yaxis: { lines: { show: true } },
+      padding: { left: 4, right: 12, top: 0 },
+    },
     xaxis: {
       categories: months.map((m) => m.label),
       axisBorder: { show: false },
       axisTicks: { show: false },
-      labels: { style: { colors: chartColors.muted, fontSize: '10px' } },
-      crosshairs: { show: true },
+      labels: { style: { colors: chartColors.muted, fontSize: '11px' } },
+      crosshairs: { stroke: { color: chartColors.line, width: 1, dashArray: 0 } },
+      tooltip: { enabled: false },
     },
-    yaxis: { show: false },
+    // Anchored at zero: an area chart on a truncated axis overstates every
+    // peak. `forceNiceScale` keeps the ticks on round numbers, and a small
+    // tick count keeps them from repeating when a quiet year's counts are
+    // single digits.
+    yaxis: {
+      min: 0,
+      forceNiceScale: true,
+      tickAmount: maxVal > 0 && maxVal < 4 ? maxVal : 4,
+      labels: {
+        formatter: axisLabel,
+        style: { colors: chartColors.muted, fontSize: '11px' },
+      },
+    },
     tooltip: {
-      y: { formatter: formatValue },
-      x: { show: false },
+      // The month is the tooltip's own heading, so the series name in front
+      // of the value is just noise.
+      y: { formatter: formatValue, title: { formatter: () => '' } },
+      marker: { show: false },
     },
-    markers: { size: 0, hover: { size: 5 } },
+    markers: { size: 0, strokeWidth: 2, strokeColors: chartColors.surface, hover: { size: 6 } },
     annotations: { points: annotationPoints },
   }
 
   return (
     <Card className="mb-8">
-      <Card.Body className="flex flex-wrap items-center justify-between gap-3 p-4 pb-0">
-        <div>
-          <div className="sv-serif tabular-nums text-2xl font-bold">
-            {data ? (metric === 'revenue' ? formatMoney(total) : total.toLocaleString()) : '—'}
+      <Card.Body className="flex flex-wrap items-start justify-between gap-3 p-4 pb-0">
+        <div className="min-w-0">
+          <div className="text-xs font-medium uppercase tracking-[0.04em] text-muted">
+            {metricLabel} · {dataYear}
           </div>
-          <div className="text-sm text-muted">{metric === 'revenue' ? 'Revenue' : 'Reservations'} in {year}</div>
+          <div className="mt-1 flex flex-wrap items-baseline gap-2">
+            {/* Proportional figures, not tabular-nums: every digit padded to
+                the width of a '0' makes a standalone headline look loose. */}
+            <span className="sv-serif text-[1.75rem] font-bold leading-none">
+              {data ? (metric === 'revenue' ? formatMoney(total) : total.toLocaleString()) : '—'}
+            </span>
+            {delta !== null && (
+              <Badge bg={delta >= 0 ? 'success' : 'danger'}>
+                {delta >= 0 ? '↑' : '↓'} {Math.abs(delta)}% vs {dataYear - 1}
+              </Badge>
+            )}
+          </div>
         </div>
-        {delta !== null && (
-          <Badge bg={delta >= 0 ? 'success' : 'danger'} className="text-sm">
-            {delta >= 0 ? '↑' : '↓'} {Math.abs(delta)}% vs {year - 1}
-          </Badge>
-        )}
-        {metric === 'revenue' && data && peakIndex >= 0 && troughIndex >= 0 && (
-          <div className="w-full text-xs text-muted">
-            Highest: <span className="font-medium text-body">
-              {months[peakIndex].label} · {formatMoney(values[peakIndex])}
-            </span>
-            {' · '}
-            Lowest: <span className="font-medium text-body">
-              {months[troughIndex].label} · {formatMoney(values[troughIndex])}
-            </span>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Two mutually-exclusive metrics read better as a segmented
+              control than as a dropdown you have to open to see the choice. */}
+          <ButtonGroup>
+            <Button size="sm" variant={metric === 'visits' ? 'secondary' : 'outline-secondary'}
+              onClick={() => setMetric('visits')}>
+              Guests
+            </Button>
+            <Button size="sm" variant={metric === 'revenue' ? 'secondary' : 'outline-secondary'}
+              onClick={() => setMetric('revenue')}>
+              Revenue
+            </Button>
+          </ButtonGroup>
+          <Form.Select size="sm" value={year} style={{ width: 'auto' }}
+            onChange={(e) => setYear(Number(e.target.value))}>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </Form.Select>
+        </div>
       </Card.Body>
 
       {error && <Card.Body className="pt-4"><Alert variant="danger" className="mb-0">{error}</Alert></Card.Body>}
       {!error && !data && <Card.Body><SkeletonTable rows={3} /></Card.Body>}
 
-      {!error && data && showTable && (
-        <Card.Body>
-          <Table>
-            <thead>
-              <tr>{months.map((m) => <th key={m.month}>{m.label}</th>)}</tr>
-            </thead>
-            <tbody>
-              <tr>
+      {!error && data && (
+        <Card.Body className={`pt-2 transition-opacity duration-200 ${refreshing ? 'opacity-40' : ''}`}>
+          {showTable ? (
+            // The accessible twin of the chart — a month per row reads far
+            // better than twelve columns scrolling sideways.
+            <Table>
+              <thead>
+                <tr><th>Month</th><th className="text-right">{metricLabel}</th></tr>
+              </thead>
+              <tbody>
                 {months.map((m, i) => (
-                  <td key={m.month} className={values[i] === maxVal && maxVal > 0 ? 'font-semibold' : undefined}>
-                    {metric === 'revenue' ? formatMoney(values[i]) : values[i]}
-                  </td>
+                  <tr key={m.month}>
+                    <td>{m.label}</td>
+                    <td className={`tabular-nums text-right ${
+                      values[i] === maxVal && maxVal > 0 ? 'font-semibold' : ''
+                    }`}>
+                      {metric === 'revenue' ? formatMoney(values[i]) : values[i].toLocaleString()}
+                    </td>
+                  </tr>
                 ))}
-              </tr>
-            </tbody>
-          </Table>
-        </Card.Body>
-      )}
-
-      {!error && data && !showTable && (
-        <Card.Body className="pt-2">
-          <Suspense fallback={<SkeletonTable rows={3} />}>
-            {/* Remount on a theme flip too — ApexCharts doesn't reliably
-                re-theme an existing instance from an options update. */}
-            <Chart key={`${year}-${metric}-${theme}`} type="area" height={220} series={series} options={chartOptions} />
-          </Suspense>
+              </tbody>
+            </Table>
+          ) : (
+            <Suspense fallback={<SkeletonTable rows={3} />}>
+              {/* Remount on a theme flip too — ApexCharts doesn't reliably
+                  re-theme an existing instance from an options update. */}
+              <Chart key={`${dataYear}-${metric}-${theme}`} type="area"
+                height={CHART_HEIGHT} series={series} options={chartOptions} />
+            </Suspense>
+          )}
         </Card.Body>
       )}
 
       <Card.Footer className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Form.Select size="sm" value={metric} style={{ width: 'auto' }}
-            onChange={(e) => setMetric(e.target.value)}>
-            <option value="visits">Guests</option>
-            <option value="revenue">Revenue</option>
-          </Form.Select>
-          <Form.Select size="sm" value={year} style={{ width: 'auto' }}
-            onChange={(e) => setYear(Number(e.target.value))}>
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
-          </Form.Select>
+        <div className="text-xs text-muted">
+          {data && peakIndex >= 0 && (
+            <>
+              Busiest:{' '}
+              <span className="font-medium text-body">
+                {months[peakIndex].label} · {formatValue(values[peakIndex])}
+              </span>
+              {troughIndex >= 0 && (
+                <>
+                  {' · '}Slowest:{' '}
+                  <span className="font-medium text-body">
+                    {months[troughIndex].label} · {formatValue(values[troughIndex])}
+                  </span>
+                </>
+              )}
+            </>
+          )}
         </div>
         {data && (
           <Button size="sm" variant="link" onClick={() => setShowTable((s) => !s)}>
