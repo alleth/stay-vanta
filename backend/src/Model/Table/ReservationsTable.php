@@ -4,8 +4,10 @@ declare(strict_types=1);
 namespace App\Model\Table;
 
 use App\Model\Entity\Reservation;
+use Cake\ORM\RulesChecker;
 use Cake\ORM\Table;
 use Cake\Validation\Validator;
+use Closure;
 
 /**
  * Reservations model.
@@ -82,6 +84,59 @@ class ReservationsTable extends Table
             ->allowEmptyString('additional_beds');
 
         return $validator;
+    }
+
+    /**
+     * A reservation's room and guest must belong to the same property as the
+     * reservation itself.
+     *
+     * Both arrive as raw ids in the request body (`room_id`, `guest_id`) and
+     * neither is something the caller should be trusted about: a booking
+     * pointing at another property's room would flip that property's
+     * `rooms.status` to occupied on check-in, and one pointing at another
+     * property's guest would echo their name and contact details back through
+     * the reservations index, which contains Guests.
+     *
+     * This lives in the table rather than the controller so every writer is
+     * covered at once — `add()`, `edit()`, and anything added later — and so a
+     * row that is already wrong can't be saved again by a lifecycle
+     * transition without the problem surfacing.
+     */
+    public function buildRules(RulesChecker $rules): RulesChecker
+    {
+        $rules->add($this->inSameProperty('Rooms', 'room_id'), 'roomInProperty', [
+            'errorField' => 'room_id',
+            'message' => 'That room does not belong to this property.',
+        ]);
+
+        $rules->add($this->inSameProperty('Guests', 'guest_id'), 'guestInProperty', [
+            'errorField' => 'guest_id',
+            'message' => 'That guest does not belong to this property.',
+        ]);
+
+        return $rules;
+    }
+
+    /**
+     * Build a rule asserting that the row `$field` points at shares the
+     * reservation's property. A null id passes — whether the column may be
+     * empty at all is validationDefault's business, not this rule's.
+     */
+    private function inSameProperty(string $association, string $field): Closure
+    {
+        return function (Reservation $reservation) use ($association, $field): bool {
+            $id = $reservation->get($field);
+            if ($id === null) {
+                return true;
+            }
+
+            // Via the association's target rather than the table locator —
+            // a Table has no getTableLocator() in CakePHP 5.
+            return $this->getAssociation($association)->getTarget()->exists([
+                $association . '.id' => $id,
+                $association . '.property_id' => $reservation->property_id,
+            ]);
+        };
     }
 
     /**

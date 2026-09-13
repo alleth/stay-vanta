@@ -555,7 +555,15 @@ class ReservationsController extends AppController
     {
         $guestId = $this->request->getData('guest_id');
         if ($guestId) {
-            $this->completeGuest((int)$guestId, $propertyId);
+            // Refuse an id that isn't this property's. Previously completeGuest()
+            // simply found nothing and returned, and the id was written onto the
+            // booking regardless — which meant either a guest from another
+            // property (whose details the reservations index would then hand
+            // back) or, with stale client state, a dangling reference and a
+            // blank name in the table with no error to explain it.
+            if (!$this->completeGuest((int)$guestId, $propertyId)) {
+                throw new BadRequestException('That guest is not registered at this property.');
+            }
 
             return (int)$guestId;
         }
@@ -585,15 +593,18 @@ class ReservationsController extends AppController
      * form. Re-booking a returning guest can thus complete a sparse record
      * (add a missing contact number, email, etc.) without ever overwriting
      * information already on file.
+     *
+     * @return bool False when no such guest exists *at this property* — the
+     *   caller must not use the id in that case.
      */
-    private function completeGuest(int $guestId, int $propertyId): void
+    private function completeGuest(int $guestId, int $propertyId): bool
     {
         $guests = $this->fetchTable('Guests');
         $guest = $guests->find()
             ->where(['Guests.id' => $guestId, 'Guests.property_id' => $propertyId])
             ->first();
         if ($guest === null) {
-            return;
+            return false;
         }
 
         $changed = false;
@@ -607,6 +618,8 @@ class ReservationsController extends AppController
         if ($changed) {
             $guests->saveOrFail($guest);
         }
+
+        return true;
     }
 
     /**
