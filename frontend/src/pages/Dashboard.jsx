@@ -16,16 +16,20 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
+// Compact stat tiles. Counts are short enough to sit two-up even on a phone;
+// a peso figure (up to "₱1,234,567.00") needs the full width there, so the
+// money variant only splits into columns from `sm` up.
 function Tiles({ tiles, money = false }) {
+  const cols = money ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-4'
   return (
-    <div className="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className={`mb-8 grid gap-3 ${cols}`}>
       {tiles.map((t) => (
         <Card key={t.label} className="h-full">
-          <Card.Body className="p-6">
-            <div className="text-sm uppercase tracking-[0.04em] text-muted">
+          <Card.Body className="p-4">
+            <div className="text-xs font-medium uppercase tracking-[0.04em] text-muted">
               {t.label}
             </div>
-            <div className={`sv-serif tabular-nums mt-2 font-bold ${money ? 'text-[1.75rem]' : 'text-[2.25rem]'}`}>
+            <div className={`sv-serif tabular-nums mt-1 font-bold ${money ? 'text-xl' : 'text-2xl'}`}>
               {money ? formatMoney(t.value) : t.value}
             </div>
           </Card.Body>
@@ -54,7 +58,7 @@ function dashboardError(err) {
 
 function SectionTitle({ children }) {
   return (
-    <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.04em] text-muted">
+    <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted">
       {children}
     </h2>
   )
@@ -107,8 +111,8 @@ function CollectionReport({ allowMonthly }) {
 
   return (
     <>
-      <Card className="mb-4">
-        <Card.Body className="flex flex-wrap items-center gap-4 px-4 py-3">
+      <Card className="mb-3">
+        <Card.Body className="flex flex-wrap items-center gap-3 px-4 py-3">
           {allowMonthly && (
             <Form.Select size="sm" value={mode} style={{ width: 'auto' }}
               onChange={(e) => setMode(e.target.value)}>
@@ -298,10 +302,10 @@ function SeasonalityChart() {
   }
 
   return (
-    <Card className="mb-10">
-      <Card.Body className="flex flex-wrap items-center justify-between gap-3 p-6 pb-0">
+    <Card className="mb-8">
+      <Card.Body className="flex flex-wrap items-center justify-between gap-3 p-4 pb-0">
         <div>
-          <div className="sv-serif tabular-nums text-[1.75rem] font-bold">
+          <div className="sv-serif tabular-nums text-2xl font-bold">
             {data ? (metric === 'revenue' ? formatMoney(total) : total.toLocaleString()) : '—'}
           </div>
           <div className="text-sm text-muted">{metric === 'revenue' ? 'Revenue' : 'Reservations'} in {year}</div>
@@ -451,7 +455,7 @@ function AdminDashboard({ user }) {
       </p>
 
       <SectionTitle>Seasonality</SectionTitle>
-      <p className="mb-4 text-sm text-muted">
+      <p className="mb-3 text-sm text-muted">
         Guests (non-cancelled reservations by check-in date) or revenue by month — spot your busiest
         season, or your highest and lowest-earning months.
       </p>
