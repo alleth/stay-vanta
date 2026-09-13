@@ -337,7 +337,9 @@ export default function Inventory() {
                             >
                               {Object.entries(reusable ? REUSABLE_ACTIONS : CONSUMABLE_ACTIONS).map(([key, a]) => (
                                 <Dropdown.Item key={key} onClick={() => openMove(it, key)}>
-                                  <span className={a.direction === 'in' ? 'text-emerald-600' : 'text-red-600'}>
+                                  <span className={a.direction === 'in'
+                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                    : 'text-red-600 dark:text-red-400'}>
                                     {a.direction === 'in' ? '↓' : '↑'}
                                   </span>
                                   {a.label}
@@ -614,7 +616,7 @@ function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onS
               <option value="reusable">Reusable (issued out & returned)</option>
             </Form.Select>
             {typeChanged && (
-              <Form.Text className="text-amber-600">
+              <Form.Text className="text-amber-600 dark:text-amber-400">
                 {reusable
                   ? 'Switching to reusable: current on-hand becomes the owned total.'
                   : 'Switching to consumable: the owned-total tracking is dropped.'}

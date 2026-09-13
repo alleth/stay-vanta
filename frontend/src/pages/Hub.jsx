@@ -12,7 +12,7 @@ function Tile({ to, label, blurb, Icon }) {
       to={to}
       className="group flex flex-col items-center gap-3 rounded-2xl border border-line bg-surface p-6 text-center no-underline shadow-sm transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-md sm:p-8"
     >
-      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-soft text-accent transition-colors group-hover:bg-accent group-hover:text-white">
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-soft text-accent transition-colors group-hover:bg-accent group-hover:text-on-ink">
         <Icon className="h-7 w-7" />
       </span>
       <div>

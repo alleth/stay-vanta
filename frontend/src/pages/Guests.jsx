@@ -5,15 +5,9 @@ import {
 import { useProperty } from '../context/PropertyContext'
 import { listGuestsPage, guestStats, getGuest, createGuest, updateGuest, matchGuests } from '../api/guests'
 import { SkeletonTable, SkeletonTableRows, Skeleton } from '../components/Skeleton'
+import { StatCard } from '../components/StatCard'
 
 const TYPE_VARIANT = { local: 'info', foreign: 'warning' }
-// Stat-card number tint per card variant.
-const VALUE_COLOR = {
-  dark: 'text-gray-900',
-  info: 'text-sky-600',
-  warning: 'text-amber-600',
-  success: 'text-emerald-600',
-}
 
 const GUESTS_PER_PAGE = 20
 
@@ -96,7 +90,7 @@ export default function Guests() {
       {error && <Alert variant="danger">{error}</Alert>}
 
       {/* total/local/foreign are today's registrations — they reset to 0 each day. */}
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Total guests today" value={stats.total} variant="dark" />
         <StatCard label="Local today" value={stats.local} variant="info" />
         <StatCard label="Foreign today" value={stats.foreign} variant="warning" />
@@ -182,17 +176,6 @@ export default function Guests() {
         <HistoryModal id={modal.id} onClose={() => setModal(null)} />
       )}
     </div>
-  )
-}
-
-function StatCard({ label, value, variant }) {
-  return (
-    <Card className="h-full">
-      <Card.Body>
-        <div className="text-sm text-muted">{label}</div>
-        <div className={`text-3xl font-bold ${VALUE_COLOR[variant] ?? ''}`}>{value}</div>
-      </Card.Body>
-    </Card>
   )
 }
 

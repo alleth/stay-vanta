@@ -1,9 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Card, Alert, Form, Table, Button, Badge } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
+import { useTheme } from '../context/ThemeContext'
 import { ownerDashboard, adminDashboard, dailyCollection, monthlySummary } from '../api/reports'
 import { formatMoney } from '../utils/format'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
+import { StatCard } from '../components/StatCard'
 
 // ApexCharts is a large dependency (~200KB gzipped) used only by the admin
 // Dashboard's seasonality chart — code-split it so every other role/page
@@ -24,16 +26,12 @@ function Tiles({ tiles, money = false }) {
   return (
     <div className={`mb-8 grid gap-3 ${cols}`}>
       {tiles.map((t) => (
-        <Card key={t.label} className="h-full">
-          <Card.Body className="p-4">
-            <div className="text-xs font-medium uppercase tracking-[0.04em] text-muted">
-              {t.label}
-            </div>
-            <div className={`sv-serif tabular-nums mt-1 font-bold ${money ? 'text-xl' : 'text-2xl'}`}>
-              {money ? formatMoney(t.value) : t.value}
-            </div>
-          </Card.Body>
-        </Card>
+        <StatCard
+          key={t.label}
+          label={t.label}
+          value={money ? formatMoney(t.value) : t.value}
+          size={money ? 'sm' : undefined}
+        />
       ))}
     </div>
   )
@@ -170,11 +168,15 @@ function CollectionReport({ allowMonthly }) {
   )
 }
 
-// The app's design tokens (frontend/src/index.css @theme), as literal hex
-// values — ApexCharts' config takes real color strings, not CSS custom
-// properties.
-const CHART_ACCENT = '#d99211'
-const CHART_MUTED = '#6b7280'
+// The app's design tokens (frontend/src/index.css), as literal hex values —
+// ApexCharts' config takes real color strings, not CSS custom properties, so
+// the chart can't inherit the theme the way every other surface does. Both
+// themes' values are mirrored here; keep in sync with @theme and
+// :root[data-theme='dark'] in src/index.css.
+const CHART_COLORS = {
+  light: { accent: '#d99211', muted: '#6b7280', surface: '#ffffff' },
+  dark: { accent: '#e9a62c', muted: '#9ba1aa', surface: '#191b20' },
+}
 
 // Seasonality: one year at a time, toggled between two metrics — non-
 // cancelled reservations by check-in date ("Guests"), or collected revenue
@@ -189,6 +191,8 @@ const CHART_MUTED = '#6b7280'
 // Revenue mode the lowest month gets one too. A table-view toggle is the
 // accessible twin, reachable from the footer like the reference's link.
 function SeasonalityChart() {
+  const { theme } = useTheme()
+  const chartColors = CHART_COLORS[theme] ?? CHART_COLORS.light
   const nowYear = new Date().getFullYear()
   const [year, setYear] = useState(nowYear)
   const [metric, setMetric] = useState('visits')
@@ -245,12 +249,12 @@ function SeasonalityChart() {
     annotationPoints.push({
       x: months[peakIndex].label,
       y: values[peakIndex],
-      marker: { size: 5, fillColor: CHART_ACCENT, strokeColor: '#fff', strokeWidth: 2 },
+      marker: { size: 5, fillColor: chartColors.accent, strokeColor: chartColors.surface, strokeWidth: 2 },
       label: {
         text: `${months[peakIndex].label} · ${formatValue(values[peakIndex])}`,
         borderWidth: 0,
         offsetY: -8,
-        style: { color: CHART_ACCENT, fontSize: '11px', fontWeight: 600, background: 'transparent' },
+        style: { color: chartColors.accent, fontSize: '11px', fontWeight: 600, background: 'transparent' },
       },
     })
   }
@@ -258,12 +262,12 @@ function SeasonalityChart() {
     annotationPoints.push({
       x: months[troughIndex].label,
       y: values[troughIndex],
-      marker: { size: 5, fillColor: CHART_MUTED, strokeColor: '#fff', strokeWidth: 2 },
+      marker: { size: 5, fillColor: chartColors.muted, strokeColor: chartColors.surface, strokeWidth: 2 },
       label: {
         text: `${months[troughIndex].label} · ${formatValue(values[troughIndex])}`,
         borderWidth: 0,
         offsetY: -8,
-        style: { color: CHART_MUTED, fontSize: '11px', fontWeight: 600, background: 'transparent' },
+        style: { color: chartColors.muted, fontSize: '11px', fontWeight: 600, background: 'transparent' },
       },
     })
   }
@@ -276,8 +280,12 @@ function SeasonalityChart() {
       zoom: { enabled: false },
       fontFamily: 'inherit',
       animations: { enabled: false },
+      // The card behind it already paints the surface; ApexCharts' own dark
+      // mode would otherwise lay its slightly-different grey over it.
+      background: 'transparent',
     },
-    colors: [CHART_ACCENT],
+    theme: { mode: theme },
+    colors: [chartColors.accent],
     dataLabels: { enabled: false },
     stroke: { curve: 'smooth', width: 2 },
     fill: {
@@ -289,7 +297,7 @@ function SeasonalityChart() {
       categories: months.map((m) => m.label),
       axisBorder: { show: false },
       axisTicks: { show: false },
-      labels: { style: { colors: CHART_MUTED, fontSize: '10px' } },
+      labels: { style: { colors: chartColors.muted, fontSize: '10px' } },
       crosshairs: { show: true },
     },
     yaxis: { show: false },
@@ -353,7 +361,9 @@ function SeasonalityChart() {
       {!error && data && !showTable && (
         <Card.Body className="pt-2">
           <Suspense fallback={<SkeletonTable rows={3} />}>
-            <Chart key={`${year}-${metric}`} type="area" height={220} series={series} options={chartOptions} />
+            {/* Remount on a theme flip too — ApexCharts doesn't reliably
+                re-theme an existing instance from an options update. */}
+            <Chart key={`${year}-${metric}-${theme}`} type="area" height={220} series={series} options={chartOptions} />
           </Suspense>
         </Card.Body>
       )}

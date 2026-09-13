@@ -9,8 +9,43 @@
          #root with the identical BrandSplash component while the session
          resolves, so a refresh shows one continuous animation. Keep in sync
          with src/components/BrandSplash.jsx / src/index.css. -->
+    <script>
+      // Resolve the theme before first paint so a dark-mode user never gets a
+      // white flash on the way to the app. Mirrors src/context/ThemeContext.jsx
+      // (same storage key, same "stored choice wins, else the OS" rule) — keep
+      // the two in sync.
+      (function () {
+        try {
+          var t = localStorage.getItem('stayvanta_theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {
+          /* storage blocked (private mode): light is the default */
+        }
+      })();
+    </script>
     <style>
-      body { margin: 0; background: #f7f7f8; }
+      /* The splash's own copy of the palette — it paints before the bundle's
+         CSS exists, so it can't use the @theme tokens. */
+      :root {
+        color-scheme: light;
+        --sv-boot-bg: #f7f7f8;
+        --sv-boot-fg: #1a1a1e;
+        --sv-boot-track: #f1f1f3;
+        --sv-boot-accent: #d99211;
+      }
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --sv-boot-bg: #121317;
+        --sv-boot-fg: #e7e7ea;
+        --sv-boot-track: #22252b;
+        --sv-boot-accent: #e9a62c;
+      }
+      body { margin: 0; background: var(--sv-boot-bg); }
       .sv-boot {
         min-height: 100vh;
         display: flex;
@@ -25,19 +60,19 @@
         line-height: 2.5rem;
         font-weight: 700;
         letter-spacing: -0.02em;
-        color: #1a1a1e;
+        color: var(--sv-boot-fg);
       }
       .sv-boot-word span {
         display: inline-block;
         animation: sv-wave 1.3s ease-in-out infinite;
       }
-      .sv-boot-word .accent { color: #d99211; }
+      .sv-boot-word .accent { color: var(--sv-boot-accent); }
       .sv-boot-track {
         position: relative;
         width: 10rem;
         height: 0.25rem;
         border-radius: 9999px;
-        background: #f1f1f3;
+        background: var(--sv-boot-track);
         overflow: hidden;
       }
       .sv-boot-bar {
@@ -46,7 +81,7 @@
         bottom: 0;
         width: 33%;
         border-radius: 9999px;
-        background: #d99211;
+        background: var(--sv-boot-accent);
         animation: sv-bar-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
       }
       @keyframes sv-wave {

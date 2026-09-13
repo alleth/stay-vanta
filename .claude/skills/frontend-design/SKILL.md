@@ -57,8 +57,22 @@ covers:
 | `--color-body` | `text-body` | primary text |
 | `--color-muted` | `text-muted` | secondary/caption text |
 | `--color-ink` / `--color-ink-hover` | `bg-ink` / `hover:bg-ink-hover`, `text-ink` | primary actions (buttons, links) |
-| `--color-accent` | `text-accent`, `bg-accent`, `border-accent` (+ `focus:ring-accent/…`) | the one accent (amber) — sparing use: focus rings, highlights, the boot splash |
+| `--color-on-ink` | `text-on-ink` | text/icons **on** a `bg-ink` or `bg-accent` fill — never `text-white`, which stays white when ink flips light in dark mode |
+| `--color-accent` / `--color-accent-hover` | `text-accent`, `bg-accent`, `border-accent`, `hover:bg-accent-hover` (+ `focus:ring-accent/…`) | the one accent (amber) — sparing use: focus rings, highlights, the boot splash |
 | `--color-accent-soft` | `bg-accent-soft` | amber tint background |
+
+**Light/dark.** Every token above is redefined under `:root[data-theme='dark']` in `index.css`, so
+anything built from these utilities themes itself — that's the whole reason to use them. The theme
+is an explicit user choice (`src/context/ThemeContext.jsx` + the header's `ThemeToggle`), so `dark:`
+is wired to that attribute via `@custom-variant`, **not** `prefers-color-scheme`. Two rules follow:
+
+- Reach for a **token** first. If you hardcode `bg-gray-100` or `text-slate-700`, it will sit there
+  light-grey on a dark card — that's exactly the bug this palette exists to prevent.
+- The semantic status colors (`emerald`/`red`/`amber`/`sky`) are *not* tokens, so anywhere you use a
+  **tinted fill or coloured text** it needs an explicit dark pair: `bg-red-100 text-red-700
+  dark:bg-red-950 dark:text-red-300`, `text-amber-600 dark:text-amber-400`. A **solid** saturated
+  fill (`bg-red-600 text-white`) is the exception — it reads correctly in both themes as-is.
+  `Badge`/`Alert`/`Button` variants already carry their pairs; reuse the variant and you get it free.
 
 Semantic (non-token) Tailwind colors are still fine for status/severity — `emerald-*` (success),
 `red-*` (danger), `amber-*` (warning), `sky-*` (info) — `Badge`/`Alert`/`Button` variants already
@@ -97,9 +111,16 @@ doesn't offer.
 <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.04em] text-muted">Section Name</h2>
 ```
 
-**Stat/summary tiles** (dashboard cards, count cards): a `Card` with a `text-sm uppercase
-tracking-[0.04em] text-muted` label and a large `sv-serif font-bold` value below it — see
-`Tiles`/`Card` usage in `Dashboard.jsx` for the exact shape before inventing a new stat-card layout.
+**Stat/summary tiles** (dashboard cards, count cards): use `StatCard` from
+`frontend/src/components/StatCard.jsx` — `<StatCard label="Occupied rooms" value={n}
+variant="danger" />`. It owns the whole treatment (compact `p-4` card, `text-xs uppercase
+tracking-[0.04em] text-muted` label, `sv-serif tabular-nums text-2xl font-bold` value) plus the
+per-variant number tint (`success | danger | warning | info | primary | secondary | dark`);
+`size="sm"` drops the value to `text-xl` for long values like a formatted peso figure. Don't
+hand-roll a `Card` + label + number: Front Desk and Guests each used to keep their own copy and
+they drifted. Lay them out in a `grid gap-3` row (`grid-cols-2 lg:grid-cols-4`; money tiles go
+`grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` so a full peso amount fits on a phone) — see
+`Dashboard.jsx`'s `Tiles`, `FrontDesk.jsx` and `Guests.jsx`.
 
 ## Rule 4 — loading states: skeletons, not spinners
 

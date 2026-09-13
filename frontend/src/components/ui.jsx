@@ -16,16 +16,23 @@ const B0 = /(^|\s)border-0(\s|$)/
 
 /* ---------------------------------------------------------------- Button */
 
+// Solid fills (success/danger) keep white-on-saturated in both themes — that
+// reads fine on a dark surface, so only the *outline* variants, which tint
+// themselves against the page, need a dark pair.
 const BUTTON_VARIANTS = {
-  primary: 'border-transparent bg-ink text-white hover:bg-ink-hover',
+  primary: 'border-transparent bg-ink text-on-ink hover:bg-ink-hover',
   secondary: 'border-line bg-subtle text-body hover:bg-line',
   success: 'border-transparent bg-emerald-600 text-white hover:bg-emerald-700',
   danger: 'border-transparent bg-red-600 text-white hover:bg-red-700',
-  warning: 'border-transparent bg-accent text-white hover:bg-[#c0800c]',
+  warning: 'border-transparent bg-accent text-on-ink hover:bg-accent-hover',
   'outline-primary': 'border-line bg-transparent text-ink hover:bg-subtle',
   'outline-secondary': 'border-line bg-transparent text-body hover:bg-subtle',
-  'outline-success': 'border-emerald-300 bg-transparent text-emerald-700 hover:bg-emerald-50',
-  'outline-danger': 'border-red-300 bg-transparent text-red-600 hover:bg-red-50',
+  'outline-success':
+    'border-emerald-300 bg-transparent text-emerald-700 hover:bg-emerald-50 ' +
+    'dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950',
+  'outline-danger':
+    'border-red-300 bg-transparent text-red-600 hover:bg-red-50 ' +
+    'dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950',
   link: 'border-transparent bg-transparent text-ink hover:underline',
 }
 
@@ -69,15 +76,19 @@ export function Spinner({ size, className = '' }) {
 
 /* ----------------------------------------------------------------- Badge */
 
+// Tinted chips are the one place the status colours sit on a *light* fill, so
+// each needs its dark counterpart (a 100-level fill stays white-ish in dark
+// mode and blows out the card). `dark`/`light` used to be raw Tailwind grays,
+// which is exactly what didn't flip.
 const BADGE_VARIANTS = {
-  primary: 'bg-ink text-white',
-  secondary: 'bg-subtle text-[#5b6270]',
-  success: 'bg-emerald-100 text-emerald-800',
-  danger: 'bg-red-100 text-red-700',
-  warning: 'bg-amber-100 text-amber-800',
-  info: 'bg-sky-100 text-sky-800',
-  dark: 'bg-gray-800 text-white',
-  light: 'bg-gray-100 text-gray-700',
+  primary: 'bg-ink text-on-ink',
+  secondary: 'bg-subtle text-muted',
+  success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  danger: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300',
+  warning: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+  info: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
+  dark: 'bg-ink text-on-ink',
+  light: 'bg-subtle text-muted',
 }
 
 export function Badge({ bg = 'secondary', className = '', children }) {
@@ -293,10 +304,14 @@ Form.Text = FormText
 /* ----------------------------------------------------------------- Alert */
 
 const ALERT_VARIANTS = {
-  danger: 'border-red-200 bg-red-50 text-red-800',
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-  warning: 'border-amber-200 bg-amber-50 text-amber-900',
-  info: 'border-sky-200 bg-sky-50 text-sky-900',
+  danger: 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200',
+  success:
+    'border-emerald-200 bg-emerald-50 text-emerald-800 ' +
+    'dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200',
+  warning:
+    'border-amber-200 bg-amber-50 text-amber-900 ' +
+    'dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-100',
+  info: 'border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950/60 dark:text-sky-100',
   secondary: 'border-line bg-subtle text-body',
 }
 
@@ -453,7 +468,9 @@ function DropdownItem({ danger, className = '', onClick, children, ...rest }) {
       onClick={(e) => { onClick?.(e); close?.() }}
       className={cx(
         'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
-        danger ? 'text-red-600 hover:bg-red-50' : 'text-body hover:bg-subtle',
+        danger
+          ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/60'
+          : 'text-body hover:bg-subtle',
         className,
       )}
       {...rest}

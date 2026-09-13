@@ -8,6 +8,7 @@ import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
 import { matchGuests, listGuests } from '../api/guests'
 import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
+import { StatCard } from '../components/StatCard'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
@@ -59,15 +60,6 @@ function resolveBaseRate(rates, roomId) {
 const roomLabel = (r) => `Room ${r.room_number} — ${r.room_type ?? 'Room'}`
 const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning' }
 const RES_VARIANT = { booked: 'secondary', checked_in: 'primary', checked_out: 'success', cancelled: 'dark' }
-// Stat-card number tint per card variant.
-const VALUE_COLOR = {
-  success: 'text-emerald-600',
-  danger: 'text-red-600',
-  warning: 'text-amber-600',
-  primary: 'text-ink',
-  secondary: 'text-muted',
-  dark: 'text-gray-900',
-}
 
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : null)
 
@@ -322,13 +314,13 @@ export default function FrontDesk() {
         </>
       ) : (
         <>
-        <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          <SummaryCard label="Available rooms" value={counts.available} variant="success" />
-          <SummaryCard label="Occupied rooms" value={counts.occupied} variant="danger" />
-          <SummaryCard label="Maintenance" value={counts.maintenance} variant="warning" />
-          <SummaryCard label="Reservations" value={counts.reservations} variant="primary" />
-          <SummaryCard label="Checked out today" value={counts.checkedOutToday} variant="secondary" />
-          <SummaryCard label="Cancelled today" value={counts.cancelledToday} variant="dark" />
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+          <StatCard label="Available rooms" value={counts.available} variant="success" />
+          <StatCard label="Occupied rooms" value={counts.occupied} variant="danger" />
+          <StatCard label="Maintenance" value={counts.maintenance} variant="warning" />
+          <StatCard label="Reservations" value={counts.reservations} variant="primary" />
+          <StatCard label="Checked out today" value={counts.checkedOutToday} variant="secondary" />
+          <StatCard label="Cancelled today" value={counts.cancelledToday} variant="dark" />
         </div>
 
         <Tabs defaultActiveKey="reservations" className="mb-4">
@@ -773,17 +765,6 @@ export default function FrontDesk() {
   )
 }
 
-function SummaryCard({ label, value, variant }) {
-  return (
-    <Card className="h-full">
-      <Card.Body>
-        <div className="text-sm text-muted">{label}</div>
-        <div className={`text-3xl font-bold ${VALUE_COLOR[variant] ?? ''}`}>{value}</div>
-      </Card.Body>
-    </Card>
-  )
-}
-
 // Editing an existing 'booked' reservation reuses this same modal, scoped to
 // booking details only (room/dates/source/discount/beds) — the linked guest
 // isn't editable here (that's the Guests module's job), and the backend
@@ -1047,7 +1028,7 @@ function ReservationModal({
             {guestId && (
               <span className="flex items-center gap-2">
                 <Badge bg="success">Using existing guest</Badge>
-                <button type="button" className="text-xs text-red-600 hover:underline"
+                <button type="button" className="text-xs text-red-600 hover:underline dark:text-red-400"
                   onClick={clearGuestSelection}>
                   Wrong guest? Clear
                 </button>

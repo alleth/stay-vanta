@@ -578,7 +578,7 @@ function InvoiceModal({ id, onClose }) {
               </div>
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
                 settled
-                  ? 'bg-emerald-50 text-emerald-700'
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
                   : 'bg-accent-soft text-accent'
               }`}>
                 {settled ? 'Settled' : 'Open tab'}
@@ -652,7 +652,7 @@ function InvoiceModal({ id, onClose }) {
             })()}
 
             {/* ---- Grand total ---- */}
-            <div className="mt-4 flex items-center justify-between rounded-xl bg-ink px-4 py-3 text-white">
+            <div className="mt-4 flex items-center justify-between rounded-xl bg-ink px-4 py-3 text-on-ink">
               <span className="text-sm font-medium opacity-80">Total due (VAT-inclusive)</span>
               <span className="text-xl font-bold tabular-nums">{formatMoney(invoice.total)}</span>
             </div>
@@ -1034,7 +1034,7 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                             <div className="text-xs text-muted">{lineTotal}</div>
                           </div>
                           <Button size="sm" variant="outline-secondary" onClick={() => toggleCollapsed(cartLine.key)}>Change</Button>
-                          <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                          <button type="button" className="px-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300" title="Remove"
                             onClick={() => removeLine(cartLine.key)}>×</button>
                         </div>
                       )
@@ -1064,7 +1064,7 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                               <Button size="sm" variant="outline-secondary" onClick={() => setLineQty(cartLine.key, cartLine.qty + 1)}>+</Button>
                             </InputGroup>
                           )}
-                          <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                          <button type="button" className="px-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300" title="Remove"
                             onClick={() => removeLine(cartLine.key)}>×</button>
                         </div>
                         {groups.length > 0 && (
@@ -1124,7 +1124,7 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                         style={{ width: 96 }} />
                       <Form.Control size="sm" type="number" min={1} value={row.qty}
                         onChange={setCustomField(row.key, 'qty')} style={{ width: 60 }} />
-                      <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                      <button type="button" className="px-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300" title="Remove"
                         onClick={() => removeCustom(row.key)}>×</button>
                     </div>
                   ))}
@@ -1173,7 +1173,7 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                         placeholder="Beneficiary name" required />
                       <Form.Control size="sm" value={b.id_number} onChange={setBeneficiaryField(b.key, 'id_number')}
                         placeholder="ID number" required />
-                      <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                      <button type="button" className="px-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300" title="Remove"
                         onClick={() => removeBeneficiary(b.key)}>×</button>
                     </div>
                   ))}
@@ -1219,7 +1219,7 @@ function OrderModal({ menu, guests, roomByGuest, propertyId, onClose, onSaved })
                 )}
                 <Form.Group>
                   <Form.Label className="mb-1">
-                    Guest {needGuest ? <span className="text-red-600">*</span> : <span className="font-normal text-muted">(optional)</span>}
+                    Guest {needGuest ? <span className="text-red-600 dark:text-red-400">*</span> : <span className="font-normal text-muted">(optional)</span>}
                   </Form.Label>
                   <GuestPicker guests={eligibleGuests} roomByGuest={roomByGuest} value={guestId}
                     onChange={setGuestId} required={needGuest} propertyId={propertyId} />
@@ -1480,7 +1480,7 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
               ))}
             </Form.Select>
             {outOfStock && (
-              <Form.Text className="text-amber-600">
+              <Form.Text className="text-amber-600 dark:text-amber-400">
                 This item is out of stock — it will be saved as unavailable.
               </Form.Text>
             )}
@@ -1503,9 +1503,9 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
                   <Form.Control size="sm" type="number" min={0.01} step="0.01" value={row.quantity}
                     onChange={setIngredientField(row.key, 'quantity')} placeholder="Qty / serving"
                     style={{ width: 110 }} />
-                  <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove"
+                  <button type="button" className="px-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300" title="Remove"
                     onClick={() => removeIngredient(row.key)}>×</button>
-                  {rowOutOfStock && <span className="text-xs text-amber-600 whitespace-nowrap">out of stock</span>}
+                  {rowOutOfStock && <span className="text-xs text-amber-600 whitespace-nowrap dark:text-amber-400">out of stock</span>}
                 </div>
               )
             })}
@@ -1528,7 +1528,7 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
                       <option value="choice">Choice — guest picks one, free</option>
                       <option value="addon">Add-ons — priced extras</option>
                     </Form.Select>
-                    <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove group"
+                    <button type="button" className="px-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300" title="Remove group"
                       onClick={() => removeOptionGroup(group.key)}>×</button>
                   </div>
                   {group.options.map((option) => {
@@ -1548,9 +1548,9 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
                             <option key={i.id} value={i.id}>{i.name} ({Number(i.quantity)} {i.unit})</option>
                           ))}
                         </Form.Select>
-                        <button type="button" className="px-1 text-red-600 hover:text-red-700" title="Remove option"
+                        <button type="button" className="px-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300" title="Remove option"
                           onClick={() => removeOption(group.key, option.key)}>×</button>
-                        {rowOutOfStock && <span className="text-xs text-amber-600 whitespace-nowrap">out of stock</span>}
+                        {rowOutOfStock && <span className="text-xs text-amber-600 whitespace-nowrap dark:text-amber-400">out of stock</span>}
                       </div>
                     )
                   })}

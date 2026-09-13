@@ -126,6 +126,24 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
   `src/components/Skeleton.jsx` exports `Skeleton`, `SkeletonTable`, `SkeletonTableRows`,
   `SkeletonCards`. Reuse these instead of a `<Spinner/>` for page/table/card loads (inline
   action buttons keep their small spinner).
+- **Light/dark theming is token-driven**: `src/index.css` defines the palette in `@theme` and
+  redefines every token under `:root[data-theme='dark']`, so any UI built from the token utilities
+  (`bg-surface`, `text-body`, `border-line`…) themes itself. `src/context/ThemeContext.jsx` owns the
+  choice (stored under `stayvanta_theme`; with nothing stored it follows — and keeps following —
+  the OS), writes `data-theme` onto `<html>`, and is toggled by `src/components/ThemeToggle.jsx` in
+  `Layout.jsx`'s header and on `Login.jsx` (which renders outside Layout). An inline script in
+  `index.html` resolves the theme **before first paint** so a dark-mode user gets no white flash —
+  it duplicates the storage key and the boot splash's colors, so keep the two in sync. Because the
+  theme is an explicit choice, `dark:` is bound to that attribute via `@custom-variant` rather than
+  `prefers-color-scheme`; use `text-on-ink` (not `text-white`) on `bg-ink`/`bg-accent` fills, and
+  give any hand-written status color (emerald/red/amber/sky) an explicit `dark:` pair — see the
+  `frontend-design` skill. `Dashboard.jsx`'s ApexCharts config can't read CSS variables, so it
+  mirrors both themes' values in `CHART_COLORS` — keep that in sync with `index.css` too.
+- **Stat/summary tiles are one shared component**: `src/components/StatCard.jsx`
+  (`label`/`value`/`variant`/`size`) backs the Dashboard's `Tiles`, Front Desk's room-status row
+  and the Guests count cards. It owns the compact card treatment and the per-variant number tint;
+  Front Desk and Guests each used to carry their own near-identical copy and the two drifted — add
+  to this component rather than hand-rolling a `Card` + label + number in a page.
 
 ### Configuration
 - Production config is **env-driven in `config/app.php`** (committed): `Datasources.default` reads

@@ -3,6 +3,18 @@
    text-body, text-muted, bg-ink / text-ink, text-accent, bg-accent-soft… */
 @import 'tailwindcss';
 
+/* Dark mode is an explicit user choice (the header toggle writes
+   data-theme onto <html>; see src/context/ThemeContext.jsx), not the OS
+   setting — so `dark:` keys off that attribute rather than the default
+   prefers-color-scheme. The OS preference is still the *initial* value when
+   the user has never picked. */
+@custom-variant dark ([data-theme='dark'] &);
+
+/* Light theme — the default. Every token below is overridden wholesale for
+   dark further down, so anything built out of these utilities (bg-surface,
+   text-body, border-line…) themes itself with no `dark:` class of its own.
+   Only the semantic status shades (emerald/red/amber/sky, in ui.jsx) need
+   explicit dark pairs. */
 @theme {
   --color-canvas: #f7f7f8;      /* neutral off-white app background */
   --color-surface: #ffffff;
@@ -12,8 +24,36 @@
   --color-muted: #6b7280;       /* gray */
   --color-ink: #1f2430;         /* near-black primary actions */
   --color-ink-hover: #2c3242;
+  --color-on-ink: #ffffff;      /* text/icons sitting on bg-ink or bg-accent */
   --color-accent: #d99211;      /* amber — the one accent */
+  --color-accent-hover: #c0800c;
   --color-accent-soft: #fdf3e0; /* amber tint */
+}
+
+:root {
+  color-scheme: light;
+}
+
+/* Dark theme — the same roles, inverted. `ink` flips from a near-black
+   button to a near-white one (hence --color-on-ink, which is what the
+   label on it uses in both themes); the amber accent is nudged brighter so
+   it still reads against a dark ground. color-scheme keeps native widgets —
+   the date pickers all over Front Desk, scrollbars — in the dark palette. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-canvas: #121317;
+  --color-surface: #191b20;
+  --color-line: #2a2d34;
+  --color-subtle: #22252b;
+  --color-body: #e7e7ea;
+  --color-muted: #9ba1aa;
+  --color-ink: #e9eaee;
+  --color-ink-hover: #ffffff;
+  --color-on-ink: #16181c;
+  --color-accent: #e9a62c;
+  --color-accent-hover: #f3ba4e;
+  --color-accent-soft: #3a2b10;
 }
 
 @layer base {
@@ -62,7 +102,11 @@
     color: var(--color-muted);
   }
   .sv-table tbody tr:last-child > td { border-bottom: 0; }
-  .sv-table-hover tbody tr:hover > td { background-color: rgb(241 241 243 / 0.55); }
+  /* Was a hardcoded light gray, which stayed light in dark mode — the token
+     carries the row tint in both themes now. */
+  .sv-table-hover tbody tr:hover > td {
+    background-color: color-mix(in srgb, var(--color-subtle) 60%, transparent);
+  }
 
   /* Seamed control groups (input groups / button groups): collapse inner
      radii and overlap the shared 1px borders. Doubled class beats the

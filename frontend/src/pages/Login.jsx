@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Card, Form, Button, Alert, Spinner } from '../components/ui'
+import ThemeToggle from '../components/ThemeToggle'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
@@ -26,7 +27,10 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
+    <div className="relative flex min-h-screen items-center justify-center px-4">
+      {/* Login renders outside Layout, so it needs its own toggle — otherwise
+          the theme can only be changed after signing in. */}
+      <ThemeToggle className="absolute right-4 top-4" />
       <Card className="w-full max-w-[400px]">
         <Card.Body className="p-10">
           <h1 className="sv-serif mb-1 text-center text-[2rem] font-bold">

@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Button, Badge } from './ui'
 import { HomeIcon } from './icons'
+import ThemeToggle from './ThemeToggle'
 import { useAuth } from '../context/AuthContext'
 
 // First letters of up to the first two words — for the header's avatar chip.
@@ -40,8 +41,9 @@ export default function Layout() {
           >
             <HomeIcon className="h-4 w-4" /> Home
           </NavLink>
-          <div className="ml-auto flex items-center gap-3 lg:border-l lg:border-line lg:pl-4">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+          <ThemeToggle className="ml-auto" />
+          <div className="flex items-center gap-3 lg:border-l lg:border-line lg:pl-4">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-on-ink">
               {initials(user?.name)}
             </span>
             <span className="hidden whitespace-nowrap text-sm sm:inline">

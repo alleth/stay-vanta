@@ -2,7 +2,9 @@
 // data loads. (Inline action buttons keep their small <Spinner/>.)
 
 export function Skeleton({ className = '' }) {
-  return <div aria-hidden="true" className={`animate-pulse rounded bg-slate-200 ${className}`} />
+  // bg-line, not a raw Tailwind gray: skeletons show on every page's first
+  // load, so this is the most-seen surface that has to follow the theme.
+  return <div aria-hidden="true" className={`animate-pulse rounded bg-line ${className}`} />
 }
 
 // A stack of row-shaped bars — drop-in for a loading table/list inside a card.
