@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Tab, Tabs, Card, Table, Button, ButtonGroup, Badge, Modal, Form, Alert, Spinner, ListGroup,
 } from '../components/ui'
@@ -813,6 +813,42 @@ function ReservationModal({
       : { ...f, source: bookingSources[0]?.code ?? '' }))
   }
 
+  // Section rail. Editing scopes the form to booking details, so there's no
+  // Guest section to jump to then.
+  const sections = editing
+    ? [{ id: 'stay', label: 'Stay' }, { id: 'pricing', label: 'Pricing' }]
+    : [{ id: 'stay', label: 'Stay' }, { id: 'guest', label: 'Guest' }, { id: 'pricing', label: 'Pricing' }]
+  const paneRef = useRef(null)
+  const [activeSection, setActiveSection] = useState('stay')
+
+  // Highlight whichever section the reader is actually looking at. The bottom
+  // margin keeps the last section from claiming the highlight the moment it
+  // peeks into view.
+  useEffect(() => {
+    const root = paneRef.current
+    if (!root || typeof IntersectionObserver === 'undefined') return undefined
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const seen = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        if (seen[0]) setActiveSection(seen[0].target.id)
+      },
+      { root, rootMargin: '0px 0px -60% 0px' },
+    )
+    root.querySelectorAll('[data-section]').forEach((el) => observer.observe(el))
+    return () => observer.disconnect()
+  }, [editing])
+
+  function goToSection(id) {
+    const el = paneRef.current?.querySelector(`#${id}`)
+    if (!el) return
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+    setActiveSection(id)
+  }
+
   // The promo rate is read-only here: the room's original rate × the admin's
   // multiplier for the picked source (the backend computes the same on booking).
   const baseRate = resolveBaseRate(rates, form.room_id)
@@ -942,12 +978,51 @@ function ReservationModal({
   }
 
   return (
-    <Modal show onHide={onClose} centered size="lg">
+    <Modal show onHide={onClose} centered size="xl">
       <Form onSubmit={(e) => { e.preventDefault(); book(false) }}>
         <Modal.Header closeButton>
           <Modal.Title>{editing ? 'Edit reservation' : 'New reservation'}</Modal.Title>
         </Modal.Header>
-        <Modal.Body>
+        <Modal.Body className="p-0">
+         <div className="flex">
+          {/* Section rail. It scrolls the pane rather than swapping panels:
+              this is one required form, and fields hidden in an inactive
+              panel are either unmounted (so `required` never fires and an
+              incomplete booking saves) or hidden (so the browser refuses to
+              submit and shows nothing). Everything stays mounted. */}
+          <nav
+            aria-label="Form sections"
+            className="hidden w-44 shrink-0 flex-col gap-1 self-start border-r border-line p-4 md:flex"
+          >
+            {sections.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => goToSection(s.id)}
+                aria-current={activeSection === s.id ? 'true' : undefined}
+                className={`rounded-lg px-3 py-1.5 text-left text-sm font-medium transition-colors ${
+                  activeSection === s.id
+                    ? 'bg-subtle text-body'
+                    : 'text-muted hover:bg-subtle hover:text-body'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+            <div className="mt-4 border-t border-line pt-3">
+              <div className="text-xs font-medium uppercase tracking-[0.04em] text-muted">
+                Est. total
+              </div>
+              <div className="sv-serif mt-1 text-xl font-bold">
+                {estTotal > 0 ? formatMoney(estTotal) : '—'}
+              </div>
+              {nights > 0 && (
+                <div className="text-xs text-muted">{nights} night{nights === 1 ? '' : 's'}</div>
+              )}
+            </div>
+          </nav>
+
+          <div ref={paneRef} className="min-w-0 flex-1 p-4 md:max-h-[70vh] md:overflow-y-auto">
           {err && <Alert variant="danger">{err}</Alert>}
           {editing && (
             <div className="mb-4 flex items-center gap-2">
@@ -956,6 +1031,8 @@ function ReservationModal({
               {reservation.guest && <Badge bg="light" className="font-normal">{reservation.guest.guest_type}</Badge>}
             </div>
           )}
+          <section id="stay" data-section>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted">Stay</h3>
           <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
             <Form.Group className="mb-4 md:col-span-6">
               <Form.Label>Room</Form.Label>
@@ -1022,67 +1099,16 @@ function ReservationModal({
               </Form.Group>
             )}
             <Form.Group className="mb-4 md:col-span-4">
-              <Form.Label>Discount</Form.Label>
-              <Form.Select value={form.discount_type} onChange={set('discount_type')}>
-                <option value="none">None</option>
-                <option value="senior">Senior citizen (20%)</option>
-                <option value="pwd">PWD (20%)</option>
-              </Form.Select>
-            </Form.Group>
-            <Form.Group className="mb-4 md:col-span-2">
-              <Form.Label>Promo rate</Form.Label>
-              <Form.Control value={promoRate !== null ? formatMoney(promoRate) : ''}
-                disabled readOnly
-                placeholder={form.source === WALK_IN ? '—' : 'Not set'} />
-              {promoRate !== null && (
-                <Form.Text muted>
-                  ×{multiplier} of {formatMoney(baseRate)} original rate
-                </Form.Text>
-              )}
-              {form.source !== WALK_IN && multiplier === null && (
-                <Form.Text muted>
-                  No {sourceLabel(bookingSources, form.source)} multiplier is set — the original room rate applies.
-                </Form.Text>
-              )}
-              {form.source !== WALK_IN && multiplier !== null && baseRate <= 0 && (
-                <Form.Text muted>
-                  This room has no rate yet — add one on the Rates tab first.
-                </Form.Text>
-              )}
-            </Form.Group>
-            <Form.Group className="mb-4 md:col-span-2">
               <Form.Label>Extra beds</Form.Label>
               <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
             </Form.Group>
           </div>
-          <Form.Group className="mb-4">
-            <Form.Check type="checkbox" label="Referral discount"
-              checked={form.referral}
-              onChange={(e) => setForm({ ...form, referral: e.target.checked })} />
-            {form.referral && (
-              <>
-                <Form.Control className="mt-2" type="number" min={0.01} step="0.01" value={form.discount_amount}
-                  onChange={set('discount_amount')} required autoFocus placeholder="e.g. 500" />
-                <Form.Text muted>
-                  Flat amount off the room total, on top of any senior/PWD discount above
-                  {estRemaining > 0 ? ` (max ${formatMoney(estRemaining)})` : ''}.
-                </Form.Text>
-              </>
-            )}
-          </Form.Group>
-          {downpayment > 0 && (
-            <Alert variant="info" className="mb-4 px-4 py-2">
-              <strong>Advance booking</strong> — collect a downpayment of{' '}
-              <strong>{formatMoney(downpayment)}</strong> (50% of the {formatMoney(estTotal)} total,
-              promo rate and discount included). If the booking is later cancelled, 10% of the
-              downpayment is retained.
-            </Alert>
-          )}
+          </section>
+
           {!editing && (
-          <>
-          <hr />
-          <div className="mb-2 flex items-center justify-between">
-            <span className="font-semibold">Guest details</span>
+          <section id="guest" data-section className="mt-6 border-t border-line pt-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.04em] text-muted">Guest</h3>
             {guestId && (
               <span className="flex items-center gap-2">
                 <Badge bg="success">Using existing guest</Badge>
@@ -1179,8 +1205,78 @@ function ReservationModal({
               <Form.Control value={form.address} onChange={set('address')} placeholder="Optional" />
             </Form.Group>
           </div>
-          </>
+          </section>
           )}
+
+          <section id="pricing" data-section className="mt-6 border-t border-line pt-5">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted">Pricing</h3>
+            <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
+              <Form.Group className="mb-4 md:col-span-6">
+                <Form.Label>Discount</Form.Label>
+                <Form.Select value={form.discount_type} onChange={set('discount_type')}>
+                  <option value="none">None</option>
+                  <option value="senior">Senior citizen (20%)</option>
+                  <option value="pwd">PWD (20%)</option>
+                </Form.Select>
+              </Form.Group>
+              <Form.Group className="mb-4 md:col-span-6">
+                <Form.Label>Promo rate</Form.Label>
+                <Form.Control value={promoRate !== null ? formatMoney(promoRate) : ''}
+                  disabled readOnly
+                  placeholder={form.source === WALK_IN ? '—' : 'Not set'} />
+                {promoRate !== null && (
+                  <Form.Text muted>
+                    ×{multiplier} of {formatMoney(baseRate)} original rate
+                  </Form.Text>
+                )}
+                {form.source !== WALK_IN && multiplier === null && (
+                  <Form.Text muted>
+                    No {sourceLabel(bookingSources, form.source)} multiplier is set — the original room rate applies.
+                  </Form.Text>
+                )}
+                {form.source !== WALK_IN && multiplier !== null && baseRate <= 0 && (
+                  <Form.Text muted>
+                    This room has no rate yet — add one on the Rates tab first.
+                  </Form.Text>
+                )}
+              </Form.Group>
+            </div>
+            <Form.Group className="mb-4">
+              <Form.Check type="checkbox" label="Referral discount"
+                checked={form.referral}
+                onChange={(e) => setForm({ ...form, referral: e.target.checked })} />
+              {form.referral && (
+                <>
+                  <Form.Control className="mt-2" type="number" min={0.01} step="0.01" value={form.discount_amount}
+                    onChange={set('discount_amount')} required autoFocus placeholder="e.g. 500" />
+                  <Form.Text muted>
+                    Flat amount off the room total, on top of any senior/PWD discount above
+                    {estRemaining > 0 ? ` (max ${formatMoney(estRemaining)})` : ''}.
+                  </Form.Text>
+                </>
+              )}
+            </Form.Group>
+            {/* The rail carries this on wider screens, where it stays in view;
+                on a phone the rail is gone, so it belongs here instead. */}
+            {estTotal > 0 && (
+              <div className="mb-4 flex items-baseline justify-between border-t border-line pt-3 md:hidden">
+                <span className="text-xs font-medium uppercase tracking-[0.04em] text-muted">
+                  Est. total
+                </span>
+                <span className="sv-serif text-xl font-bold">{formatMoney(estTotal)}</span>
+              </div>
+            )}
+            {downpayment > 0 && (
+              <Alert variant="info" className="mb-0 px-4 py-2">
+                <strong>Advance booking</strong> — collect a downpayment of{' '}
+                <strong>{formatMoney(downpayment)}</strong> (50% of the {formatMoney(estTotal)} total,
+                promo rate and discount included). If the booking is later cancelled, 10% of the
+                downpayment is retained.
+              </Alert>
+            )}
+          </section>
+          </div>
+         </div>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
