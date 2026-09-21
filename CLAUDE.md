@@ -31,9 +31,19 @@ different origins in production (CORS), same origin in dev (Vite proxy).
 - Roll back: `php bin/cake.php migrations rollback`
 - Create a migration: `php bin/cake.php bake migration CreateThings`
 - Seed a user: `php bin/cake.php create_user --name N --email E --password P --role owner|admin|receptionist [--property-id N]`
-- Tests: `vendor/bin/phpunit` — single file: `vendor/bin/phpunit tests/TestCase/Path/ThingTest.php`.
-  The suite is still the CakePHP skeleton's (`ApplicationTest`, `PagesControllerTest`) — no
-  domain logic is covered; don't assume a green run validates business rules.
+- Tests: `vendor/bin/phpunit` — single file: `vendor/bin/phpunit tests/TestCase/Path/ThingTest.php`;
+  single test: add `--filter testName`. `composer check` = `phpunit` + `phpcs`.
+  Beyond the skeleton's `ApplicationTest`/`PagesControllerTest`, coverage is confined to the
+  parts where a wrong number reaches a real folio or a real lock-out: `ReservationsTableTest`
+  (`quote()` pricing), `FoodOrdersTableTest` (the discount/cooking-charge arithmetic) and
+  `Auth/LoginThrottleTest` — all fixture-free, over entities built in memory — plus
+  `Controller/Api/ReservationDiscountsApiTest`, the one HTTP-level suite (booking with Senior/PWD
+  beneficiaries, wholesale replacement on edit, and the two rules guarding the discount).
+  **There are no fixtures**: that test builds its own property/room/rate/user in `setUp()` and
+  removes them in `tearDown()`, and re-applies its auth header before *every* request (request
+  config doesn't survive a request — the second call otherwise 401s). Everything else —
+  role enforcement, stock movements, invoice settlement — is untested, so a green run validates
+  the money math and one endpoint, not the API.
 - Style: `composer cs-check` / `composer cs-fix` (phpcs / phpcbf, CakePHP standard). A
   `phpstan.neon` exists but PHPStan is only a `suggest` (not installed / no `composer stan`
   script) — run it only after adding `phpstan/phpstan` to `require-dev`. Same story for
@@ -108,29 +118,51 @@ there's nothing to brute-force and a work factor would only tax every request. P
 extra dependencies for the skeleton. **For production, migrate to the `cakephp/authentication`
 plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 
+`App\Auth\LoginThrottle` (used by `AuthController::login`) pauses an **email address** after
+`MAX_ATTEMPTS` (5) failed sign-ins for `LOCKOUT_SECONDS` (900), reporting the remaining wait; a
+success clears the counter. Counters live in the `login_throttle` **cache** config
+(`config/app.php`), whose `duration` must stay in step with `LOCKOUT_SECONDS`. Keyed on email and
+deliberately **not on IP**: nothing configures a trusted proxy, so `clientIp()` reports Railway's
+proxy for every caller — an IP limit would lock out every property at once, and trusting
+`X-Forwarded-For` would make the key attacker-controlled. An IP limit means configuring trusted
+proxies first.
+
 ### Frontend structure
-- `src/api/client.js` — single axios instance; injects the bearer token from localStorage.
-  Base URL is `VITE_API_BASE_URL` or `/api` (dev proxy).
+- `src/api/client.js` — single axios instance; injects the bearer token from localStorage
+  (`stayvanta_token`). Base URL is `VITE_API_BASE_URL` or `/api` (dev proxy). Pages never call
+  axios directly: each module has its own thin wrapper file beside it (`inventory.js`,
+  `frontdesk.js`, `guests.js`, `food.js`, `reports.js`, `staff.js`) exporting one function per
+  endpoint that unwraps `r.data.<key>`. Owner accounts pass `propertyId` through a local
+  `withProp()` helper (staff are scoped server-side); add new calls there, not in the page.
 - `src/context/AuthContext.jsx` — `useAuth()` provides `{ user, role, login, logout }`;
   resolves the current user from a stored token on boot via `/auth/me`.
 - `src/components/ProtectedRoute.jsx` wraps authed routes; pass `roles={[...]}` to restrict.
-- **No persistent tab nav** — `/` renders `src/pages/Hub.jsx`, a role-scoped grid of icon tiles
+- **No persistent tab nav** — `/hub` renders `src/pages/Hub.jsx`, a role-scoped grid of icon tiles
   (one per module) that's the post-login landing screen; `src/components/Layout.jsx`'s header
-  keeps only the brand mark (itself the link back to `/`), the theme toggle, and the user/logout
+  keeps only the brand mark (itself the link back to `/hub`), the theme toggle, and the user/logout
   chip. Getting back is a two-level **breadcrumb** (`Home / <module>`) rendered at the top of
   the page body, not in the header — the header is global chrome and doesn't change as you move
   around, so page-level context doesn't belong in it. Crumb labels are read from `src/nav.js`,
   so they can't drift from the Hub tile that was clicked; the Hub itself renders no crumb,
   being the trail's root.
   `src/nav.js` is the single source of truth for the module list (`{to, label, blurb, roles,
-  icon}`) that `Hub.jsx` renders — icons live in `src/components/icons.jsx` (hand-rolled inline
+  Icon}`) that `Hub.jsx` renders — icons live in `src/components/icons.jsx` (hand-rolled inline
   SVGs, no icon library). This is deliberate, not an oversight: every module-to-module switch
   goes back through the Hub (no shortcut nav inside a module) — if you're tempted to add a tab
   bar back into `Layout.jsx`, that reintroduces exactly what this replaced.
 - All five domain module pages in `src/pages/` are implemented (see below); no page is a
-  placeholder. Dashboard lives at `/dashboard` (not `/`, which is the Hub above).
-- **Public routes** `/privacy` and `/terms` (`PrivacyPolicy.jsx`, `TermsOfService.jsx`) render
-  outside `ProtectedRoute`/`Layout` (no auth, no nav) — they're linkable from the login page.
+  placeholder. Dashboard lives at `/dashboard`, the Hub at `/hub` — **not** at `/`, which is
+  public (below).
+- **Public routes** (outside `ProtectedRoute`/`Layout` — no auth, no nav): `/` → `Landing.jsx`,
+  `/login`, and `/privacy` + `/terms` (`PrivacyPolicy.jsx`, `TermsOfService.jsx`, linked from the
+  login page and Layout's footer). `App.jsx`'s `RootRoute` serves the landing page to visitors and
+  redirects a signed-in user to `/hub`, rendering nothing while `useAuth().loading` resolves the
+  stored token — otherwise marketing copy flashes at someone already signed in.
+  **`Landing.jsx` is deliberately outside the design system**: it commits to the dark promo look
+  (ink ground, amber mark, Manrope, radial glows) with every color written out rather than taken
+  from a token, and it doesn't use `ui.jsx` — it shares the brand, not the admin interface. Don't
+  "fix" it to follow the theme. `BrandMark.jsx` (the mark alone) and `BrandSplash.jsx` (the boot
+  splash, whose colors are duplicated by `index.html`'s pre-paint script) are shared by both.
 - **Loading states use Tailwind skeletons, not spinners**, for initial data loads:
   `src/components/Skeleton.jsx` exports `Skeleton`, `SkeletonTable`, `SkeletonTableRows`,
   `SkeletonCards`. Reuse these instead of a `<Spinner/>` for page/table/card loads (inline
@@ -191,7 +223,13 @@ plugin** (JWT or session) and move hashing to its `DefaultPasswordHasher`.
 - `GET /api/booking-sources` (any authed; **read-only** — starts empty for every property; a row is created only as a side effect of `POST /api/promo-rates`/`PATCH /api/promo-rates/{id}`, never through this endpoint)
 - `GET /api/promo-rates[?source=]` (any authed — the booking form reads them) · `POST /api/promo-rates` · `PATCH|PUT /api/promo-rates/{id}` (writes **owner/admin only**; a row = booking `source` + rate `multiplier` (> 0, of the room's original rate), optionally room-specific via `room_id`; both take a typed `source_name`, never a `source` code — `BookingSourcesTable::resolveOrCreate()` resolves it to an existing source by name (case-insensitive) or creates a new one, so adding/editing a promo rate is the only way a booking source comes into being) · `DELETE /api/promo-rates/{id}`
 - `GET /api/extra-charges` (any authed; index **auto-seeds** the built-in `early_check_in` row per property) · `POST /api/extra-charges` (**owner/admin only**; custom charge, `code` null) · `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; set amount/active, built-in row's name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the built-in early check-in row)
-- `GET|POST /api/reservations[?status=]` · `PATCH|PUT /api/reservations/{id}` (any authed staff, matching who can create a booking; fix a mistake made at booking — room/dates/source/discount — while the guest hasn't checked in yet; **blocked** once `status` isn't `booked`, and **blocked** once a downpayment has already been collected against the original quote, since editing the total afterward would leave that amount out of sync — cancel and rebook instead; `promo_rate` is recomputed server-side the same way `add()` does; if the edit turns the booking into — or keeps it as — an advance booking, the downpayment is collected the same way `add()` does) · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; an **advance booking** (check-in after today, guest on file) collects a **50% downpayment** of the quoted total as an immediately-settled invoice; **check-out** credits it against the room charge; **cancel** from `booked` refunds 90% and retains 10% (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`); **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting; `promo_rate` is **never client-supplied** — booking resolves it server-side from `promo_rates` for OTA sources) · `POST /api/reservations/{id}/payment` (any authed; `{payment_status: unpaid|paid}` — a Front Desk operational flag independent of the booking lifecycle and of invoice settlement, toggled from the reservations table)
+- `GET|POST /api/reservations[?status=]` (`POST` of a `walk_in` source is saved straight to
+  `checked_in` with `check_in` forced to today and the room flipped to `occupied`; any other
+  source requires `booking_reference` and may carry `sold_rate` — see Front Desk below. A save
+  that would double-book the room for overlapping nights is rejected. `total_guests` (default 1)
+  + `discount_beneficiaries[]` (`{discount_type: senior|pwd, name, id_number}`) carry the
+  statutory discount: **several qualified guests per booking**, each covering only their own
+  share of the room, so `discount_beneficiaries.length` can never exceed `total_guests`) · `PATCH|PUT /api/reservations/{id}` (any authed staff, matching who can create a booking; fix a mistake made at booking — room/dates/source/discount — while the guest hasn't checked in yet; **blocked** once `status` isn't `booked`, and **blocked** once a downpayment has already been collected against the original quote, since editing the total afterward would leave that amount out of sync — cancel and rebook instead; `promo_rate` is recomputed server-side the same way `add()` does; if the edit turns the booking into — or keeps it as — an advance booking, the downpayment is collected the same way `add()` does) · `POST /api/reservations/{id}/{check-in|check-out|cancel}` (transitions stamp `checked_in_at`/`checked_out_at`/`cancelled_at`; an **advance booking** (check-in after today, guest on file) collects a **50% downpayment** of the quoted total as an immediately-settled invoice; **check-out** credits it against the room charge; **cancel** from `booked` refunds 90% and retains 10% (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`); **check-in** accepts `early_check_in:true` → posts the configured early check-in fee to the guest's invoice; **cancel** reverses any early check-in fee; booking with a `guest_id` **completes** that guest's empty detail fields without overwriting; `promo_rate` is **never client-supplied** — booking resolves it server-side from `promo_rates` for OTA sources) · `POST /api/reservations/{id}/payment` (any authed; `{payment_status: unpaid|paid}` — a Front Desk operational flag independent of the booking lifecycle and of invoice settlement, toggled from the reservations table)
 - `GET /api/guests[?guest_type=&q=&page=&limit=]` (**paginated** → `{guests,total,page,limit}`; `limit` is only clamped 5–100 when a caller passes it — omitting it, as the Food & Orders charge-to-room picker and the Front Desk booking combobox do, returns the same wide unpaginated window (500) the endpoint always returned, so those client-side search comboboxes aren't affected by the Guests tab's pagination) · `GET /api/guests/stats` (total/local/foreign count **today's registrations only** — the cards reset daily; in_house is current) · `GET /api/guests/match?full_name=&email=&contact_number=` (de-dup candidates) · `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`)
 - `GET|POST /api/food-menu-items[?available=1][?type=food|linen]` · `PATCH|PUT /api/food-menu-items/{id}` · `DELETE /api/food-menu-items/{id}` (owner/admin; **soft-delete** — sets `deleted_at`, hides it from the menu/new orders, keeps the row so order history stays intact). `type` (`food`|`linen`, default `food`) picks which Food & Orders management tab the item lives on; if the linked `inventory_item_id` is out of stock (`quantity <= 0`), the item is **force-saved unavailable** regardless of what was requested (`FoodMenuItemsController::resolveAvailability()`). Optional `ingredients[]` (`{inventory_item_id, quantity}`) is a **recipe** — on top of, not instead of, the single `inventory_item_id` link — naming other inventory items one serving consumes (e.g. a dish links Rice as its main stock but also carries Egg/Hotdog as recipe ingredients); `resolveAvailability()` force-unavailables the item if any ingredient (not just the linked stock) is short; add/edit replace the item's `food_menu_item_ingredients` rows wholesale via `FoodMenuItemsController::saveIngredients()`. Optional `option_groups[]` (`{name, kind, options: [{label, price_delta, inventory_item_id}]}`) are guest-facing picks, distinct from the silent recipe: `kind` is `choice` (guest must pick exactly one, normally free — e.g. "Choice of Drink") or `addon` (guest may add any number of each, normally priced — e.g. "Additional egg"); add/edit replace the item's `food_menu_item_option_groups`/`options` wholesale via `FoodMenuItemsController::saveOptionGroups()`
 - `GET|POST /api/food-orders[?status=&date=YYYY-MM-DD|all&page=&limit=]` (index is **paginated** → returns `{orders,total,page,limit}`; `date` defaults client-side to today for a fresh-start view, `limit` clamped 5–100; `items[]` entries are either a menu line (`food_menu_item_id`, `quantity`, optional `selected_options[]` — see below) or a **custom line** (`description`, `price`, `quantity` — no menu item, no stock deduction, e.g. cooking of guest-brought food); optional `total_diners` (default 1) + `discount_beneficiaries[]` (`{discount_type: senior|pwd, name, id_number}`) let an order carry **more than one** Senior/PWD diner (e.g. two seniors at one table); the statutory 20% only covers each beneficiary's own even share of the items subtotal — `subtotal * (beneficiaries / total_diners) * 20%`, so `discount_beneficiaries.length` can never exceed `total_diners` — split evenly in whole cents across beneficiaries (any remainder cent to the first ones) and snapshotted per-beneficiary onto `food_order_discounts`, each posted as its own invoice line when charge-to-room; optional `cooking_charge` is added **after** the discount, since it's a service fee, not food; `payment_method` (`cash`|`gcash`|`maya`|`gotyme`) is **required when `payment_status` is `paid`**, null otherwise) · `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` (a **receptionist may not cancel a `served` + `paid` order** — owner/admin only)
@@ -223,7 +261,7 @@ roles=` in `App.jsx`** (frontend guards are UX only):
   stamped in `InvoicesController::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room
   food already lives inside invoices, so only `paid` food orders are added (no double count).
 - **Room revenue is persisted on Mark paid, falling back to check-out**: `ReservationsController::postRoomCharge()`
-  posts the `quote()` subtotal (itemized with any senior/PWD/referral discount as its own negative line) as
+  posts the `quote()` subtotal (itemized with one negative line per Senior/PWD beneficiary, plus the referral) as
   `reservation` line(s) on the guest's invoice (via `InvoicesTable::addLine`), so rooms become
   collectable revenue. It's called from both `payment()` (the moment a reservation is marked
   `paid`, whether that's at check-in or any time before check-out) and `transition()`'s check-out
@@ -292,7 +330,9 @@ typed price/qty — no stock movement). Custom lines exist for a guest who bring
 be cooked: the receptionist adds a custom item (e.g. "Cooking of guest's fish") for the cooking
 labor itself, separate from `cooking_charge` below. `place()` computes
 `total = subtotal − discount + cooking_charge` where `subtotal` sums every line (menu + custom):
-- **Senior/PWD discount** (`FoodOrdersTable::STATUTORY_DISCOUNT` = 20%) is per-**beneficiary**, not
+- **Senior/PWD discount** (20%, `App\Model\StatutoryDiscount::RATE` — the same class Front Desk
+  prices its own per-guest beneficiaries through; `FoodOrdersTable::splitStatutoryDiscount()` is a
+  thin delegate to it) is per-**beneficiary**, not
   per-order: `food_orders.total_diners` (default 1) plus zero or more `food_order_discounts` rows
   (`discount_type: senior|pwd`, `beneficiary_name`, `id_number`, `amount`) let an order carry
   several qualified diners at once (e.g. two senior citizens at the same table). The discount only
@@ -337,16 +377,60 @@ own `property_id`; an owner's chosen property defaults to the first and persists
 on every lifecycle transition (check-in/out/cancel), so a booking always shows who last
 handled it; transitions also flip `rooms.status` (occupied/available) and are guarded by an
 allowed-from-state table. Pricing lives in `ReservationsTable::quote()`: nightly rate =
-`promo_rate` (OTA) ?? resolved room rate. **`discount_type` (`none`|`senior`|`pwd`) and referral
+`promo_rate` (OTA) ?? resolved room rate. **The statutory Senior/PWD discount and referral
 (`reservations.discount_amount`) are independent and stack** — a guest can be a senior citizen
 *and* have a referral, since either can happen to any booking. Senior/PWD applies the fixed
-`STATUTORY_DISCOUNT` (20%) of the subtotal; referral has no fixed rate — it's a flat peso amount
-the receptionist types in (checkbox + amount field on the booking form, separate from the
-Discount dropdown), applied to whatever's left after the statutory discount and capped there
-(`min()`) so the total can never go negative. `discount_amount` is optional regardless of
-`discount_type`, but must be `> 0` whenever it's set at all. `quote()` returns
+`STATUTORY_DISCOUNT` (20%) per qualified guest (see below); referral has no fixed rate — it's a
+flat peso amount the receptionist types in (checkbox + amount field on the booking form, separate
+from the beneficiary rows), applied to whatever's left after the statutory discount and capped
+there (`min()`) so the total can never go negative. `discount_amount` is optional however many
+beneficiaries a booking carries, but must be `> 0` whenever it's set at all. `quote()` returns
 `statutory_discount`/`referral_discount` separately (as well as their `discount` sum) so
 `ReservationsController::postRoomCharge()` can itemize each as its own invoice line.
+
+**The statutory discount is per beneficiary, not per booking.** A room can hold several
+qualified guests (an elderly couple, two seniors sharing), so a booking carries one
+**`reservation_discounts`** row per beneficiary (`discount_type` senior|pwd, `beneficiary_name`,
+`id_number`) plus **`reservations.total_guests`** — how many people the room is billed between.
+The 20% only covers each beneficiary's own even share of the room:
+`subtotal * (beneficiaries / total_guests) * 20%`, the rule RA 9994 actually states — a lone
+senior in a room booked for three takes 20% of a third of it, not 20% of all of it. The
+arithmetic (whole-cent split, leftover cent to the earliest beneficiaries, shares summing
+exactly to the total) lives in **`App\Model\StatutoryDiscount`**, which `FoodOrdersTable` prices
+its own diners through as well — the law is one rule over two different bills, and a second copy
+would drift. `quote()` returns `statutory_shares` (per beneficiary, in row order) alongside
+`statutory_discount`, and `postRoomCharge()` posts **one negative invoice line per beneficiary**
+naming who it was for and against which ID, mirroring `FoodOrdersTable::place()`.
+`ReservationsController::parseBeneficiaries()` requires a name + ID on each and rejects more
+beneficiaries than guests; `saveBeneficiaries()` replaces the set wholesale on an edit (sending
+`discount_beneficiaries` at all replaces them; omitting the key leaves them alone).
+Unlike `food_order_discounts` these rows carry **no `amount`**: an order is a finished
+transaction with a stored total, while a booking is re-quoted live from whatever the room rate
+resolves to now, so the only snapshot of who got how much is the invoice line. `quote()` reads
+contained rows when they're there and loads them itself when they aren't (`beneficiariesFor()`),
+so a caller that forgets to `contain('ReservationDiscounts')` can't quietly bill the full rate.
+
+**A walk-in is not a future booking.** `source` splits bookings in two, and `add()` decides the
+rest from it rather than trusting the form: for `BookingSourcesTable::WALK_IN` it forces
+`check_in` to **today**, saves the reservation already `checked_in` (stamping `checked_in_at`),
+and flips the room to `occupied` on the spot — no early check-in fee (that charge is for arriving
+ahead of a booked date, which a walk-in has none of) and no downpayment. An **online** booking is
+saved `booked` as before and carries the channel's own paperwork: `reservations.booking_reference`
+(the Agoda/Cocotel confirmation code — **required** by a build rule for any non-walk-in, what you
+quote back when a stay is disputed) and the optional `sold_rate` (the nightly rate the channel
+sold the room for, gross of its commission). `sold_rate` is **recorded, never priced**: `quote()`
+still bills `promo_rate` ?? the resolved room rate, and the sold rate exists only to reconcile
+against what the OTA eventually remits. Both columns are nulled for a walk-in however the form was
+filled in before the type was switched.
+
+**A room can't be booked twice for the same nights.** The `roomAvailable` build rule rejects a save
+whose room already has a reservation in `HOLDS_ROOM` overlapping `[check_in, check_out)` —
+occupancy is the nights stayed, so the comparisons are strict and a check-out frees the room for a
+same-day check-in (the Calendar tab derives availability the same way). Because checking and
+inserting are two steps, `add()`/`edit()` first call `ReservationsTable::lockRoom()` (`FOR UPDATE`
+on the room row, inside the transaction, same idiom as `ReceiptSeriesTable::assignNext()`), so two
+receptionists booking the same room at the same moment are serialised instead of both passing the
+rule. Query the overlap yourself with `ReservationsTable::conflicting()`.
 
 **A `booked` reservation is editable until check-in**: clicking its row in the Reservations table
 (cursor changes; row actions like Check in/Cancel/Mark paid stop the click from bubbling) reopens
@@ -405,11 +489,11 @@ opens (or reuses) the guest's invoice right away and posts the room charge onto 
 `ReservationsController::postRoomCharge()` — so a guest who pays at check-in (or any time before
 check-out) already shows the room amount on Food & Orders → Invoices, instead of only getting it
 at check-out. `postRoomCharge()` itemizes it: the subtotal as one line (noting the OTA promo rate
-in its description when `promo_rate` is set, via `ReservationsTable::SOURCE_LABELS`), then, if
-`quote()`'s discount is > 0, a separate negative line — "Senior discount (20%)" / "PWD discount
-(20%)" / "Referral discount" depending on `discount_type` — mirroring how `FoodOrdersTable::place()`
-itemizes its own discount, so the invoice folio always shows the discount and promo rate as their
-own lines, not folded into a single net figure. It's
+in its description when `promo_rate` is set, via `ReservationsTable::SOURCE_LABELS`), then one
+negative line **per Senior/PWD beneficiary** ("Senior discount (20%, 1 of 3 guests) — Name, ID X")
+and one for the referral if there is one — mirroring how `FoodOrdersTable::place()` itemizes its
+own beneficiaries, so the invoice folio always shows who each discount was granted to, and the
+promo rate, as their own lines rather than folded into a single net figure. It's
 idempotent (checks `InvoicesTable::invoiceForLine('reservation', ...)` first), so **check-out**
 calling the same helper is just a fallback for a reservation that was never marked paid — whichever
 happens first is the one that actually posts the line. Cancelling a reservation reverses it
@@ -440,8 +524,8 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   ▶/▼ expand toggle revealing its sub-items, each tracked with its own stock/quantity). Inventory
   also has a **Receipt Booklets** tab (`Inventory.jsx`) managing `receipt_series` — see below.
 - **Front Desk** *(implemented)* (UI name for "Room Monitoring") — rooms, room rates, reservations, OTA
-  sources (`reservations.source`: cocotel/agoda/trip_com/tripadvisor), senior/PWD/referral
-  discounts, additional beds.
+  sources (`reservations.source`: cocotel/agoda/trip_com/tripadvisor), referral discounts and
+  per-guest senior/PWD ones (`reservation_discounts`, one row per qualified guest), additional beds.
 - **Guests** *(implemented)* — registry + counts (`GuestsController::stats` → total / local / foreign /
   in_house, where total/local/foreign count only guests **registered today** (daily fresh-start
   cards) and in_house = distinct guests with a `checked_in` reservation). Guests are also

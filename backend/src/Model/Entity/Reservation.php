@@ -25,9 +25,13 @@ use Cake\ORM\Entity;
  * @property string $source         walk_in | cocotel | agoda | trip_com | tripadvisor
  * @property string|null $promo_rate
  * @property string|null $downpayment  50% collected up front on an advance booking
- * @property string $discount_type  none | senior | pwd — statutory 20% off
+ * @property \App\Model\Entity\ReservationDiscount[] $reservation_discounts  one row per
+ *   Senior/PWD guest on this booking; the statutory 20% covers each one's own share of
+ *   the room (see ReservationsTable::quote()), so several can qualify at once
+ * @property int $total_guests  how many people the room is billed between — the divisor
+ *   the statutory discount is shared over
  * @property string|null $discount_amount  flat referral discount amount, independent of
- *   and stackable with discount_type (a guest can be senior/pwd *and* referred)
+ *   and stackable with the statutory one (a guest can be senior/pwd *and* referred)
  * @property string $payment_status unpaid | paid — Front Desk operational flag,
  *   independent of the booking lifecycle and of invoice settlement
  * @property int $additional_beds
@@ -50,7 +54,7 @@ class Reservation extends Entity
         'promo_rate' => true,
         'sold_rate' => true,
         'downpayment' => true,
-        'discount_type' => true,
+        'total_guests' => true,
         'discount_amount' => true,
         'payment_status' => true,
         'additional_beds' => true,

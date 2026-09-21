@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Model\Table;
 
 use App\Model\Entity\FoodOrder;
+use App\Model\StatutoryDiscount;
 use Cake\ORM\Table;
 use Cake\ORM\TableRegistry;
 use Cake\Validation\Validator;
@@ -28,14 +29,15 @@ class FoodOrdersTable extends Table
     public const STATUSES = ['open', 'served', 'cancelled'];
     public const PAYMENT_STATUSES = ['paid', 'charge_to_room', 'unpaid'];
     public const PAYMENT_METHODS = ['cash', 'gcash', 'maya', 'gotyme'];
-    public const BENEFICIARY_TYPES = ['senior', 'pwd'];
+    public const BENEFICIARY_TYPES = StatutoryDiscount::TYPES;
 
     /**
      * Statutory Senior Citizen / PWD discount. Legally it only covers a
      * qualified diner's own share of the bill, not the whole table — see
-     * place()'s discount math.
+     * App\Model\StatutoryDiscount, which Front Desk prices its own Senior/PWD
+     * guests through as well.
      */
-    public const STATUTORY_DISCOUNT = 0.20;
+    public const STATUTORY_DISCOUNT = StatutoryDiscount::RATE;
 
     public function initialize(array $config): void
     {
@@ -70,47 +72,20 @@ class FoodOrdersTable extends Table
     }
 
     /**
-     * The statutory discount for an order, split across its beneficiaries.
+     * The statutory discount for an order, split across its beneficiaries —
+     * `subtotal * (beneficiaries / total_diners) * 20%`, handed out in whole
+     * cents that sum to exactly the total.
      *
-     * The discount only covers each qualified diner's own even share of the
-     * bill — `subtotal * (beneficiaries / total_diners) * 20%` — because
-     * RA 9994 and the PWD Magna Carta don't discount a whole table just
-     * because one diner qualifies.
-     *
-     * The total is computed in whole cents first and then handed out evenly,
-     * any leftover cent going to the earliest beneficiaries, so the shares
-     * always sum to exactly the total: each is snapshotted onto its own
-     * `food_order_discounts` row and posted as its own invoice line, and a
-     * third of a cent lost in rounding would leave the folio disagreeing with
-     * the order total.
-     *
-     * Extracted from place() so it can be tested without a database — it is
-     * the arithmetic most expensive to get wrong and the least convenient to
-     * exercise through a whole transaction.
+     * The arithmetic itself lives in App\Model\StatutoryDiscount, which Front
+     * Desk prices its own Senior/PWD guests through: the law is the same rule
+     * over a different bill, and two copies of it would drift. This stays as
+     * the name place() reads from, and as the seam the tests exercise.
      *
      * @return array{total: float, shares: list<float>}
      */
     public function splitStatutoryDiscount(float $subtotal, int $totalDiners, int $beneficiaryCount): array
     {
-        if ($beneficiaryCount < 1 || $totalDiners < 1) {
-            return ['total' => 0.0, 'shares' => []];
-        }
-
-        $totalCents = (int)round(
-            $subtotal * $beneficiaryCount / $totalDiners * self::STATUTORY_DISCOUNT * 100,
-        );
-        $baseCents = intdiv($totalCents, $beneficiaryCount);
-        $remainder = $totalCents % $beneficiaryCount;
-
-        // Cast deliberately: PHP's `/` hands back an int when the division is
-        // exact, so an even 200.00 discount would come out as int(200) while
-        // 6.67 came out as a float. Callers are promised floats throughout.
-        $shares = [];
-        for ($i = 0; $i < $beneficiaryCount; $i++) {
-            $shares[] = (float)(($baseCents + ($i < $remainder ? 1 : 0)) / 100);
-        }
-
-        return ['total' => (float)($totalCents / 100), 'shares' => $shares];
+        return StatutoryDiscount::split($subtotal, $totalDiners, $beneficiaryCount);
     }
 
     /**
@@ -368,7 +343,7 @@ class FoodOrdersTable extends Table
                     // whom — not a single net figure.
                     $invoices->addLine($invoice, 'Food order #' . $order->id, $subtotal, 'food_order', (int)$order->id);
                     foreach ($savedDiscounts as $d) {
-                        $label = $d->discount_type === 'senior' ? 'Senior' : 'PWD';
+                        $label = StatutoryDiscount::label($d->discount_type);
                         $invoices->addLine(
                             $invoice,
                             sprintf(

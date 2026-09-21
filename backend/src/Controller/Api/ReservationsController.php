@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Model\Entity\Reservation;
+use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
 use App\Model\Table\ReservationsTable;
 use Cake\Http\Exception\BadRequestException;
@@ -39,7 +40,9 @@ class ReservationsController extends AppController
         $reservations = $this->fetchTable('Reservations');
         $query = $this->scopeToProperty(
             $reservations->find()
-                ->contain(['Rooms', 'Guests', 'Receptionist'])
+                // ReservationDiscounts rides along because quote() prices from
+                // it — without it every row would cost one extra query.
+                ->contain(['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts'])
                 ->orderBy(['Reservations.check_in' => 'DESC'])
                 ->limit(200),
         );
@@ -63,12 +66,16 @@ class ReservationsController extends AppController
     /**
      * POST /api/reservations
      *
-     * { room_id, check_in, check_out, source?, discount_type?, discount_amount?,
-     *   additional_beds?, guest_id? | guest_name?+nationality?+guest_type? }
+     * { room_id, check_in, check_out, source?, total_guests?,
+     *   discount_beneficiaries?, discount_amount?, additional_beds?,
+     *   guest_id? | guest_name?+nationality?+guest_type? }
      *
-     * `discount_type` (none/senior/pwd) and `discount_amount` (a flat peso
-     * referral amount, receptionist-decided) are independent and stack — a
-     * guest can be a senior citizen *and* have a referral discount.
+     * `discount_beneficiaries[]` ({discount_type: senior|pwd, name, id_number})
+     * is the Senior/PWD side: a room can hold several qualified guests, each
+     * recorded with their own ID, and the statutory 20% only covers each one's
+     * share of `total_guests` (see ReservationsTable::quote()).
+     * `discount_amount` (a flat peso referral amount, receptionist-decided) is
+     * independent and stacks — a guest can be a senior citizen *and* referred.
      *
      * The promo rate is resolved server-side from the promo_rates the admin
      * configured for the booking source — it is not accepted from the client.
@@ -88,9 +95,14 @@ class ReservationsController extends AppController
         $reservations = $this->fetchTable('Reservations');
         $reservation = null;
 
+        // Parsed before the transaction opens: a malformed beneficiary is the
+        // caller's mistake, not a reason to have started writing rows.
+        $totalGuests = $this->resolveTotalGuests();
+        $beneficiaries = $this->parseBeneficiaries($totalGuests);
+
         // Rolls back the inline-created guest if the reservation fails to save.
         $ok = $reservations->getConnection()->transactional(
-            function () use ($reservations, $propertyId, &$reservation): bool {
+            function () use ($reservations, $propertyId, $totalGuests, $beneficiaries, &$reservation): bool {
                 $guestId = $this->resolveGuestId($propertyId);
                 $source = $this->request->getData('source') ?? BookingSourcesTable::WALK_IN;
                 $roomId = $this->request->getData('room_id');
@@ -136,7 +148,6 @@ class ReservationsController extends AppController
                     ? Date::today()->format('Y-m-d')
                     : $this->request->getData('check_in');
 
-                $discountType = $this->request->getData('discount_type') ?? 'none';
                 $reservation = $reservations->newEntity([
                     'property_id' => $propertyId,
                     'room_id' => $roomId,
@@ -152,7 +163,7 @@ class ReservationsController extends AppController
                     // switched.
                     'booking_reference' => $isWalkIn ? null : $this->trimmedOrNull('booking_reference'),
                     'sold_rate' => $isWalkIn ? null : $this->trimmedOrNull('sold_rate'),
-                    'discount_type' => $discountType,
+                    'total_guests' => $totalGuests,
                     'discount_amount' => $this->resolveReferralAmount(),
                     'promo_rate' => $promoRate,
                     'additional_beds' => (int)($this->request->getData('additional_beds') ?? 0),
@@ -161,6 +172,10 @@ class ReservationsController extends AppController
                 if ($reservations->save($reservation) === false) {
                     return false;
                 }
+
+                // Before the downpayment below: it quotes the booking, and the
+                // quote prices from these.
+                $this->saveBeneficiaries($reservation, $beneficiaries);
 
                 // The room is taken from this moment, exactly as transition()
                 // does on check-in. No early check-in fee: that charge is for
@@ -204,8 +219,11 @@ class ReservationsController extends AppController
      * refunds 90% of the downpayment correctly).
      *
      * Accepts the same body as add() (room_id, check_in, check_out, source?,
-     * discount_type?, discount_amount?, additional_beds?) minus the guest
-     * fields — the linked guest isn't editable here. The promo rate is
+     * total_guests?, discount_beneficiaries?, discount_amount?,
+     * additional_beds?) minus the guest fields — the linked guest isn't
+     * editable here. Sending `discount_beneficiaries` replaces the booking's
+     * beneficiaries wholesale, the way FoodMenuItemsController::saveIngredients()
+     * treats a recipe; omitting the key leaves them as they are. The promo rate is
      * recomputed server-side the same way add() does, for whatever
      * source/room the edit ends up with. If the edit turns this into (or
      * keeps it as) an advance booking, the downpayment is collected the same
@@ -258,7 +276,22 @@ class ReservationsController extends AppController
             }
         }
 
-        $discountType = $this->request->getData('discount_type') ?? $reservation->discount_type;
+        // Omitting the key leaves the booking's beneficiaries alone; sending
+        // it (even empty, to clear them) replaces the lot.
+        $replaceBeneficiaries = $this->request->getData('discount_beneficiaries') !== null;
+        $totalGuests = $this->resolveTotalGuests((int)($reservation->total_guests ?? 1));
+        $beneficiaries = $replaceBeneficiaries ? $this->parseBeneficiaries($totalGuests) : [];
+        if (!$replaceBeneficiaries) {
+            // The guest count can still be edited on its own, and shrinking it
+            // below the beneficiaries already on file would price the discount
+            // above the statutory rate.
+            $existing = count($this->fetchTable('Reservations')->beneficiariesFor($reservation));
+            if ($existing > $totalGuests) {
+                throw new BadRequestException(
+                    'This booking already has more Senior/PWD beneficiaries than that many guests.',
+                );
+            }
+        }
 
         // Transactional for the same reason add() is: lockRoom() only holds
         // for the life of a transaction, and moving a booking to a different
@@ -271,7 +304,9 @@ class ReservationsController extends AppController
                 $roomId,
                 $source,
                 $promoRate,
-                $discountType,
+                $totalGuests,
+                $beneficiaries,
+                $replaceBeneficiaries,
             ): bool {
                 if ($roomId) {
                     $reservations->lockRoom((int)$roomId);
@@ -285,7 +320,7 @@ class ReservationsController extends AppController
                     'booking_reference' => $source === BookingSourcesTable::WALK_IN
                         ? null
                         : $this->trimmedOrNull('booking_reference') ?? $reservation->booking_reference,
-                    'discount_type' => $discountType,
+                    'total_guests' => $totalGuests,
                     'discount_amount' => $this->resolveReferralAmount(),
                     'promo_rate' => $promoRate,
                     'sold_rate' => $source === BookingSourcesTable::WALK_IN
@@ -298,6 +333,10 @@ class ReservationsController extends AppController
 
                 if ($reservations->save($reservation) === false) {
                     return false;
+                }
+
+                if ($replaceBeneficiaries) {
+                    $this->saveBeneficiaries($reservation, $beneficiaries);
                 }
 
                 if ($reservation->guest_id !== null) {
@@ -549,14 +588,29 @@ class ReservationsController extends AppController
                     (int)$reservation->id,
                 );
 
-                if ($quote['statutory_discount'] > 0) {
-                    $description = $reservation->discount_type === 'senior'
-                        ? 'Senior discount (20%)'
-                        : 'PWD discount (20%)';
+                // One line per beneficiary, not one net figure: the folio has
+                // to show who the discount was granted to and against which
+                // ID, and a room can hold several qualified guests. This is
+                // also the only place the peso amount is ever fixed — the
+                // beneficiary rows themselves carry no amount, since a
+                // booking's price is quoted live until it's charged.
+                $totalGuests = max(1, (int)($reservation->total_guests ?? 1));
+                foreach ($this->fetchTable('Reservations')->beneficiariesFor($reservation) as $i => $beneficiary) {
+                    $share = (float)($quote['statutory_shares'][$i] ?? 0);
+                    if ($share <= 0) {
+                        continue;
+                    }
                     $invoices->addLine(
                         $invoice,
-                        $description,
-                        -(float)$quote['statutory_discount'],
+                        sprintf(
+                            '%s discount (20%%, 1 of %d guest%s) — %s, ID %s',
+                            StatutoryDiscount::label($beneficiary->discount_type),
+                            $totalGuests,
+                            $totalGuests === 1 ? '' : 's',
+                            $beneficiary->beneficiary_name,
+                            $beneficiary->id_number,
+                        ),
+                        -$share,
                         'reservation',
                         (int)$reservation->id,
                     );
@@ -605,9 +659,96 @@ class ReservationsController extends AppController
     }
 
     /**
+     * How many people the room is billed between, from the request — the
+     * divisor the statutory discount is shared over. At least one; falls back
+     * to `$current` (the booking's own count on an edit, 1 on a new booking)
+     * when the field isn't sent at all.
+     */
+    private function resolveTotalGuests(int $current = 1): int
+    {
+        $raw = $this->request->getData('total_guests');
+        if ($raw === null || trim((string)$raw) === '') {
+            return max(1, $current);
+        }
+
+        return max(1, (int)$raw);
+    }
+
+    /**
+     * The Senior/PWD beneficiaries from the request, validated.
+     *
+     * Each needs a name and an ID number: the point of recording a
+     * beneficiary at all is being able to account for the discount afterwards,
+     * and "senior, no name" accounts for nothing. There can't be more of them
+     * than guests on the booking either — that would discount more of the room
+     * than there are people to discount for. Mirrors FoodOrdersTable::place()'s
+     * own parsing of the same shape.
+     *
+     * @return list<array{discount_type: string, name: string, id_number: string}>
+     */
+    private function parseBeneficiaries(int $totalGuests): array
+    {
+        $beneficiaries = [];
+        foreach ((array)($this->request->getData('discount_beneficiaries') ?? []) as $raw) {
+            $type = $raw['discount_type'] ?? null;
+            if (!in_array($type, StatutoryDiscount::TYPES, true)) {
+                throw new BadRequestException('Unknown discount type.');
+            }
+            $name = trim((string)($raw['name'] ?? ''));
+            $idNumber = trim((string)($raw['id_number'] ?? ''));
+            if ($name === '' || $idNumber === '') {
+                throw new BadRequestException(
+                    'Each Senior/PWD discount needs the beneficiary name and ID number.',
+                );
+            }
+            $beneficiaries[] = ['discount_type' => $type, 'name' => $name, 'id_number' => $idNumber];
+        }
+
+        if (count($beneficiaries) > $totalGuests) {
+            throw new BadRequestException(
+                'The number of Senior/PWD beneficiaries cannot exceed the total guests.',
+            );
+        }
+
+        return $beneficiaries;
+    }
+
+    /**
+     * Replace a booking's beneficiaries with `$beneficiaries`.
+     *
+     * Wholesale, like FoodMenuItemsController::saveIngredients(): an edit that
+     * dropped one guest and added another is easier to get right by rewriting
+     * the set than by diffing it, and nothing else references these rows.
+     *
+     * The saved rows are set back onto the entity (clean, so they can't ride
+     * along into a later save) because quote() prices from them, and the
+     * downpayment is quoted moments later in the same transaction.
+     *
+     * @param list<array{discount_type: string, name: string, id_number: string}> $beneficiaries
+     */
+    private function saveBeneficiaries(Reservation $reservation, array $beneficiaries): void
+    {
+        $discounts = $this->fetchTable('ReservationDiscounts');
+        $discounts->deleteAll(['reservation_id' => $reservation->id]);
+
+        $saved = [];
+        foreach ($beneficiaries as $beneficiary) {
+            $saved[] = $discounts->saveOrFail($discounts->newEntity([
+                'reservation_id' => $reservation->id,
+                'discount_type' => $beneficiary['discount_type'],
+                'beneficiary_name' => $beneficiary['name'],
+                'id_number' => $beneficiary['id_number'],
+            ]));
+        }
+
+        $reservation->set('reservation_discounts', $saved);
+        $reservation->setDirty('reservation_discounts', false);
+    }
+
+    /**
      * The referral discount amount from the request, or null when not set —
-     * distinct from `discount_type` (none/senior/pwd), since referral stacks
-     * with it rather than being one more option in that enum.
+     * distinct from the statutory Senior/PWD discount, since referral stacks
+     * with it rather than being one more kind of beneficiary.
      */
     private function resolveReferralAmount(): ?string
     {
@@ -766,7 +907,10 @@ class ReservationsController extends AppController
     private function respondWithReservation(Reservation $reservation, int $status): void
     {
         $reservations = $this->fetchTable('Reservations');
-        $full = $reservations->get($reservation->id, contain: ['Rooms', 'Guests', 'Receptionist']);
+        $full = $reservations->get(
+            $reservation->id,
+            contain: ['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts'],
+        );
         $full->set('quote', $reservations->quote($full, $this->resolveBaseRate((int)$full->property_id, $full->room_id)));
 
         $this->response = $this->response->withStatus($status);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Test\TestCase\Model\Table;
 
 use App\Model\Entity\Reservation;
+use App\Model\Entity\ReservationDiscount;
 use App\Model\Table\ReservationsTable;
 use Cake\I18n\Date;
 use Cake\ORM\Locator\LocatorAwareTrait;
@@ -33,16 +34,41 @@ class ReservationsTableTest extends TestCase
 
     /**
      * A booking over the given nights, with no discounts unless asked for.
+     *
+     * `reservation_discounts` is set even when empty: quote() falls back to
+     * reading the rows for a saved booking when the association is absent, and
+     * these entities are never saved.
      */
     private function booking(string $checkIn, string $checkOut, array $extra = []): Reservation
     {
         return new Reservation($extra + [
             'check_in' => new Date($checkIn),
             'check_out' => new Date($checkOut),
-            'discount_type' => 'none',
+            'reservation_discounts' => [],
+            'total_guests' => 1,
             'discount_amount' => null,
             'promo_rate' => null,
         ]);
+    }
+
+    /**
+     * Senior/PWD beneficiary rows — only their number and type matter to a
+     * quote, the name and ID are for the invoice line.
+     *
+     * @return list<\App\Model\Entity\ReservationDiscount>
+     */
+    private function beneficiaries(string ...$types): array
+    {
+        $rows = [];
+        foreach ($types as $i => $type) {
+            $rows[] = new ReservationDiscount([
+                'discount_type' => $type,
+                'beneficiary_name' => 'Guest ' . ($i + 1),
+                'id_number' => 'ID-' . ($i + 1),
+            ]);
+        }
+
+        return $rows;
     }
 
     public function testNightsAreTheStayNotTheDatesTouched(): void
@@ -73,13 +99,76 @@ class ReservationsTableTest extends TestCase
         $this->assertSame(4000.0, $quote['subtotal']);
     }
 
-    public function testSeniorDiscountTakesTwentyPercent(): void
+    public function testASeniorAloneInTheRoomTakesTwentyPercentOfAllOfIt(): void
     {
-        $booking = $this->booking('2026-03-01', '2026-03-04', ['discount_type' => 'senior']);
+        // One beneficiary, one guest: their own share is the whole room, so
+        // this is the flat 20% a booking used to get — the case every
+        // pre-existing booking was migrated into.
+        $booking = $this->booking('2026-03-01', '2026-03-04', [
+            'reservation_discounts' => $this->beneficiaries('senior'),
+        ]);
         $quote = $this->Reservations->quote($booking, 1500.0);
 
         $this->assertSame(900.0, $quote['statutory_discount']);
         $this->assertSame(0.0, $quote['referral_discount']);
+        $this->assertSame(3600.0, $quote['total']);
+    }
+
+    public function testTheDiscountOnlyCoversTheBeneficiarysOwnShare(): void
+    {
+        // One senior among three guests doesn't discount the other two's
+        // share of the room: 20% of a third of 4500, not 20% of 4500.
+        $booking = $this->booking('2026-03-01', '2026-03-04', [
+            'reservation_discounts' => $this->beneficiaries('senior'),
+            'total_guests' => 3,
+        ]);
+        $quote = $this->Reservations->quote($booking, 1500.0);
+
+        $this->assertSame(300.0, $quote['statutory_discount']);
+        $this->assertSame(4200.0, $quote['total']);
+    }
+
+    public function testSeveralBeneficiariesEachTakeATheirOwnShare(): void
+    {
+        // The case the single discount_type flag couldn't express at all: an
+        // elderly couple in a room booked for three.
+        $booking = $this->booking('2026-03-01', '2026-03-04', [
+            'reservation_discounts' => $this->beneficiaries('senior', 'pwd'),
+            'total_guests' => 3,
+        ]);
+        $quote = $this->Reservations->quote($booking, 1500.0);
+
+        $this->assertSame(600.0, $quote['statutory_discount']);
+        $this->assertSame([300.0, 300.0], $quote['statutory_shares']);
+        $this->assertSame(3900.0, $quote['total']);
+    }
+
+    public function testSharesSumToTheTotalWhenTheCentsDontDivideEvenly(): void
+    {
+        // Each share becomes its own invoice line, so a lost rounding cent
+        // would leave the folio disagreeing with the booking's own total.
+        $booking = $this->booking('2026-03-01', '2026-03-02', [
+            'reservation_discounts' => $this->beneficiaries('senior', 'senior', 'pwd'),
+            'total_guests' => 3,
+        ]);
+        $quote = $this->Reservations->quote($booking, 333.35);
+
+        $this->assertSame(66.67, $quote['statutory_discount']);
+        $this->assertSame([22.23, 22.22, 22.22], $quote['statutory_shares']);
+        $this->assertSame(66.67, array_sum($quote['statutory_shares']));
+    }
+
+    public function testMoreBeneficiariesThanGuestsCannotDiscountMoreThanTheRoom(): void
+    {
+        // The controller rejects this at the door; the quote caps it too, so a
+        // hand-edited row can't price the discount above the statutory rate.
+        $booking = $this->booking('2026-03-01', '2026-03-04', [
+            'reservation_discounts' => $this->beneficiaries('senior', 'senior', 'pwd'),
+            'total_guests' => 1,
+        ]);
+        $quote = $this->Reservations->quote($booking, 1500.0);
+
+        $this->assertSame(900.0, $quote['statutory_discount']);
         $this->assertSame(3600.0, $quote['total']);
     }
 
@@ -98,7 +187,7 @@ class ReservationsTableTest extends TestCase
         // Either can happen to any booking, so they add up: 20% off 4500 is
         // 900, and the referral then comes off the 3600 that's left.
         $booking = $this->booking('2026-03-01', '2026-03-04', [
-            'discount_type' => 'senior',
+            'reservation_discounts' => $this->beneficiaries('senior'),
             'discount_amount' => 500.0,
         ]);
         $quote = $this->Reservations->quote($booking, 1500.0);
@@ -114,7 +203,7 @@ class ReservationsTableTest extends TestCase
         // A mistyped referral is capped at what's left after the statutory
         // discount, so the worst case is a free stay, never a refund owed.
         $booking = $this->booking('2026-03-01', '2026-03-04', [
-            'discount_type' => 'pwd',
+            'reservation_discounts' => $this->beneficiaries('pwd'),
             'discount_amount' => 99999.0,
         ]);
         $quote = $this->Reservations->quote($booking, 1500.0);

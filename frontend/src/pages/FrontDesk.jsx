@@ -70,6 +70,14 @@ const roomLabel = (r) => `Room ${r.room_number} — ${r.room_type ?? 'Room'}`
 const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning' }
 const RES_VARIANT = { booked: 'secondary', checked_in: 'primary', checked_out: 'success', cancelled: 'dark' }
 
+// The statutory discounts a guest can qualify for. A booking carries one
+// beneficiary row per qualified guest (a room can hold several), so these are
+// counted per row rather than read off a single flag.
+const DISCOUNT_KINDS = [
+  { type: 'senior', label: 'senior' },
+  { type: 'pwd', label: 'PWD' },
+]
+
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : null)
 
 // Allowed manual status changes per current room status. A room becomes
@@ -380,9 +388,17 @@ export default function FrontDesk() {
                       <td className="text-xs">{r.check_in} → {r.check_out}</td>
                       <td className="text-xs">
                         {sourceLabel(bookingSources, r.source)}
-                        {r.discount_type !== 'none' && (
-                          <Badge bg="info" className="ml-1">{r.discount_type}</Badge>
-                        )}
+                        {/* One badge per qualified guest, since a room can
+                            hold several — "senior ×2" beats a bare flag. */}
+                        {DISCOUNT_KINDS.map(({ type, label }) => {
+                          const n = (r.reservation_discounts ?? [])
+                            .filter((d) => d.discount_type === type).length
+                          return n > 0 && (
+                            <Badge key={type} bg="info" className="ml-1">
+                              {label}{n > 1 ? ` ×${n}` : ''}
+                            </Badge>
+                          )
+                        })}
                         {Number(r.discount_amount) > 0 && (
                           <Badge bg="info" className="ml-1">referral</Badge>
                         )}
@@ -394,7 +410,8 @@ export default function FrontDesk() {
                         )}
                         {Number(r.quote?.statutory_discount) > 0 && (
                           <div className="whitespace-nowrap text-[11px] text-muted">
-                            −{formatMoney(r.quote.statutory_discount)} ({r.discount_type})
+                            −{formatMoney(r.quote.statutory_discount)} (
+                            {r.reservation_discounts?.length ?? 0}/{r.total_guests ?? 1} guests)
                           </div>
                         )}
                         {Number(r.quote?.referral_discount) > 0 && (
@@ -799,7 +816,6 @@ function ReservationModal({
       ?? (forFutureDate ? bookingSources[0]?.code ?? WALK_IN : WALK_IN),
     booking_reference: reservation?.booking_reference ?? '',
     sold_rate: reservation?.sold_rate ?? '',
-    discount_type: reservation?.discount_type ?? 'none',
     referral: Boolean(reservation?.discount_amount),
     discount_amount: reservation?.discount_amount ?? '',
     additional_beds: reservation?.additional_beds ?? 0,
@@ -807,6 +823,27 @@ function ReservationModal({
     contact_number: '', email: '', address: '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+
+  // Senior/PWD statutory discount — a room can hold several qualified guests
+  // (an elderly couple, say), each recorded with their own name + ID. The 20%
+  // only covers each beneficiary's own even share of the room, so it needs the
+  // guest count to divide by. [{key, discount_type, name, id_number}], exactly
+  // as Food & Orders records the diners on an order.
+  const [beneficiaries, setBeneficiaries] = useState(
+    () => (reservation?.reservation_discounts ?? []).map((d, i) => ({
+      key: i, discount_type: d.discount_type, name: d.beneficiary_name, id_number: d.id_number,
+    })),
+  )
+  const [totalGuests, setTotalGuests] = useState(Number(reservation?.total_guests) || 1)
+  const addBeneficiary = () => {
+    setBeneficiaries((bs) => [...bs, { key: Date.now(), discount_type: 'senior', name: '', id_number: '' }])
+    // Never fewer guests than beneficiaries — the backend rejects that, and it
+    // would mean discounting more of the room than there are people in it.
+    setTotalGuests((tg) => Math.max(tg, beneficiaries.length + 1))
+  }
+  const removeBeneficiary = (key) => setBeneficiaries((bs) => bs.filter((b) => b.key !== key))
+  const setBeneficiaryField = (key, field) => (e) =>
+    setBeneficiaries((bs) => bs.map((b) => (b.key === key ? { ...b, [field]: e.target.value } : b)))
 
   // `source` stays the single value that gets submitted — walk_in or a
   // channel code. The two controls above it are just a clearer way to pick
@@ -834,18 +871,20 @@ function ReservationModal({
 
   // Advance booking (check-in after today) collects a 50% downpayment of the
   // estimated total — promo rate and discount included. The backend computes
-  // the authoritative amount the same way. Senior/PWD is a fixed 20% off;
-  // referral is a flat amount the receptionist types in, applied on top of
-  // whatever's left after the statutory discount and capped there so the
-  // estimate can't go negative while they're still typing — the two stack,
-  // since a guest can be a senior citizen *and* have a referral.
+  // the authoritative amount the same way. Senior/PWD is 20% of each
+  // beneficiary's own share of the room, not 20% of the room; referral is a
+  // flat amount the receptionist types in, applied on top of whatever's left
+  // after the statutory discount and capped there so the estimate can't go
+  // negative while they're still typing — the two stack, since a guest can be
+  // a senior citizen *and* have a referral.
   const nights = form.check_in && form.check_out
     ? Math.max(0, Math.round((new Date(form.check_out) - new Date(form.check_in)) / 86400000))
     : 0
   const nightly = promoRate ?? (baseRate > 0 ? baseRate : null)
   const estSubtotal = nightly !== null && nights > 0 ? nightly * nights : 0
-  const estStatutoryDiscount = form.discount_type === 'senior' || form.discount_type === 'pwd'
-    ? estSubtotal * 0.2
+  const qualifying = Math.min(beneficiaries.length, totalGuests)
+  const estStatutoryDiscount = qualifying > 0
+    ? estSubtotal * (qualifying / totalGuests) * 0.2
     : 0
   const estRemaining = Math.max(0, estSubtotal - estStatutoryDiscount)
   const estReferralDiscount = form.referral
@@ -923,6 +962,12 @@ function ReservationModal({
     const payload = { ...form, ...extra }
     if (!payload.referral) payload.discount_amount = ''
     delete payload.referral
+    // Always sent, so an edit that removed the last beneficiary clears them
+    // rather than leaving the old rows in place.
+    payload.total_guests = totalGuests
+    payload.discount_beneficiaries = beneficiaries.map((b) => ({
+      discount_type: b.discount_type, name: b.name.trim(), id_number: b.id_number.trim(),
+    }))
     if (guestId) { payload.guest_id = guestId; delete payload.guest_name }
     return payload
   }
@@ -1203,12 +1248,17 @@ function ReservationModal({
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted">Pricing</h3>
             <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
               <Form.Group className="mb-4 md:col-span-6">
-                <Form.Label>Discount</Form.Label>
-                <Form.Select value={form.discount_type} onChange={set('discount_type')}>
-                  <option value="none">None</option>
-                  <option value="senior">Senior citizen (20%)</option>
-                  <option value="pwd">PWD (20%)</option>
-                </Form.Select>
+                <Form.Label>Guests in the room</Form.Label>
+                <Form.Control type="number" min={Math.max(1, beneficiaries.length)}
+                  value={totalGuests}
+                  onChange={(e) => setTotalGuests(
+                    Math.max(beneficiaries.length || 1, parseInt(e.target.value, 10) || 1),
+                  )}
+                  required />
+                <Form.Text muted>
+                  What a Senior/PWD discount is shared over — each beneficiary&apos;s 20% covers
+                  their own share of the room, not the whole room.
+                </Form.Text>
               </Form.Group>
               <Form.Group className="mb-4 md:col-span-6">
                 <Form.Label>Promo rate</Form.Label>
@@ -1232,6 +1282,45 @@ function ReservationModal({
                 )}
               </Form.Group>
             </div>
+            <Form.Group className="mb-4">
+              <div className="mb-1 flex items-center justify-between">
+                <Form.Label className="mb-0">
+                  Senior/PWD discount{' '}
+                  <span className="font-normal text-muted">(optional — one per qualified guest)</span>
+                </Form.Label>
+                <Button size="sm" variant="outline-secondary" onClick={addBeneficiary}>
+                  + Add beneficiary
+                </Button>
+              </div>
+              {beneficiaries.length === 0 && (
+                <Form.Text muted>
+                  Add one for each Senior Citizen or PWD staying in the room — their name and ID
+                  are recorded against the discount.
+                </Form.Text>
+              )}
+              {beneficiaries.map((b) => (
+                <div key={b.key} className="mb-1 flex items-center gap-1">
+                  <Form.Select size="sm" style={{ width: 90 }} value={b.discount_type}
+                    onChange={setBeneficiaryField(b.key, 'discount_type')}>
+                    <option value="senior">Senior</option>
+                    <option value="pwd">PWD</option>
+                  </Form.Select>
+                  <Form.Control size="sm" value={b.name} onChange={setBeneficiaryField(b.key, 'name')}
+                    placeholder="Beneficiary name" required />
+                  <Form.Control size="sm" value={b.id_number} onChange={setBeneficiaryField(b.key, 'id_number')}
+                    placeholder="ID number" required />
+                  <button type="button" title="Remove"
+                    className="px-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                    onClick={() => removeBeneficiary(b.key)}>×</button>
+                </div>
+              ))}
+              {qualifying > 0 && estSubtotal > 0 && (
+                <Form.Text muted>
+                  −{formatMoney(estStatutoryDiscount)} — {qualifying} of {totalGuests}{' '}
+                  guest{totalGuests === 1 ? '' : 's'} qualify, 20% of their own share.
+                </Form.Text>
+              )}
+            </Form.Group>
             <Form.Group className="mb-4">
               <Form.Check type="checkbox" label="Referral discount"
                 checked={form.referral}

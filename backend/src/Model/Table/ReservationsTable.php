@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Model\Table;
 
 use App\Model\Entity\Reservation;
+use App\Model\StatutoryDiscount;
 use Cake\ORM\Query\SelectQuery;
 use Cake\ORM\RulesChecker;
 use Cake\ORM\Table;
@@ -26,11 +27,16 @@ class ReservationsTable extends Table
      * releases it, so only these two can collide with a new one.
      */
     public const HOLDS_ROOM = ['booked', 'checked_in'];
-    public const DISCOUNT_TYPES = ['none', 'senior', 'pwd'];
     public const PAYMENT_STATUSES = ['unpaid', 'paid'];
 
-    /** Statutory Senior Citizen / PWD discount (Philippines). */
-    public const STATUTORY_DISCOUNT = 0.20;
+    /**
+     * Statutory Senior Citizen / PWD discount (Philippines). A booking carries
+     * one `reservation_discounts` row per qualified guest rather than a single
+     * flag, and the rate only ever covers each one's own share of the room —
+     * see App\Model\StatutoryDiscount, which both this and Food & Orders price
+     * through.
+     */
+    public const STATUTORY_DISCOUNT = StatutoryDiscount::RATE;
 
     public function initialize(array $config): void
     {
@@ -48,6 +54,7 @@ class ReservationsTable extends Table
             'className' => 'Users',
             'foreignKey' => 'receptionist_id',
         ]);
+        $this->hasMany('ReservationDiscounts', ['dependent' => true]);
     }
 
     public function validationDefault(Validator $validator): Validator
@@ -60,13 +67,20 @@ class ReservationsTable extends Table
         // Validity (walk_in, or one of the property's configured booking
         // sources) is checked in the controller, where the property is known.
         $validator->scalar('source')->maxLength('source', 50);
-        $validator->inList('discount_type', self::DISCOUNT_TYPES);
         $validator->inList('payment_status', self::PAYMENT_STATUSES);
 
+        // How many people the room is billed between — the divisor the
+        // statutory discount is shared over. One, unless the desk says
+        // otherwise; never zero, which would make the share undefined.
+        $validator
+            ->integer('total_guests')
+            ->greaterThanOrEqual('total_guests', 1, 'A booking has at least one guest.')
+            ->allowEmptyString('total_guests');
+
         // Referral is a flat peso amount the receptionist decides, independent
-        // of (and stackable with) the senior/pwd statutory discount above —
-        // so it's optional regardless of discount_type, but must be a
-        // positive number whenever it's set at all.
+        // of (and stackable with) the senior/pwd statutory discount — so it's
+        // optional however many beneficiaries the booking carries, but must be
+        // a positive number whenever it's set at all.
         $validator
             ->numeric('discount_amount')
             ->greaterThan('discount_amount', 0, 'Enter a referral discount amount greater than 0.')
@@ -265,18 +279,62 @@ class ReservationsTable extends Table
     }
 
     /**
+     * The Senior/PWD beneficiaries on a booking.
+     *
+     * Contained rows are used as they are; otherwise they're read for the
+     * booking's own id (an entity that was never saved has none, and so no
+     * beneficiaries). Loading rather than trusting an absent association is
+     * deliberate: quote() prices from the count, and a caller that forgot to
+     * contain them would otherwise quietly bill the full rate.
+     *
+     * The rows are not written back onto the entity — a dirty hasMany would
+     * ride along into the next save().
+     *
+     * @return list<\App\Model\Entity\ReservationDiscount>
+     */
+    public function beneficiariesFor(Reservation $reservation): array
+    {
+        if ($reservation->has('reservation_discounts')) {
+            return array_values((array)$reservation->reservation_discounts);
+        }
+        if (!$reservation->id) {
+            return [];
+        }
+
+        return TableRegistry::getTableLocator()->get('ReservationDiscounts')->find()
+            ->where(['ReservationDiscounts.reservation_id' => $reservation->id])
+            ->orderBy(['ReservationDiscounts.id' => 'ASC'])
+            ->all()
+            ->toList();
+    }
+
+    /**
      * Compute a price quote for a reservation given the resolved nightly rate.
      * The promo rate (an OTA-negotiated nightly price) overrides the base rate
-     * when present. Senior/PWD (`discount_type`) and referral
-     * (`discount_amount`) are independent and stack: a guest can be, say, a
-     * senior citizen *and* have a referral discount. Senior/PWD applies the
-     * statutory 20% off the subtotal; referral is the receptionist-entered
-     * flat amount, applied on what's left after the statutory discount and
-     * capped there so the total can never go negative.
+     * when present.
+     *
+     * Senior/PWD and referral (`discount_amount`) are independent and stack: a
+     * guest can be, say, a senior citizen *and* have a referral discount.
+     *
+     * The statutory discount is **per beneficiary, not per booking**: a room
+     * can hold several qualified guests (an elderly couple, say), each
+     * recorded as a `reservation_discounts` row, and the 20% only covers each
+     * one's own even share of the room — `subtotal * (beneficiaries /
+     * total_guests) * 20%`, the rule RA 9994 states. A lone senior in a room
+     * billed for three guests takes 20% of a third of it, not 20% of all of
+     * it. `statutory_shares` is each beneficiary's own slice, in row order, so
+     * ReservationsController::postRoomCharge() can post one invoice line per
+     * beneficiary naming who it was for; the shares always sum to
+     * `statutory_discount`.
+     *
+     * Referral is the receptionist-entered flat amount, applied on what's left
+     * after the statutory discount and capped there so the total can never go
+     * negative.
      *
      * @return array{
      *     nights:int, nightly_rate:float, subtotal:float,
-     *     statutory_discount:float, referral_discount:float, discount:float, total:float
+     *     statutory_discount:float, statutory_shares:list<float>,
+     *     referral_discount:float, discount:float, total:float
      * }
      */
     public function quote(Reservation $reservation, float $baseNightlyRate): array
@@ -288,9 +346,14 @@ class ReservationsTable extends Table
         $nights = $this->nights($reservation);
         $subtotal = $nightly * $nights;
 
-        $statutoryDiscount = in_array($reservation->discount_type, ['senior', 'pwd'], true)
-            ? round($subtotal * self::STATUTORY_DISCOUNT, 2)
-            : 0.0;
+        $totalGuests = max(1, (int)($reservation->total_guests ?? 1));
+        // More beneficiaries than guests is rejected at the door by the
+        // controller; capping here too keeps a hand-edited row from pricing
+        // the discount above the statutory rate.
+        $beneficiaries = min(count($this->beneficiariesFor($reservation)), $totalGuests);
+        $split = StatutoryDiscount::split($subtotal, $totalGuests, $beneficiaries);
+
+        $statutoryDiscount = $split['total'];
         $remaining = max(0.0, $subtotal - $statutoryDiscount);
         $referralDiscount = $reservation->discount_amount !== null
             ? round(min((float)$reservation->discount_amount, $remaining), 2)
@@ -301,6 +364,7 @@ class ReservationsTable extends Table
             'nightly_rate' => round($nightly, 2),
             'subtotal' => round($subtotal, 2),
             'statutory_discount' => $statutoryDiscount,
+            'statutory_shares' => $split['shares'],
             'referral_discount' => $referralDiscount,
             'discount' => round($statutoryDiscount + $referralDiscount, 2),
             'total' => round($subtotal - $statutoryDiscount - $referralDiscount, 2),
