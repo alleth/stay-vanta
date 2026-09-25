@@ -227,6 +227,89 @@ class ReservationDiscountsApiTest extends TestCase
         $this->assertStringContainsString('cannot exceed', (string)$this->_response->getBody());
     }
 
+    /**
+     * An online booking for today (so it stays out of downpayment territory),
+     * with `$extra` merged into the body. Must be the test's first request.
+     */
+    private function bookOnline(array $extra): void
+    {
+        $sources = $this->getTableLocator()->get('BookingSources');
+        if (!$sources->exists(['property_id' => $this->propertyId, 'code' => 'agoda'])) {
+            $sources->saveOrFail($sources->newEntity([
+                'property_id' => $this->propertyId,
+                'code' => 'agoda',
+                'name' => 'Agoda',
+            ]));
+        }
+
+        // Not re-signed here: setUp() already signed the test's first request,
+        // and configRequest() merges recursively — signing twice turns the
+        // Authorization header into an array and the request 401s.
+        $this->post('/api/reservations', json_encode($extra + [
+            'room_id' => $this->roomId,
+            'check_in' => Date::today()->format('Y-m-d'),
+            'check_out' => Date::today()->addDays(3)->format('Y-m-d'),
+            'source' => 'agoda',
+            'booking_reference' => 'AG-456',
+            'guest_name' => 'Test Guest',
+        ]));
+    }
+
+    public function testAnOnlineBookingCarriesItsChannelDiscount(): void
+    {
+        $this->bookOnline(['channel_discount_type' => 'percent', 'channel_discount_value' => 10]);
+
+        $this->assertResponseCode(201, (string)$this->_response->getBody());
+        $reservation = json_decode((string)$this->_response->getBody(), true)['reservation'];
+        $this->assertSame('percent', $reservation['channel_discount_type']);
+        // 10% of 3 nights × 1500.
+        $this->assertEqualsWithDelta(450.0, $reservation['quote']['channel_discount'], 0.001);
+        $this->assertEqualsWithDelta(4050.0, $reservation['quote']['total'], 0.001);
+
+        // An edit that doesn't mention it keeps it; sending it blank clears it.
+        $id = $reservation['id'];
+        $this->authed();
+        $this->patch("/api/reservations/{$id}", json_encode(['total_guests' => 2]));
+        $kept = json_decode((string)$this->_response->getBody(), true)['reservation'];
+        $this->assertEqualsWithDelta(450.0, $kept['quote']['channel_discount'], 0.001);
+
+        $this->authed();
+        $this->patch("/api/reservations/{$id}", json_encode(['channel_discount_type' => '']));
+        $cleared = json_decode((string)$this->_response->getBody(), true)['reservation'];
+        $this->assertNull($cleared['channel_discount_type']);
+        $this->assertEqualsWithDelta(0.0, $cleared['quote']['channel_discount'], 0.001);
+    }
+
+    public function testAWalkInNeverCarriesAChannelDiscount(): void
+    {
+        $this->post('/api/reservations', json_encode([
+            'room_id' => $this->roomId,
+            'check_out' => Date::today()->addDays(2)->format('Y-m-d'),
+            'source' => 'walk_in',
+            'guest_name' => 'Test Guest',
+            'channel_discount_type' => 'fixed',
+            'channel_discount_value' => 500,
+        ]));
+
+        $this->assertResponseCode(201, (string)$this->_response->getBody());
+        $reservation = json_decode((string)$this->_response->getBody(), true)['reservation'];
+        $this->assertNull($reservation['channel_discount_type']);
+        $this->assertEqualsWithDelta(0.0, $reservation['quote']['channel_discount'], 0.001);
+    }
+
+    public function testAChannelDiscountAbove100PercentIsRejected(): void
+    {
+        $this->bookOnline(['channel_discount_type' => 'percent', 'channel_discount_value' => 120]);
+        $this->assertResponseCode(422);
+        $this->assertStringContainsString('100%', (string)$this->_response->getBody());
+    }
+
+    public function testAChannelDiscountTypeWithoutAValueIsRejected(): void
+    {
+        $this->bookOnline(['channel_discount_type' => 'fixed']);
+        $this->assertResponseCode(400);
+    }
+
     public function testABeneficiaryWithoutAnIdIsRejected(): void
     {
         $this->post('/api/reservations', json_encode([

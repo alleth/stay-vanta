@@ -22,7 +22,7 @@ use Cake\ORM\Entity;
  * @property \Cake\I18n\DateTime|null $checked_out_at  when check-out actually happened
  * @property \Cake\I18n\DateTime|null $cancelled_at    when the booking was cancelled
  * @property string $status         booked | checked_in | checked_out | cancelled
- * @property string $source         walk_in | cocotel | agoda | trip_com | tripadvisor
+ * @property string $source         walk_in, or one of the property's booking_sources codes
  * @property string|null $promo_rate
  * @property string|null $downpayment  50% collected up front on an advance booking
  * @property \App\Model\Entity\ReservationDiscount[] $reservation_discounts  one row per
@@ -30,6 +30,9 @@ use Cake\ORM\Entity;
  *   the room (see ReservationsTable::quote()), so several can qualify at once
  * @property int $total_guests  how many people the room is billed between — the divisor
  *   the statutory discount is shared over
+ * @property string|null $channel_discount_type  percent | fixed — a discount the booking
+ *   channel promised the guest; null for none, and always null for a walk-in
+ * @property string|null $channel_discount_value  the percentage (0-100] or the peso amount
  * @property string|null $discount_amount  flat referral discount amount, independent of
  *   and stackable with the statutory one (a guest can be senior/pwd *and* referred)
  * @property string $payment_status unpaid | paid — Front Desk operational flag,
@@ -53,6 +56,8 @@ class Reservation extends Entity
         'booking_reference' => true,
         'promo_rate' => true,
         'sold_rate' => true,
+        'channel_discount_type' => true,
+        'channel_discount_value' => true,
         'downpayment' => true,
         'total_guests' => true,
         'discount_amount' => true,

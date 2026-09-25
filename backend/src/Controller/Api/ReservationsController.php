@@ -68,7 +68,11 @@ class ReservationsController extends AppController
      *
      * { room_id, check_in, check_out, source?, total_guests?,
      *   discount_beneficiaries?, discount_amount?, additional_beds?,
+     *   channel_discount_type?, channel_discount_value?,
      *   guest_id? | guest_name?+nationality?+guest_type? }
+     *
+     * `channel_discount_type` (percent | fixed) + `channel_discount_value` is
+     * a promotion the online channel gave the guest — ignored for a walk-in.
      *
      * `discount_beneficiaries[]` ({discount_type: senior|pwd, name, id_number})
      * is the Senior/PWD side: a room can hold several qualified guests, each
@@ -144,6 +148,7 @@ class ReservationsController extends AppController
                 // trusted from the form — "walk-in" and "arriving next week"
                 // can't both be true.
                 $isWalkIn = $source === BookingSourcesTable::WALK_IN;
+                $channelDiscount = $this->resolveChannelDiscount($source);
                 $checkIn = $isWalkIn
                     ? Date::today()->format('Y-m-d')
                     : $this->request->getData('check_in');
@@ -163,6 +168,8 @@ class ReservationsController extends AppController
                     // switched.
                     'booking_reference' => $isWalkIn ? null : $this->trimmedOrNull('booking_reference'),
                     'sold_rate' => $isWalkIn ? null : $this->trimmedOrNull('sold_rate'),
+                    'channel_discount_type' => $channelDiscount['type'],
+                    'channel_discount_value' => $channelDiscount['value'],
                     'total_guests' => $totalGuests,
                     'discount_amount' => $this->resolveReferralAmount(),
                     'promo_rate' => $promoRate,
@@ -263,6 +270,7 @@ class ReservationsController extends AppController
         }
 
         $roomId = $this->request->getData('room_id') ?? $reservation->room_id;
+        $channelDiscount = $this->resolveChannelDiscount($source, $reservation);
 
         // The promo rate is never client-supplied: recomputed the same way
         // add() does, for the (possibly new) source/room.
@@ -304,6 +312,7 @@ class ReservationsController extends AppController
                 $roomId,
                 $source,
                 $promoRate,
+                $channelDiscount,
                 $totalGuests,
                 $beneficiaries,
                 $replaceBeneficiaries,
@@ -326,6 +335,8 @@ class ReservationsController extends AppController
                     'sold_rate' => $source === BookingSourcesTable::WALK_IN
                         ? null
                         : $this->trimmedOrNull('sold_rate') ?? $reservation->sold_rate,
+                    'channel_discount_type' => $channelDiscount['type'],
+                    'channel_discount_value' => $channelDiscount['value'],
                     'additional_beds' => (int)($this->request->getData('additional_beds')
                         ?? $reservation->additional_beds),
                     'receptionist_id' => (int)$this->currentUser->id,
@@ -588,6 +599,27 @@ class ReservationsController extends AppController
                     (int)$reservation->id,
                 );
 
+                // The channel's promotion, as its own line so the folio shows
+                // the guest was billed the price the OTA sold them.
+                if ($quote['channel_discount'] > 0) {
+                    $invoices->addLine(
+                        $invoice,
+                        sprintf(
+                            '%s discount%s',
+                            $this->fetchTable('BookingSources')->labelFor(
+                                (int)$reservation->property_id,
+                                $reservation->source,
+                            ),
+                            $reservation->channel_discount_type === 'percent'
+                                ? sprintf(' (%s%%)', (string)(float)$reservation->channel_discount_value)
+                                : '',
+                        ),
+                        -(float)$quote['channel_discount'],
+                        'reservation',
+                        (int)$reservation->id,
+                    );
+                }
+
                 // One line per beneficiary, not one net figure: the folio has
                 // to show who the discount was granted to and against which
                 // ID, and a room can hold several qualified guests. This is
@@ -743,6 +775,47 @@ class ReservationsController extends AppController
 
         $reservation->set('reservation_discounts', $saved);
         $reservation->setDirty('reservation_discounts', false);
+    }
+
+    /**
+     * The channel discount from the request, as `{type, value}` (both null for
+     * none).
+     *
+     * It's the booking channel's own promotion, so a walk-in never carries
+     * one however the form was filled in before the type was switched. On an
+     * edit (`$current`), omitting `channel_discount_type` altogether keeps the
+     * booking's existing discount; sending it blank clears it. A type with no
+     * value is refused rather than guessed — the range checks (> 0, a
+     * percentage ≤ 100) are the table validator's.
+     *
+     * @return array{type: string|null, value: string|null}
+     */
+    private function resolveChannelDiscount(string $source, ?Reservation $current = null): array
+    {
+        $none = ['type' => null, 'value' => null];
+        if ($source === BookingSourcesTable::WALK_IN) {
+            return $none;
+        }
+        if ($current !== null && $this->request->getData('channel_discount_type') === null) {
+            return [
+                'type' => $current->channel_discount_type,
+                'value' => $current->channel_discount_value,
+            ];
+        }
+
+        $type = $this->trimmedOrNull('channel_discount_type');
+        if ($type === null) {
+            return $none;
+        }
+        if (!in_array($type, ReservationsTable::CHANNEL_DISCOUNT_TYPES, true)) {
+            throw new BadRequestException('Channel discount must be a percentage or a fixed amount.');
+        }
+        $value = $this->trimmedOrNull('channel_discount_value');
+        if ($value === null) {
+            throw new BadRequestException('Enter how much the channel discounted the booking.');
+        }
+
+        return ['type' => $type, 'value' => $value];
     }
 
     /**

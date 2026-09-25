@@ -62,7 +62,10 @@ different origins in production (CORS), same origin in dev (Vite proxy).
 XAMPP MySQL must be running before backend commands that touch the DB. Start it via the
 XAMPP control panel, or directly: `C:\xampp\mysql\bin\mysqld.exe --defaults-file=C:\xampp\mysql\bin\my.ini --standalone`.
 Create DBs: `stay_vanta` (dev) and `stay_vanta_test` (tests). Default local creds are
-`root` with empty password.
+`root` with empty password. You don't migrate the test DB by hand: `tests/bootstrap.php` runs
+`Migrations\TestSuite\Migrator` at the start of every PHPUnit run. `app_local.php` points the
+`test` connection at `DB_TEST_DATABASE` (default `stay_vanta_test`), and `DATABASE_TEST_URL`
+overrides it.
 
 **Local is MariaDB, prod is MySQL 8** — MySQL 8 enforces `ONLY_FULL_GROUP_BY` by default,
 XAMPP's MariaDB doesn't, so a query can pass locally and 500 on Railway. Known footgun:
@@ -225,7 +228,8 @@ proxies first.
 - `GET /api/extra-charges` (any authed; index **auto-seeds** the built-in `early_check_in` row per property) · `POST /api/extra-charges` (**owner/admin only**; custom charge, `code` null) · `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; set amount/active, built-in row's name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the built-in early check-in row)
 - `GET|POST /api/reservations[?status=]` (`POST` of a `walk_in` source is saved straight to
   `checked_in` with `check_in` forced to today and the room flipped to `occupied`; any other
-  source requires `booking_reference` and may carry `sold_rate` — see Front Desk below. A save
+  source requires `booking_reference` and may carry `sold_rate` and a channel discount
+  (`channel_discount_type` percent|fixed + `channel_discount_value`) — see Front Desk below. A save
   that would double-book the room for overlapping nights is rejected. `total_guests` (default 1)
   + `discount_beneficiaries[]` (`{discount_type: senior|pwd, name, id_number}`) carry the
   statutory discount: **several qualified guests per booking**, each covering only their own
@@ -423,6 +427,15 @@ still bills `promo_rate` ?? the resolved room rate, and the sold rate exists onl
 against what the OTA eventually remits. Both columns are nulled for a walk-in however the form was
 filled in before the type was switched.
 
+An online booking may also carry a **channel discount**: the OTA's own promotion, which the
+receptionist types in as `channel_discount_type` (`percent`|`fixed`) + `channel_discount_value`
+(`ReservationsController::resolveChannelDiscount()`; forced null for a walk-in; on an edit, omitting
+the type keeps it and sending it blank clears it). Unlike `sold_rate` it **is** priced: `quote()`
+takes it off the subtotal *first* (a percentage of it, or a fixed amount capped at it), since it's
+the price the channel sold the stay at. The statutory share and the referral are then computed
+from what's left. `quote()` returns it as `channel_discount`, and `postRoomCharge()` posts it as
+its own negative line (`Agoda discount (10%)`).
+
 **A room can't be booked twice for the same nights.** The `roomAvailable` build rule rejects a save
 whose room already has a reservation in `HOLDS_ROOM` overlapping `[check_in, check_out)` —
 occupancy is the nights stayed, so the comparisons are strict and a check-out frees the room for a
@@ -489,7 +502,7 @@ opens (or reuses) the guest's invoice right away and posts the room charge onto 
 `ReservationsController::postRoomCharge()` — so a guest who pays at check-in (or any time before
 check-out) already shows the room amount on Food & Orders → Invoices, instead of only getting it
 at check-out. `postRoomCharge()` itemizes it: the subtotal as one line (noting the OTA promo rate
-in its description when `promo_rate` is set, via `ReservationsTable::SOURCE_LABELS`), then one
+in its description when `promo_rate` is set, labelled via `BookingSourcesTable::labelFor()`), then one
 negative line **per Senior/PWD beneficiary** ("Senior discount (20%, 1 of 3 guests) — Name, ID X")
 and one for the referral if there is one — mirroring how `FoodOrdersTable::place()` itemizes its
 own beneficiaries, so the invoice folio always shows who each discount was granted to, and the
@@ -514,7 +527,7 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   Utensils; `inventory_categories.parent_id` models sub-groups; `inventory_categories.kind`
   tags the type. Quantities change **only** via `StockMovementsTable::record()` (transactional:
   writes the ledger row, updates `quantity`, stamps `last_receptionist_id`; rejects negative stock).
-  Use it as the template for the remaining modules. `inventory_items.tracking_type` is
+  `inventory_items.tracking_type` is
   `consumable` (depletes on use — In/Out) or `reusable` (issued out then returned). For reusables
   `quantity` = available on the shelf and `total_quantity` = units owned, so *in use* =
   `total_quantity − quantity`; `record()`'s `$affectsTotal` flag moves the owned total too
@@ -523,8 +536,8 @@ stamps (`last_receptionist_id`, `stock_movements.receptionist_id`) reflect real 
   under it (one level deep — `Inventory.jsx`'s consumables table shows the parent with a
   ▶/▼ expand toggle revealing its sub-items, each tracked with its own stock/quantity). Inventory
   also has a **Receipt Booklets** tab (`Inventory.jsx`) managing `receipt_series` — see below.
-- **Front Desk** *(implemented)* (UI name for "Room Monitoring") — rooms, room rates, reservations, OTA
-  sources (`reservations.source`: cocotel/agoda/trip_com/tripadvisor), referral discounts and
+- **Front Desk** *(implemented)* (UI name for "Room Monitoring") — rooms, room rates, reservations, booking
+  sources (`reservations.source`: `walk_in` or a per-property `booking_sources.code`), referral discounts and
   per-guest senior/PWD ones (`reservation_discounts`, one row per qualified guest), additional beds.
 - **Guests** *(implemented)* — registry + counts (`GuestsController::stats` → total / local / foreign /
   in_house, where total/local/foreign count only guests **registered today** (daily fresh-start

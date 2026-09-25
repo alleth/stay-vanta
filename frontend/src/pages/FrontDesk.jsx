@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ListGroup,
+  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ListGroup, InputGroup,
 } from '../components/ui'
 import { useProperty } from '../context/PropertyContext'
 import { useAuth } from '../context/AuthContext'
@@ -407,6 +407,15 @@ export default function FrontDesk() {
                         {formatMoney(r.quote?.total)}
                         {r.promo_rate !== null && r.promo_rate !== undefined && (
                           <div className="whitespace-nowrap text-[11px] text-muted">promo rate</div>
+                        )}
+                        {Number(r.quote?.channel_discount) > 0 && (
+                          <div className="whitespace-nowrap text-[11px] text-muted">
+                            −{formatMoney(r.quote.channel_discount)} (
+                            {r.channel_discount_type === 'percent'
+                              ? `${Number(r.channel_discount_value)}% `
+                              : ''}
+                            {sourceLabel(bookingSources, r.source)})
+                          </div>
                         )}
                         {Number(r.quote?.statutory_discount) > 0 && (
                           <div className="whitespace-nowrap text-[11px] text-muted">
@@ -816,6 +825,9 @@ function ReservationModal({
       ?? (forFutureDate ? bookingSources[0]?.code ?? WALK_IN : WALK_IN),
     booking_reference: reservation?.booking_reference ?? '',
     sold_rate: reservation?.sold_rate ?? '',
+    // The channel's own promotion: '' (none) | percent | fixed.
+    channel_discount_type: reservation?.channel_discount_type ?? '',
+    channel_discount_value: reservation?.channel_discount_value ?? '',
     referral: Boolean(reservation?.discount_amount),
     discount_amount: reservation?.discount_amount ?? '',
     additional_beds: reservation?.additional_beds ?? 0,
@@ -882,15 +894,23 @@ function ReservationModal({
     : 0
   const nightly = promoRate ?? (baseRate > 0 ? baseRate : null)
   const estSubtotal = nightly !== null && nights > 0 ? nightly * nights : 0
+  // The channel's promotion comes off first — it's the price the OTA sold
+  // the stay at, so the Senior/PWD share and the referral are taken from that.
+  const channelValue = Number(form.channel_discount_value) || 0
+  const estChannelDiscount = isWalkIn || channelValue <= 0 ? 0
+    : form.channel_discount_type === 'percent' ? estSubtotal * Math.min(channelValue, 100) / 100
+      : form.channel_discount_type === 'fixed' ? Math.min(channelValue, estSubtotal)
+        : 0
+  const estAfterChannel = estSubtotal - estChannelDiscount
   const qualifying = Math.min(beneficiaries.length, totalGuests)
   const estStatutoryDiscount = qualifying > 0
-    ? estSubtotal * (qualifying / totalGuests) * 0.2
+    ? estAfterChannel * (qualifying / totalGuests) * 0.2
     : 0
-  const estRemaining = Math.max(0, estSubtotal - estStatutoryDiscount)
+  const estRemaining = Math.max(0, estAfterChannel - estStatutoryDiscount)
   const estReferralDiscount = form.referral
     ? Math.min(Number(form.discount_amount) || 0, estRemaining)
     : 0
-  const estDiscount = estStatutoryDiscount + estReferralDiscount
+  const estDiscount = estChannelDiscount + estStatutoryDiscount + estReferralDiscount
   const estTotal = Math.max(0, estSubtotal - estDiscount)
   const isAdvance = Boolean(form.check_in) && form.check_in > todayStr()
   const downpayment = isAdvance ? estTotal * 0.5 : 0
@@ -962,6 +982,11 @@ function ReservationModal({
     const payload = { ...form, ...extra }
     if (!payload.referral) payload.discount_amount = ''
     delete payload.referral
+    // Sent blank to clear it: a walk-in has no channel to have promised one.
+    if (payload.source === WALK_IN || !payload.channel_discount_type) {
+      payload.channel_discount_type = ''
+      payload.channel_discount_value = ''
+    }
     // Always sent, so an edit that removed the last beneficiary clears them
     // rather than leaving the old rows in place.
     payload.total_guests = totalGuests
@@ -1282,6 +1307,47 @@ function ReservationModal({
                 )}
               </Form.Group>
             </div>
+            {/* Only an online booking has a channel to have promised the
+                guest a deal — same reason the booking ID sits with the type. */}
+            {!isWalkIn && (
+              <Form.Group className="mb-4">
+                <Form.Label>
+                  {sourceLabel(bookingSources, form.source)} discount{' '}
+                  <span className="font-normal text-muted">(optional — the channel&apos;s promotion)</span>
+                </Form.Label>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-12">
+                  <Form.Select className="sm:col-span-5" value={form.channel_discount_type}
+                    onChange={(e) => setForm({
+                      ...form,
+                      channel_discount_type: e.target.value,
+                      channel_discount_value: e.target.value ? form.channel_discount_value : '',
+                    })}>
+                    <option value="">No discount</option>
+                    <option value="percent">Percentage (%)</option>
+                    <option value="fixed">Fixed amount (₱)</option>
+                  </Form.Select>
+                  {form.channel_discount_type && (
+                    <InputGroup className="sm:col-span-7">
+                      {form.channel_discount_type === 'fixed' && <InputGroup.Text>₱</InputGroup.Text>}
+                      <Form.Control type="number" min={0.01} step="0.01"
+                        max={form.channel_discount_type === 'percent' ? 100 : undefined}
+                        value={form.channel_discount_value} onChange={set('channel_discount_value')}
+                        required placeholder={form.channel_discount_type === 'percent' ? 'e.g. 10' : 'e.g. 300'} />
+                      {form.channel_discount_type === 'percent' && <InputGroup.Text>%</InputGroup.Text>}
+                    </InputGroup>
+                  )}
+                </div>
+                {estChannelDiscount > 0 ? (
+                  <Form.Text muted>
+                    −{formatMoney(estChannelDiscount)} off the room, before any Senior/PWD or referral discount.
+                  </Form.Text>
+                ) : (
+                  <Form.Text muted>
+                    A percentage of the room total, or a fixed amount off the whole stay.
+                  </Form.Text>
+                )}
+              </Form.Group>
+            )}
             <Form.Group className="mb-4">
               <div className="mb-1 flex items-center justify-between">
                 <Form.Label className="mb-0">

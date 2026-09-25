@@ -30,6 +30,12 @@ class ReservationsTable extends Table
     public const PAYMENT_STATUSES = ['unpaid', 'paid'];
 
     /**
+     * How a channel discount is expressed: a percentage of the room subtotal,
+     * or a fixed peso amount off the whole stay.
+     */
+    public const CHANNEL_DISCOUNT_TYPES = ['percent', 'fixed'];
+
+    /**
      * Statutory Senior Citizen / PWD discount (Philippines). A booking carries
      * one `reservation_discounts` row per qualified guest rather than a single
      * flag, and the rate only ever covers each one's own share of the room —
@@ -117,6 +123,22 @@ class ReservationsTable extends Table
             ->numeric('sold_rate')
             ->greaterThan('sold_rate', 0, 'Enter the rate the channel sold it for, or leave it blank.')
             ->allowEmptyString('sold_rate');
+
+        // A discount the booking channel promised the guest. Whether it may be
+        // set at all (online bookings only, both fields or neither) is decided
+        // by the controller; here it only has to make sense as a number.
+        $validator
+            ->inList('channel_discount_type', self::CHANNEL_DISCOUNT_TYPES)
+            ->allowEmptyString('channel_discount_type');
+        $validator
+            ->numeric('channel_discount_value')
+            ->greaterThan('channel_discount_value', 0, 'Enter a channel discount greater than 0.')
+            ->add('channel_discount_value', 'percentCap', [
+                'rule' => fn($value, $context) => ($context['data']['channel_discount_type'] ?? null) !== 'percent'
+                    || (float)$value <= 100,
+                'message' => 'A percentage discount cannot be more than 100%.',
+            ])
+            ->allowEmptyString('channel_discount_value');
 
         return $validator;
     }
@@ -331,8 +353,14 @@ class ReservationsTable extends Table
      * after the statutory discount and capped there so the total can never go
      * negative.
      *
+     * A channel discount (an online booking's OTA promotion — a percentage or
+     * a fixed peso amount) comes off first, before either of those: it's the
+     * price the channel sold the stay at, so it's the room price the guest
+     * actually pays, and the statutory 20% is a share of *that*. A fixed
+     * amount is capped at the subtotal.
+     *
      * @return array{
-     *     nights:int, nightly_rate:float, subtotal:float,
+     *     nights:int, nightly_rate:float, subtotal:float, channel_discount:float,
      *     statutory_discount:float, statutory_shares:list<float>,
      *     referral_discount:float, discount:float, total:float
      * }
@@ -346,28 +374,53 @@ class ReservationsTable extends Table
         $nights = $this->nights($reservation);
         $subtotal = $nightly * $nights;
 
+        $channelDiscount = $this->channelDiscount($reservation, $subtotal);
+        $afterChannel = $subtotal - $channelDiscount;
+
         $totalGuests = max(1, (int)($reservation->total_guests ?? 1));
         // More beneficiaries than guests is rejected at the door by the
         // controller; capping here too keeps a hand-edited row from pricing
         // the discount above the statutory rate.
         $beneficiaries = min(count($this->beneficiariesFor($reservation)), $totalGuests);
-        $split = StatutoryDiscount::split($subtotal, $totalGuests, $beneficiaries);
+        $split = StatutoryDiscount::split($afterChannel, $totalGuests, $beneficiaries);
 
         $statutoryDiscount = $split['total'];
-        $remaining = max(0.0, $subtotal - $statutoryDiscount);
+        $remaining = max(0.0, $afterChannel - $statutoryDiscount);
         $referralDiscount = $reservation->discount_amount !== null
             ? round(min((float)$reservation->discount_amount, $remaining), 2)
             : 0.0;
+
+        $discount = round($channelDiscount + $statutoryDiscount + $referralDiscount, 2);
 
         return [
             'nights' => $nights,
             'nightly_rate' => round($nightly, 2),
             'subtotal' => round($subtotal, 2),
+            'channel_discount' => $channelDiscount,
             'statutory_discount' => $statutoryDiscount,
             'statutory_shares' => $split['shares'],
             'referral_discount' => $referralDiscount,
-            'discount' => round($statutoryDiscount + $referralDiscount, 2),
-            'total' => round($subtotal - $statutoryDiscount - $referralDiscount, 2),
+            'discount' => $discount,
+            'total' => round($subtotal - $discount, 2),
         ];
+    }
+
+    /**
+     * The peso amount a booking's channel discount takes off `$subtotal`:
+     * a percentage of it, or a fixed amount capped at it. Zero when the
+     * booking has none.
+     */
+    private function channelDiscount(Reservation $reservation, float $subtotal): float
+    {
+        $value = (float)($reservation->channel_discount_value ?? 0);
+        if ($value <= 0 || $subtotal <= 0) {
+            return 0.0;
+        }
+
+        return match ($reservation->channel_discount_type) {
+            'percent' => round($subtotal * min($value, 100.0) / 100, 2),
+            'fixed' => round(min($value, $subtotal), 2),
+            default => 0.0,
+        };
     }
 }

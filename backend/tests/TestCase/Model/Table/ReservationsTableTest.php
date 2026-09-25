@@ -212,6 +212,50 @@ class ReservationsTableTest extends TestCase
         $this->assertSame(0.0, $quote['total']);
     }
 
+    public function testAPercentageChannelDiscountComesOffTheSubtotal(): void
+    {
+        $booking = $this->booking('2026-03-01', '2026-03-04', [
+            'channel_discount_type' => 'percent',
+            'channel_discount_value' => '10.00',
+        ]);
+        $quote = $this->Reservations->quote($booking, 1500.0);
+
+        $this->assertSame(450.0, $quote['channel_discount']);
+        $this->assertSame(450.0, $quote['discount']);
+        $this->assertSame(4050.0, $quote['total']);
+    }
+
+    public function testAFixedChannelDiscountIsCappedAtTheSubtotal(): void
+    {
+        $booking = $this->booking('2026-03-01', '2026-03-02', [
+            'channel_discount_type' => 'fixed',
+            'channel_discount_value' => '5000',
+        ]);
+        $quote = $this->Reservations->quote($booking, 1500.0);
+
+        $this->assertSame(1500.0, $quote['channel_discount']);
+        $this->assertSame(0.0, $quote['total']);
+    }
+
+    public function testTheStatutoryDiscountIsAShareOfTheChannelPrice(): void
+    {
+        // The channel sold the stay at 4,500 − 500 = 4,000; a lone senior
+        // takes 20% of that, then the referral comes off what's left.
+        $booking = $this->booking('2026-03-01', '2026-03-04', [
+            'channel_discount_type' => 'fixed',
+            'channel_discount_value' => '500',
+            'reservation_discounts' => $this->beneficiaries('senior'),
+            'discount_amount' => '200',
+        ]);
+        $quote = $this->Reservations->quote($booking, 1500.0);
+
+        $this->assertSame(500.0, $quote['channel_discount']);
+        $this->assertSame(800.0, $quote['statutory_discount']);
+        $this->assertSame(200.0, $quote['referral_discount']);
+        $this->assertSame(1500.0, $quote['discount']);
+        $this->assertSame(3000.0, $quote['total']);
+    }
+
     public function testAnUnresolvedRateQuotesZeroRatherThanFailing(): void
     {
         // resolveBaseRate() returns 0 when no rate is configured; the quote
