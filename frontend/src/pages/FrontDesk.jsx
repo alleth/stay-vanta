@@ -80,6 +80,43 @@ const DISCOUNT_KINDS = [
 
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : null)
 
+// The booking form's running estimate, itemized the way the invoice will be:
+// the room subtotal, then each discount that was applied as its own line
+// (negative), then the total and any advance-booking downpayment. Shared by
+// the side rail (wider screens) and the Pricing section (phones) so the two
+// can't drift apart.
+function EstimateBreakdown({ subtotalLabel, subtotal, discounts, total, downpayment }) {
+  if (subtotal <= 0) {
+    return <div className="sv-serif mt-1 text-xl font-bold">—</div>
+  }
+  return (
+    <div className="mt-2 text-xs">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-muted">{subtotalLabel}</span>
+        <span className="tabular-nums">{formatMoney(subtotal)}</span>
+      </div>
+      {discounts.map((d) => (
+        <div key={d.label} className="mt-1 flex items-baseline justify-between gap-2">
+          <span className="text-muted">{d.label}</span>
+          <span className="whitespace-nowrap tabular-nums text-emerald-700 dark:text-emerald-400">
+            −{formatMoney(d.amount)}
+          </span>
+        </div>
+      ))}
+      <div className="mt-2 flex items-baseline justify-between gap-2 border-t border-line pt-2">
+        <span className="font-medium uppercase tracking-[0.04em] text-muted">Total</span>
+        <span className="sv-serif text-xl font-bold tabular-nums">{formatMoney(total)}</span>
+      </div>
+      {downpayment > 0 && (
+        <div className="mt-1 flex items-baseline justify-between gap-2">
+          <span className="text-muted">Downpayment (50%)</span>
+          <span className="tabular-nums">{formatMoney(downpayment)}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Allowed manual status changes per current room status. A room becomes
 // `occupied` only by booking + checking in a guest (so picking "occupied" opens
 // the reservation flow), and returns to `available` automatically on check-out.
@@ -914,6 +951,26 @@ function ReservationModal({
   const estTotal = Math.max(0, estSubtotal - estDiscount)
   const isAdvance = Boolean(form.check_in) && form.check_in > todayStr()
   const downpayment = isAdvance ? estTotal * 0.5 : 0
+  // Only the discounts actually applied, each as its own line.
+  const estimate = {
+    subtotalLabel: `${nights} night${nights === 1 ? '' : 's'} × ${formatMoney(nightly ?? 0)}`
+      + (promoRate !== null ? ' (promo)' : ''),
+    subtotal: estSubtotal,
+    discounts: [
+      estChannelDiscount > 0 && {
+        label: `${sourceLabel(bookingSources, form.source)} discount`
+          + (form.channel_discount_type === 'percent' ? ` (${channelValue}%)` : ''),
+        amount: estChannelDiscount,
+      },
+      estStatutoryDiscount > 0 && {
+        label: `Senior/PWD (${qualifying} of ${totalGuests})`,
+        amount: estStatutoryDiscount,
+      },
+      estReferralDiscount > 0 && { label: 'Referral', amount: estReferralDiscount },
+    ].filter(Boolean),
+    total: estTotal,
+    downpayment,
+  }
   const [guestId, setGuestId] = useState(null) // set when reusing an existing guest
   const [duplicates, setDuplicates] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -1034,7 +1091,7 @@ function ReservationModal({
               form, hiding the channel fields for a walk-in is correct: a
               walk-in has no channel, so those fields don't exist for it —
               they're not skipped, they don't apply. */}
-          <div className="w-full shrink-0 border-b border-line p-4 md:w-52 md:border-b-0 md:border-r">
+          <div className="w-full shrink-0 border-b border-line p-4 md:w-60 md:border-b-0 md:border-r">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.04em] text-muted">
               Booking type
             </div>
@@ -1080,12 +1137,7 @@ function ReservationModal({
               <div className="text-xs font-medium uppercase tracking-[0.04em] text-muted">
                 Est. total
               </div>
-              <div className="sv-serif mt-1 text-xl font-bold">
-                {estTotal > 0 ? formatMoney(estTotal) : '—'}
-              </div>
-              {nights > 0 && (
-                <div className="text-xs text-muted">{nights} night{nights === 1 ? '' : 's'}</div>
-              )}
+              <EstimateBreakdown {...estimate} />
             </div>
           </div>
 
@@ -1404,12 +1456,12 @@ function ReservationModal({
             </Form.Group>
             {/* The rail carries this on wider screens, where it stays in view;
                 on a phone the rail is gone, so it belongs here instead. */}
-            {estTotal > 0 && (
-              <div className="mb-4 flex items-baseline justify-between border-t border-line pt-3 md:hidden">
+            {estSubtotal > 0 && (
+              <div className="mb-4 border-t border-line pt-3 md:hidden">
                 <span className="text-xs font-medium uppercase tracking-[0.04em] text-muted">
                   Est. total
                 </span>
-                <span className="sv-serif text-xl font-bold">{formatMoney(estTotal)}</span>
+                <EstimateBreakdown {...estimate} />
               </div>
             )}
             {downpayment > 0 && (
