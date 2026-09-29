@@ -9,6 +9,7 @@ import { formatMoney } from '../utils/format'
 import { matchGuests, listGuests } from '../api/guests'
 import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
 import { StatCard } from '../components/StatCard'
+import { InvoicesPanel } from '../components/Invoices'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
@@ -576,6 +577,13 @@ export default function FrontDesk() {
                 </Pagination>
               </div>
             )}
+          </Tab>
+
+          {/* ---- Invoices ---- the same panel as Food & Orders, so the desk
+              can settle a guest's bill at check-out without leaving; settling
+              refreshes the "invoice not settled" flags above. */}
+          <Tab eventKey="invoices" title="Invoices">
+            <InvoicesPanel propertyId={propertyId} onSettled={refresh} />
           </Tab>
 
           {/* ---- Rooms ---- */}

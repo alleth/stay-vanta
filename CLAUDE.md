@@ -161,6 +161,10 @@ would make the key attacker-controlled.
 - Initial loads use skeletons from `src/components/Skeleton.jsx`, not spinners (inline action
   buttons keep their small spinner). Stat tiles go through `src/components/StatCard.jsx` — extend
   it rather than hand-rolling a card + number (copies in pages drifted before).
+- The **Invoices** tab (list, folio view, Settle with SI/OR booklet numbers) is one component,
+  `src/components/Invoices.jsx` (`InvoicesPanel`), rendered by both Food & Orders and Front Desk —
+  change it there, not in a page. It loads itself when its tab opens (`Tabs` mounts only the
+  active tab); `onSettled` lets the host refresh what depends on settlement.
 
 ### Configuration & deployment (see `DEPLOYMENT.md`)
 - Prod config is env-driven in the committed `config/app.php` (`DATABASE_URL` or `DB_*`,
