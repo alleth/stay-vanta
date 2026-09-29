@@ -210,7 +210,8 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   charges** (`reservation_extra_charges`, admin-configured custom charges × quantity, name/amount
   snapshotted at pick time) are added on top — never discounted. `quote()` returns each component
   separately so `postRoomCharge()` can itemize them; extras post as `reservation`-sourced lines, so
-  idempotency, cancel reversal and the delete guard cover them for free.
+  idempotency, cancel reversal and the delete guard cover them for free. (`reservations.additional_beds`
+  is a legacy unpriced count, no longer on the form — an extra bed is an extra charge.)
 - **`promo_rate` is never client-supplied**: `promo_rates` holds an admin-set `multiplier` per
   booking source (room-specific wins, `PromoRatesTable::multiplierFor()`); add/edit stamp
   base × multiplier server-side.

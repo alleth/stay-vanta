@@ -743,8 +743,12 @@ export default function FrontDesk() {
           {/* ---- Extra Charges (admin/owner only) ---- */}
           {canManageRooms && (
             <Tab eventKey="charges" title="Extra Charges">
-              <div className="mb-2 flex justify-end">
-                <Button onClick={() => setModal({ type: 'charge' })}>Add charge</Button>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="mb-0 text-sm text-muted">
+                  Active charges (e.g. Extra bed) can be added to a reservation under Pricing.
+                  Early check-in is billed when the guest checks in.
+                </p>
+                <Button className="shrink-0" onClick={() => setModal({ type: 'charge' })}>Add charge</Button>
               </div>
               <Card>
                 <Table hover>
@@ -888,7 +892,6 @@ function ReservationModal({
     channel_discount_value: reservation?.channel_discount_value ?? '',
     referral: Boolean(reservation?.discount_amount),
     discount_amount: reservation?.discount_amount ?? '',
-    additional_beds: reservation?.additional_beds ?? 0,
     guest_name: '', guest_type: 'local', nationality: '',
     contact_number: '', email: '', address: '',
   })
@@ -1259,25 +1262,21 @@ function ReservationModal({
                 max={reservation?.status === 'checked_out' ? todayStr() : undefined} required />
             </Form.Group>
           </div>
-          <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
-            <Form.Group className="mb-4 md:col-span-4">
-              <Form.Label>Extra beds</Form.Label>
-              <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
-            </Form.Group>
-            {isPast ? (
-              <div className="mb-4 md:col-span-8">
-                <Form.Text muted>
-                  {pastEnded
-                    ? 'Past stay — saved as checked out. Find it under “All” to mark it paid.'
-                    : 'Started before today — saved as checked in.'}
-                </Form.Text>
-              </div>
-            ) : isWalkIn && !editing && (
-              <div className="mb-4 md:col-span-8">
-                <Form.Text muted>Arriving now — checks in as soon as you save.</Form.Text>
-              </div>
-            )}
-          </div>
+          {/* No "extra beds" count here: an extra bed is an Extra Charge the
+              admin prices, picked under Pricing, so it's actually billed. */}
+          {isPast ? (
+            <div className="-mt-2 mb-4">
+              <Form.Text muted>
+                {pastEnded
+                  ? 'Past stay — saved as checked out. Find it under “All” to mark it paid.'
+                  : 'Started before today — saved as checked in.'}
+              </Form.Text>
+            </div>
+          ) : isWalkIn && !editing && (
+            <div className="-mt-2 mb-4">
+              <Form.Text muted>Arriving now — checks in as soon as you save.</Form.Text>
+            </div>
+          )}
 
           {/* The channel's own paperwork. Only an online booking has any of
               it, which is why these appear with the type rather than sitting
