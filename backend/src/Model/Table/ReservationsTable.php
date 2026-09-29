@@ -5,6 +5,7 @@ namespace App\Model\Table;
 
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
+use Cake\I18n\Date;
 use Cake\ORM\Query\SelectQuery;
 use Cake\ORM\RulesChecker;
 use Cake\ORM\Table;
@@ -187,10 +188,17 @@ class ReservationsTable extends Table
 
         $rules->add(
             function (Reservation $reservation): bool {
+                // A past stay an admin is entering now is recorded already
+                // checked out, so it holds no room — but it still can't share
+                // nights with a stay that really did happen in that room.
+                $recordingPast = $reservation->isNew()
+                    && $reservation->check_in instanceof Date
+                    && $reservation->check_in->lessThan(Date::today());
+
                 // A booking that no longer holds the room can't collide.
                 if (
                     $reservation->room_id === null
-                    || !in_array($reservation->status, self::HOLDS_ROOM, true)
+                    || (!in_array($reservation->status, self::HOLDS_ROOM, true) && !$recordingPast)
                     || !$reservation->check_in
                     || !$reservation->check_out
                 ) {
@@ -202,6 +210,7 @@ class ReservationsTable extends Table
                     $reservation->check_in,
                     $reservation->check_out,
                     $reservation->isNew() ? null : (int)$reservation->id,
+                    $recordingPast ? [...self::HOLDS_ROOM, 'checked_out'] : self::HOLDS_ROOM,
                 )->count();
             },
             'roomAvailable',
@@ -224,16 +233,19 @@ class ReservationsTable extends Table
      *
      * @param \Cake\I18n\Date|string $checkIn
      * @param \Cake\I18n\Date|string $checkOut
+     * @param array<string> $statuses Which bookings count — by default the ones
+     *   still holding the room; recording a past stay also counts finished ones.
      */
     public function conflicting(
         int $roomId,
         mixed $checkIn,
         mixed $checkOut,
         ?int $excludeId = null,
+        array $statuses = self::HOLDS_ROOM,
     ): SelectQuery {
         $query = $this->find()->where([
             'Reservations.room_id' => $roomId,
-            'Reservations.status IN' => self::HOLDS_ROOM,
+            'Reservations.status IN' => $statuses,
             'Reservations.check_in <' => $checkOut,
             'Reservations.check_out >' => $checkIn,
         ]);

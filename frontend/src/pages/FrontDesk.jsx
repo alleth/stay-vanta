@@ -901,6 +901,14 @@ function ReservationModal({
   const isWalkIn = form.source === WALK_IN
   const hasChannels = bookingSources.length > 0
 
+  // Only an admin may record a stay that started before today (the backend
+  // refuses anyone else). It's saved as whatever its dates say it is by now:
+  // checked out if it's over, checked in if the guest is still here.
+  const { role } = useAuth()
+  const canBackdate = role === 'admin'
+  const isPast = !editing && Boolean(form.check_in) && form.check_in < todayStr()
+  const pastEnded = isPast && Boolean(form.check_out) && form.check_out <= todayStr()
+
   // A walk-in is someone at the desk right now, so the stay starts today and
   // the date isn't the receptionist's to choose. The backend decides this for
   // itself too — this only keeps the form from disagreeing with the result.
@@ -1157,7 +1165,7 @@ function ReservationModal({
               <Form.Label>Room</Form.Label>
               <Form.Select value={form.room_id} onChange={set('room_id')} required>
                 {rooms.map((r) => (
-                  <option key={r.id} value={r.id} disabled={r.status !== 'available' && r.id !== reservation?.room_id}>
+                  <option key={r.id} value={r.id} disabled={!pastEnded && r.status !== 'available' && r.id !== reservation?.room_id}>
                     {r.room_number} — {r.room_type ?? 'Room'}
                     {r.status !== 'available' ? ` (${r.status})` : ''}
                   </option>
@@ -1167,8 +1175,11 @@ function ReservationModal({
             <Form.Group className="mb-4 md:col-span-3">
               <Form.Label>Check-in</Form.Label>
               <Form.Control type="date" value={form.check_in} onChange={set('check_in')}
-                min={todayStr()} required disabled={isWalkIn && !editing} />
-              {isWalkIn && !editing && <Form.Text muted>Today — the guest is here.</Form.Text>}
+                min={canBackdate ? undefined : todayStr()}
+                // An admin may backdate a walk-in, but not move one ahead.
+                max={isWalkIn && canBackdate && !editing ? todayStr() : undefined}
+                required disabled={isWalkIn && !editing && !canBackdate} />
+              {isWalkIn && !editing && !isPast && <Form.Text muted>Today — the guest is here.</Form.Text>}
             </Form.Group>
             <Form.Group className="mb-4 md:col-span-3">
               <Form.Label>Check-out</Form.Label>
@@ -1181,7 +1192,15 @@ function ReservationModal({
               <Form.Label>Extra beds</Form.Label>
               <Form.Control type="number" min={0} value={form.additional_beds} onChange={set('additional_beds')} />
             </Form.Group>
-            {isWalkIn && !editing && (
+            {isPast ? (
+              <div className="mb-4 md:col-span-8">
+                <Form.Text muted>
+                  {pastEnded
+                    ? 'Past stay — saved as checked out. Find it under “All” to mark it paid.'
+                    : 'Started before today — saved as checked in.'}
+                </Form.Text>
+              </div>
+            ) : isWalkIn && !editing && (
               <div className="mb-4 md:col-span-8">
                 <Form.Text muted>Arriving now — checks in as soon as you save.</Form.Text>
               </div>

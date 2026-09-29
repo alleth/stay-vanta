@@ -101,11 +101,17 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   - Rejected if it would double-book the room for overlapping nights.
   - An advance booking (check-in after today, guest on file) collects a 50% downpayment as an
     immediately-settled invoice.
+  - A check-in **before today** (a past stay) is **admin-only** — 403 for anyone else, except a
+    receptionist's walk-in, whose date is silently forced to today. A past stay is saved as
+    `checked_out` if `check_out` ≤ today (room untouched), else `checked_in` (room → `occupied`),
+    with `checked_in_at`/`checked_out_at` set to its dates; its overlap check also counts
+    `checked_out` stays.
 - `PATCH|PUT /api/reservations/{id}` — any authed staff. Room/dates/source/discount only.
   **400** once `status` isn't `booked`, and **400** once a downpayment has been collected (cancel
   and rebook). `promo_rate` recomputed as in `add()`; downpayment collected if the edit makes it an
   advance booking. Sending `discount_beneficiaries` replaces the set; omitting it leaves them.
-  Omitting `channel_discount_type` keeps it; sending it blank clears it.
+  Omitting `channel_discount_type` keeps it; sending it blank clears it. Changing `check_in` to a
+  date before today is admin-only (403); resending the unchanged date is fine.
 - `POST /api/reservations/{id}/{check-in|check-out|cancel}` — stamp
   `checked_in_at`/`checked_out_at`/`cancelled_at` and `receptionist_id`; flip room status.
   - check-in accepts `early_check_in:true` → posts the configured fee to the guest's invoice.

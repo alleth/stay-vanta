@@ -8,6 +8,7 @@ use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
 use App\Model\Table\ReservationsTable;
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ForbiddenException;
 use Cake\I18n\Date;
 use Cake\I18n\DateTime;
 
@@ -86,6 +87,11 @@ class ReservationsController extends AppController
      *
      * An advance booking (check-in after today) with a guest collects a 50%
      * downpayment of the quoted total, recorded as a settled invoice.
+     *
+     * A check-in before today records a stay that already happened, and only
+     * an admin may add one (see isBackdated()). Its status follows the dates:
+     * checked out if it ended on or before today, checked in (room occupied)
+     * if it's still going.
      */
     public function add(): void
     {
@@ -103,10 +109,21 @@ class ReservationsController extends AppController
         // caller's mistake, not a reason to have started writing rows.
         $totalGuests = $this->resolveTotalGuests();
         $beneficiaries = $this->parseBeneficiaries($totalGuests);
+        $backdated = $this->isBackdated(
+            $this->request->getData('source') ?? BookingSourcesTable::WALK_IN,
+            $this->request->getData('check_in'),
+        );
 
         // Rolls back the inline-created guest if the reservation fails to save.
         $ok = $reservations->getConnection()->transactional(
-            function () use ($reservations, $propertyId, $totalGuests, $beneficiaries, &$reservation): bool {
+            function () use (
+                $reservations,
+                $propertyId,
+                $totalGuests,
+                $beneficiaries,
+                $backdated,
+                &$reservation,
+            ): bool {
                 $guestId = $this->resolveGuestId($propertyId);
                 $source = $this->request->getData('source') ?? BookingSourcesTable::WALK_IN;
                 $roomId = $this->request->getData('room_id');
@@ -146,12 +163,28 @@ class ReservationsController extends AppController
                 // the room on save, rather than being booked and then checked
                 // in a moment later. The date is decided here rather than
                 // trusted from the form — "walk-in" and "arriving next week"
-                // can't both be true.
+                // can't both be true. A backdated stay is the exception: an
+                // admin recording a past walk-in keeps the date they entered.
                 $isWalkIn = $source === BookingSourcesTable::WALK_IN;
                 $channelDiscount = $this->resolveChannelDiscount($source);
-                $checkIn = $isWalkIn
+                $checkIn = $isWalkIn && !$backdated
                     ? Date::today()->format('Y-m-d')
                     : $this->request->getData('check_in');
+                $checkOut = $this->request->getData('check_out');
+
+                // A past stay is saved as whatever its dates say it is by now,
+                // with the event times taken from those dates rather than from
+                // the moment it was typed in — so it doesn't count toward
+                // today's check-ins/check-outs.
+                $status = $isWalkIn ? 'checked_in' : 'booked';
+                $checkedInAt = $isWalkIn ? new DateTime() : null;
+                $checkedOutAt = null;
+                if ($backdated) {
+                    $ended = is_string($checkOut) && $checkOut <= Date::today()->format('Y-m-d');
+                    $status = $ended ? 'checked_out' : 'checked_in';
+                    $checkedInAt = new DateTime($checkIn);
+                    $checkedOutAt = $ended ? new DateTime($checkOut) : null;
+                }
 
                 $reservation = $reservations->newEntity([
                     'property_id' => $propertyId,
@@ -159,9 +192,10 @@ class ReservationsController extends AppController
                     'guest_id' => $guestId,
                     'receptionist_id' => (int)$this->currentUser->id,
                     'check_in' => $checkIn,
-                    'check_out' => $this->request->getData('check_out'),
-                    'status' => $isWalkIn ? 'checked_in' : 'booked',
-                    'checked_in_at' => $isWalkIn ? new DateTime() : null,
+                    'check_out' => $checkOut,
+                    'status' => $status,
+                    'checked_in_at' => $checkedInAt,
+                    'checked_out_at' => $checkedOutAt,
                     'source' => $source,
                     // Both belong to the channel, so a walk-in never carries
                     // them however the form was filled in before the type was
@@ -187,8 +221,9 @@ class ReservationsController extends AppController
                 // The room is taken from this moment, exactly as transition()
                 // does on check-in. No early check-in fee: that charge is for
                 // arriving ahead of a booked date, which a walk-in has none of,
-                // and there is no confirmation step here to ask about it.
-                if ($isWalkIn && $reservation->room_id) {
+                // and there is no confirmation step here to ask about it. A
+                // past stay that has already ended leaves the room as it is.
+                if ($status === 'checked_in' && $reservation->room_id) {
                     $rooms = $this->fetchTable('Rooms');
                     $room = $rooms->get($reservation->room_id);
                     $room->set('status', 'occupied');
@@ -267,6 +302,18 @@ class ReservationsController extends AppController
             ])
         ) {
             throw new BadRequestException('Unknown booking source.');
+        }
+
+        // Moving the check-in into the past is the same privilege as booking
+        // there; a date left as it was (a no-show still on the books) isn't.
+        $newCheckIn = $this->request->getData('check_in');
+        if (
+            $newCheckIn !== null
+            && $newCheckIn !== $reservation->check_in?->format('Y-m-d')
+            && $this->isBeforeToday($newCheckIn)
+            && !$this->userHasRole('admin')
+        ) {
+            throw new ForbiddenException('Only an admin can move a booking to a date before today.');
         }
 
         $roomId = $this->request->getData('room_id') ?? $reservation->room_id;
@@ -937,6 +984,42 @@ class ReservationsController extends AppController
             ->first();
 
         return $rate ? (float)$rate->base_rate : 0.0;
+    }
+
+    /**
+     * Whether a new booking records a stay that started before today — which
+     * only an admin may add (history the desk didn't record at the time). A
+     * receptionist's walk-in isn't one: its date is forced to today whatever
+     * the form sent, so a stale date there is ignored, not refused.
+     *
+     * @throws \Cake\Http\Exception\ForbiddenException When a non-admin sends one.
+     */
+    private function isBackdated(string $source, mixed $checkIn): bool
+    {
+        if (!$this->isBeforeToday($checkIn)) {
+            return false;
+        }
+
+        $isAdmin = $this->userHasRole('admin');
+        if ($source === BookingSourcesTable::WALK_IN && !$isAdmin) {
+            return false;
+        }
+        if (!$isAdmin) {
+            throw new ForbiddenException('Only an admin can add a booking with a check-in before today.');
+        }
+
+        return true;
+    }
+
+    /**
+     * A well-formed `Y-m-d` date earlier than today. Anything else is left for
+     * the table's own validation to reject.
+     */
+    private function isBeforeToday(mixed $value): bool
+    {
+        return is_string($value)
+            && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1
+            && $value < Date::today()->format('Y-m-d');
     }
 
     /**

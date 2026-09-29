@@ -39,10 +39,11 @@ origin in dev (Vite proxy).
 **Test coverage is deliberately narrow**: only where a wrong number reaches a real folio or a
 real lock-out — `ReservationsTableTest` (`quote()` pricing), `FoodOrdersTableTest`
 (discount/cooking-charge arithmetic), `Auth/LoginThrottleTest` (all fixture-free, entities built
-in memory), plus `Controller/Api/ReservationDiscountsApiTest`, the one HTTP-level suite. **There
-are no fixtures**: that test builds its own property/room/rate/user in `setUp()`, removes them in
+in memory), plus two HTTP-level suites: `Controller/Api/ReservationDiscountsApiTest` and
+`BackdatedReservationsApiTest` (the admin-only past-stay rule). **There are no fixtures**: each
+builds its own property/room/rate/user in `setUp()`, removes them in
 `tearDown()`, and re-applies its auth header before *every* request (request config doesn't
-survive a request — the second call otherwise 401s). Role enforcement, stock movements and
+survive a request — the second call otherwise 401s). Other role enforcement, stock movements and
 invoice settlement are untested, so a green run doesn't validate the API.
 
 ### Frontend (`cd frontend`)
@@ -219,10 +220,16 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   and `booking_reference`/`sold_rate`/channel discount nulled. An online booking is saved `booked`,
   **requires `booking_reference`** (build rule), and may record `sold_rate` — which is
   **recorded, never priced** (only for reconciling the OTA remittance).
+- **Past stays are admin-only**: a check-in before today (`ReservationsController::isBackdated()`)
+  is refused for anyone but `admin` — except a receptionist's walk-in, whose date is simply forced
+  to today. Its status follows the dates (ended on/before today → `checked_out`, room untouched;
+  still going → `checked_in`, room occupied), and `checked_in_at`/`checked_out_at` are the stay's
+  own dates so it doesn't count toward today's activity. No downpayment; revenue comes from Mark
+  paid as usual. Moving an existing booking's check-in into the past is admin-only too.
 - **No double-booking**: the `roomAvailable` build rule rejects overlap on `[check_in, check_out)`
-  among `HOLDS_ROOM` statuses (check-out day is free for a same-day check-in; the Calendar tab
-  derives availability the same way). `add()`/`edit()` call `lockRoom()` first.
-  `ReservationsTable::conflicting()` queries the overlap.
+  among `HOLDS_ROOM` statuses — plus `checked_out` when a past stay is being entered (check-out
+  day is free for a same-day check-in; the Calendar tab derives availability the same way).
+  `add()`/`edit()` call `lockRoom()` first. `ReservationsTable::conflicting()` queries the overlap.
 - **Lifecycle**: transitions are guarded by an allowed-from-state table and flip `rooms.status`.
   A `booked` reservation is editable (row click reopens `ReservationModal`, booking fields only)
   until check-in, and not at all once a downpayment was collected — cancel and rebook.
