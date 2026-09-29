@@ -160,7 +160,10 @@ would make the key attacker-controlled.
   (ApexCharts can't read CSS variables). Use the `frontend-design` skill for UI work.
 - Initial loads use skeletons from `src/components/Skeleton.jsx`, not spinners (inline action
   buttons keep their small spinner). Stat tiles go through `src/components/StatCard.jsx` — extend
-  it rather than hand-rolling a card + number (copies in pages drifted before).
+  it rather than hand-rolling a card + number (copies in pages drifted before). When a row of tiles
+  gets crowded, group figures that answer one question with its `SummaryGroup` + `SummaryRow`
+  (Front Desk: Rooms / Today / To collect); a `SummaryRow` with `onClick` jumps to the list
+  behind the number — `Tabs` takes react-bootstrap-style `activeKey`/`onSelect` for that.
 - The **Invoices** tab (list, folio view, Settle with SI/OR booklet numbers) is one component,
   `src/components/Invoices.jsx` (`InvoicesPanel`), rendered by both Food & Orders and Front Desk —
   change it there, not in a page. It loads itself when its tab opens (`Tabs` mounts only the
@@ -279,6 +282,9 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
 - **The Reservations tab is paginated server-side** (25/page; the Today/This week/All window is
   the `since` param), so nothing on `FrontDesk.jsx` may be derived from that page: the summary
   cards come from `/reservations/stats` and the Calendar from `?on_date=`, each fetched on its own.
+  The summary is three grouped cards — Rooms (occupancy bar), Today, To collect (ringed when
+  anything's owed; "unpaid" filters the table via `?payment_status=unpaid`, "unsettled invoices"
+  opens the Invoices tab).
 
 ### Food & Orders
 - **`FoodOrdersTable::place()` is the orchestrator**, one transaction: saves order + lines,

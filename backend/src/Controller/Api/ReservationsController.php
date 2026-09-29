@@ -36,7 +36,7 @@ class ReservationsController extends AppController
     ];
 
     /**
-     * GET /api/reservations[?status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]
+     * GET /api/reservations[?status=][?payment_status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]
      *   → {reservations, total, page, limit}
      *
      * - `since`: the Front Desk table's "fresh start" window — stays still in
@@ -63,6 +63,19 @@ class ReservationsController extends AppController
         $status = $this->request->getQuery('status');
         if ($status !== null) {
             $query->where(['Reservations.status' => $status]);
+        }
+
+        // `payment_status=unpaid` is the Unpaid card's list: the same set it
+        // counts (see stats()), so a cancelled booking never shows as owing.
+        $paymentStatus = $this->request->getQuery('payment_status');
+        if ($paymentStatus !== null && $paymentStatus !== '') {
+            if (!in_array($paymentStatus, ReservationsTable::PAYMENT_STATUSES, true)) {
+                throw new BadRequestException('payment_status must be unpaid or paid.');
+            }
+            $query->where(['Reservations.payment_status' => $paymentStatus]);
+            if ($paymentStatus === 'unpaid') {
+                $query->where(['Reservations.status !=' => 'cancelled']);
+            }
         }
 
         $since = $this->queryDate('since');

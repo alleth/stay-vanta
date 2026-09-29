@@ -8,7 +8,7 @@ import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
 import { matchGuests, listGuests } from '../api/guests'
 import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
-import { StatCard } from '../components/StatCard'
+import { SummaryGroup, SummaryRow } from '../components/StatCard'
 import { InvoicesPanel } from '../components/Invoices'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
@@ -102,6 +102,40 @@ function editBlockReason(r, isAdmin) {
   return null
 }
 
+// The Rooms card: one occupancy figure and a bar split by status, instead of
+// three separate tiles for parts of the same whole. Solid saturated fills
+// read correctly in both themes, so the segments need no dark: pairs.
+function RoomsOccupancy({ counts }) {
+  const total = counts.available + counts.occupied + counts.maintenance
+  const pct = (n) => (total > 0 ? `${(n / total) * 100}%` : '0%')
+  return (
+    <>
+      <div className="flex items-baseline gap-2">
+        <span className="sv-serif text-2xl font-bold tabular-nums">{counts.occupied}</span>
+        <span className="text-sm text-muted">of {total} room{total === 1 ? '' : 's'} occupied</span>
+      </div>
+      <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-subtle"
+        role="img"
+        aria-label={`${counts.occupied} occupied, ${counts.available} available, ${counts.maintenance} in maintenance`}>
+        <div className="bg-red-500" style={{ width: pct(counts.occupied) }} />
+        <div className="bg-emerald-500" style={{ width: pct(counts.available) }} />
+        <div className="bg-amber-500" style={{ width: pct(counts.maintenance) }} />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-red-500" />{counts.occupied} occupied
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />{counts.available} available
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-amber-500" />{counts.maintenance} maintenance
+        </span>
+      </div>
+    </>
+  )
+}
+
 function EstimateBreakdown({ subtotalLabel, subtotal, discounts, extras = [], total, downpayment }) {
   if (subtotal <= 0) {
     return <div className="sv-serif mt-1 text-xl font-bold">—</div>
@@ -181,6 +215,11 @@ export default function FrontDesk() {
   const [reservationDate, setReservationDate] = useState(null)
   const [calDate, setCalDate] = useState(todayStr)
   const [resFilter, setResFilter] = useState('today') // today | week | all
+  // Set by clicking the "To collect → unpaid" figure: the table then lists
+  // exactly what that number counts.
+  const [resPayment, setResPayment] = useState(null) // null | 'unpaid'
+  // Controlled so the summary cards can jump to the list behind a number.
+  const [tab, setTab] = useState('reservations')
   const [pending, setPending] = useState(null) // key of the in-flight inline action
   const [earlyConfirm, setEarlyConfirm] = useState(null) // reservation pending an early check-in
   const today = todayStr()
@@ -197,7 +236,9 @@ export default function FrontDesk() {
       const [rm, rt, bs, pr, pageData, cal, st, ec] = await Promise.all([
         listRooms(propertyId), listRoomRates(propertyId), listBookingSources(propertyId),
         listPromoRates(propertyId),
-        pageReservations(propertyId, { page: resPage, limit: RESERVATIONS_PER_PAGE, since }),
+        pageReservations(propertyId, {
+          page: resPage, limit: RESERVATIONS_PER_PAGE, since, payment_status: resPayment ?? undefined,
+        }),
         listReservations(propertyId, { on_date: calDate }),
         reservationStats(propertyId), listExtraCharges(propertyId),
       ])
@@ -218,7 +259,7 @@ export default function FrontDesk() {
     } finally {
       setLoading(false)
     }
-  }, [propertyId, resPage, since, calDate])
+  }, [propertyId, resPage, since, resPayment, calDate])
 
   // The active early check-in fee (0 if none) — shown in the warning and billed
   // automatically by the backend when an early check-in is confirmed.
@@ -405,35 +446,57 @@ export default function FrontDesk() {
 
       {loading ? (
         <>
-          <SkeletonCards count={8} />
+          <SkeletonCards count={3} />
           <SkeletonTable rows={5} />
         </>
       ) : (
         <>
-        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-          <StatCard label="Available rooms" value={counts.available} variant="success" />
-          <StatCard label="Occupied rooms" value={counts.occupied} variant="danger" />
-          <StatCard label="Maintenance" value={counts.maintenance} variant="warning" />
-          <StatCard label="Reservations" value={counts.reservations} variant="primary" />
-          <StatCard label="Checked out today" value={counts.checkedOutToday} variant="secondary" />
-          <StatCard label="Cancelled today" value={counts.cancelledToday} variant="dark" />
-          <StatCard label="Unpaid" value={counts.unpaid} variant="info" />
-          <StatCard label="Unsettled invoices" value={counts.openInvoices} variant="warning" />
+        {/* Three questions instead of eight tiles: how full are the rooms,
+            what happened today, and what's still to collect. The last one is
+            ringed when anything is owed, and its figures open the list behind
+            them. */}
+        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <SummaryGroup label="Rooms">
+            <RoomsOccupancy counts={counts} />
+          </SummaryGroup>
+          <SummaryGroup label="Today">
+            <SummaryRow value={counts.reservations} label="upcoming bookings" variant="primary" />
+            <SummaryRow value={counts.checkedOutToday} label="checked out today" variant="secondary" />
+            <SummaryRow value={counts.cancelledToday} label="cancelled today" variant="secondary" />
+          </SummaryGroup>
+          <SummaryGroup label="To collect" highlight={counts.unpaid + counts.openInvoices > 0}>
+            <SummaryRow value={counts.unpaid} label="unpaid reservations"
+              variant={counts.unpaid > 0 ? 'warning' : 'secondary'}
+              title="Show them in the table"
+              onClick={() => { setResPayment('unpaid'); setResFilter('all'); setResPage(1); setTab('reservations') }} />
+            <SummaryRow value={counts.openInvoices} label="unsettled invoices"
+              variant={counts.openInvoices > 0 ? 'warning' : 'secondary'}
+              title="Open the Invoices tab"
+              onClick={() => setTab('invoices')} />
+          </SummaryGroup>
         </div>
 
-        <Tabs defaultActiveKey="reservations" className="mb-4">
+        <Tabs activeKey={tab} onSelect={setTab} className="mb-4">
           {/* ---- Reservations ---- */}
           <Tab eventKey="reservations" title={`Reservations (${resTotal})`}>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <Form.Group className="mb-0 flex items-center gap-2">
-                <Form.Label className="mb-0 text-muted">Show</Form.Label>
-                <Form.Select size="sm" value={resFilter} style={{ width: 'auto' }}
-                  onChange={(e) => { setResFilter(e.target.value); setResPage(1) }}>
-                  <option value="today">Today&apos;s activity</option>
-                  <option value="week">This week</option>
-                  <option value="all">All</option>
-                </Form.Select>
-              </Form.Group>
+              <div className="flex flex-wrap items-center gap-2">
+                <Form.Group className="mb-0 flex items-center gap-2">
+                  <Form.Label className="mb-0 text-muted">Show</Form.Label>
+                  <Form.Select size="sm" value={resFilter} style={{ width: 'auto' }}
+                    onChange={(e) => { setResFilter(e.target.value); setResPage(1) }}>
+                    <option value="today">Today&apos;s activity</option>
+                    <option value="week">This week</option>
+                    <option value="all">All</option>
+                  </Form.Select>
+                </Form.Group>
+                {resPayment === 'unpaid' && (
+                  <Button size="sm" variant="outline-secondary" title="Show all payment statuses again"
+                    onClick={() => { setResPayment(null); setResPage(1) }}>
+                    Unpaid only ✕
+                  </Button>
+                )}
+              </div>
               <Button onClick={() => openReservation()} disabled={availableRooms.length === 0}>
                 New reservation
               </Button>

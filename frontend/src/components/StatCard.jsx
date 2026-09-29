@@ -34,4 +34,43 @@ export function StatCard({ label, value, variant, size }) {
   )
 }
 
+// A group of related figures in one card — for when a row of single-number
+// tiles gets crowded and the numbers answer the same question (Front Desk's
+// "Rooms", "Today", "To collect"). Same label and number treatment as
+// StatCard, so the two read as one system. `highlight` rings the card in the
+// accent — reserve it for a group that needs someone to act. (A ring, not a
+// border colour: Card always sets border-line, and concatenated classes can't
+// reliably override it.)
+export function SummaryGroup({ label, highlight = false, className = '', children }) {
+  return (
+    <Card className={`h-full ${highlight ? 'ring-1 ring-accent' : ''} ${className}`}>
+      <Card.Body className="p-4">
+        <div className="mb-2 text-xs font-medium uppercase tracking-[0.04em] text-muted">{label}</div>
+        {children}
+      </Card.Body>
+    </Card>
+  )
+}
+
+// One figure inside a SummaryGroup: number + what it counts. With `onClick`
+// the whole row is a button that takes you to the list behind the number.
+export function SummaryRow({ value, label, variant, onClick, title }) {
+  const inner = (
+    <>
+      <span className={`sv-serif w-10 shrink-0 text-xl font-bold tabular-nums ${VALUE_COLOR[variant] ?? ''}`}>
+        {value}
+      </span>
+      <span className="min-w-0 flex-1 text-sm text-muted">{label}</span>
+      {onClick && <span aria-hidden="true" className="text-muted">›</span>}
+    </>
+  )
+  if (!onClick) return <div className="flex items-baseline gap-2 py-0.5">{inner}</div>
+  return (
+    <button type="button" title={title} onClick={onClick}
+      className="-mx-2 flex w-[calc(100%+1rem)] items-baseline gap-2 rounded-md px-2 py-0.5 text-left transition-colors hover:bg-subtle">
+      {inner}
+    </button>
+  )
+}
+
 export default StatCard

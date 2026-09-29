@@ -352,9 +352,14 @@ export function Tab({ children }) {
   return children
 }
 
-export function Tabs({ defaultActiveKey, className = '', children }) {
+// Uncontrolled by default (`defaultActiveKey`); pass `activeKey` + `onSelect`,
+// as with react-bootstrap, when something outside the tab strip needs to switch
+// tabs (e.g. a summary card jumping to the list it counts).
+export function Tabs({ defaultActiveKey, activeKey, onSelect, className = '', children }) {
   const items = Children.toArray(children)
-  const [active, setActive] = useState(defaultActiveKey ?? items[0]?.props?.eventKey)
+  const [inner, setInner] = useState(defaultActiveKey ?? items[0]?.props?.eventKey)
+  const active = activeKey ?? inner
+  const setActive = (key) => { setInner(key); onSelect?.(key) }
   const current = items.find((t) => t.props.eventKey === active) ?? items[0]
   return (
     <div>

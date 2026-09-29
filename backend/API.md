@@ -93,9 +93,11 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; amount/active — the built-in row's
   name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the
   built-in row).
-- `GET /api/reservations[?status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]` →
-  `{reservations,total,page,limit}`, each row with a computed `quote` and `room_charge_invoice`
-  (`null` = room charge not posted yet, `open` = on the guest's tab but not collected, `settled`). `since` is the table's
+- `GET /api/reservations[?status=][?payment_status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]`
+  → `{reservations,total,page,limit}`, each row with a computed `quote` and `room_charge_invoice`
+  (`null` = room charge not posted yet, `open` = on the guest's tab but not collected, `settled`).
+  `payment_status=unpaid` also excludes cancelled — the same set the stats' `unpaid` counts.
+  `since` is the table's
   window (booked/checked-in always; checked-out/cancelled only if that happened on/after it);
   `on_date` = non-cancelled stays touching the date (Calendar tab). `limit` is clamped 5–100 only
   when passed; omitted, it's the old wide window (200) — Food & Orders' checked-in picker relies on it.
