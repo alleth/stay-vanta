@@ -60,6 +60,11 @@ export const createReservation = (data, propertyId) =>
 export const updateReservation = (id, data) =>
   client.patch(`/reservations/${id}`, data).then((r) => r.data.reservation)
 
+// Admin only, and refused once anything has been transacted against the
+// reservation (a downpayment, charges on the invoice, food orders during the stay).
+export const deleteReservation = (id) =>
+  client.delete(`/reservations/${id}`).then((r) => r.data)
+
 // transition: 'check-in' | 'check-out' | 'cancel'
 // `data` carries flags like { early_check_in: true } for the check-in transition.
 export const transitionReservation = (id, transition, data = {}) =>

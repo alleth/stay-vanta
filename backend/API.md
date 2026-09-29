@@ -111,7 +111,15 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   and rebook). `promo_rate` recomputed as in `add()`; downpayment collected if the edit makes it an
   advance booking. Sending `discount_beneficiaries` replaces the set; omitting it leaves them.
   Omitting `channel_discount_type` keeps it; sending it blank clears it. Changing `check_in` to a
-  date before today is admin-only (403); resending the unchanged date is fine.
+  date before today is admin-only (403); resending the unchanged date is fine. An **admin** may
+  also edit a `checked_in`/`checked_out` stay until its room charge is posted (400 after): the
+  status stays, so a stay's `check_in` can't move after today (nor a finished stay's `check_out`),
+  `checked_in_at`/`checked_out_at` follow their dates, and a checked-in guest's room change moves
+  the occupied flag.
+- `DELETE /api/reservations/{id}` — **admin only** (403), any status. 400 once anything has been
+  transacted against it: a downpayment, an invoice or invoice line for it, or a non-cancelled food
+  order by the same guest dated within the stay (food orders link to the guest, not the booking).
+  Removes its `reservation_discounts`; frees the room if it was the one checking the guest in.
 - `POST /api/reservations/{id}/{check-in|check-out|cancel}` — stamp
   `checked_in_at`/`checked_out_at`/`cancelled_at` and `receptionist_id`; flip room status.
   - check-in accepts `early_check_in:true` → posts the configured fee to the guest's invoice.

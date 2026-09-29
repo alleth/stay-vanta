@@ -270,6 +270,12 @@ class ReservationsController extends AppController
      * source/room the edit ends up with. If the edit turns this into (or
      * keeps it as) an advance booking, the downpayment is collected the same
      * way add() does.
+     *
+     * An admin may also correct a stay that's already checked in or out (a
+     * past stay they recorded, say) — until its room charge has been posted,
+     * since the invoice would then disagree with the corrected booking. The
+     * status stays as it is, so the dates must keep agreeing with it, and the
+     * check-in/out event dates move with the stay's own dates.
      */
     public function edit(int $id): void
     {
@@ -284,12 +290,18 @@ class ReservationsController extends AppController
         $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
             ->firstOrFail();
 
-        if ($reservation->status !== 'booked') {
+        $isStay = in_array($reservation->status, ['checked_in', 'checked_out'], true);
+        if ($reservation->status !== 'booked' && !($isStay && $this->userHasRole('admin'))) {
             throw new BadRequestException("Only a booking that hasn't checked in yet can be edited.");
         }
         if ((float)$reservation->downpayment > 0) {
             throw new BadRequestException(
                 'This booking already collected a downpayment — cancel and rebook instead of editing it.',
+            );
+        }
+        if ($isStay && $this->fetchTable('Invoices')->invoiceForLine('reservation', (int)$reservation->id)) {
+            throw new BadRequestException(
+                "This stay's room charge is already on the guest's invoice, so it can no longer be edited.",
             );
         }
 
@@ -389,12 +401,32 @@ class ReservationsController extends AppController
                     'receptionist_id' => (int)$this->currentUser->id,
                 ], ['accessibleFields' => ['property_id' => false]]);
 
+                $previousRoomId = $reservation->getOriginal('room_id');
+                if ($reservation->status !== 'booked') {
+                    $this->correctStay($reservation);
+                }
+
                 if ($reservations->save($reservation) === false) {
                     return false;
                 }
 
                 if ($replaceBeneficiaries) {
                     $this->saveBeneficiaries($reservation, $beneficiaries);
+                }
+
+                // A guest still in the room moves with the correction.
+                if (
+                    $reservation->status === 'checked_in'
+                    && (int)$previousRoomId !== (int)$reservation->room_id
+                ) {
+                    $rooms = $this->fetchTable('Rooms');
+                    foreach ([$previousRoomId => 'available', $reservation->room_id => 'occupied'] as $rid => $status) {
+                        if ($rid) {
+                            $room = $rooms->get($rid);
+                            $room->set('status', $status);
+                            $rooms->saveOrFail($room);
+                        }
+                    }
                 }
 
                 if ($reservation->guest_id !== null) {
@@ -412,6 +444,140 @@ class ReservationsController extends AppController
         }
 
         $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * Keep an edited checked-in/out stay consistent with its status: the
+     * dates may not say it hasn't happened yet, and the recorded check-in/out
+     * moments follow their dates (keeping the time of day they carried).
+     *
+     * @throws \Cake\Http\Exception\BadRequestException When the dates contradict the status.
+     */
+    private function correctStay(Reservation $reservation): void
+    {
+        $today = Date::today();
+        if ($reservation->check_in instanceof Date && $reservation->check_in->greaterThan($today)) {
+            throw new BadRequestException("A stay that's already begun can't start after today.");
+        }
+        if (
+            $reservation->status === 'checked_out'
+            && $reservation->check_out instanceof Date
+            && $reservation->check_out->greaterThan($today)
+        ) {
+            throw new BadRequestException("A finished stay can't end after today.");
+        }
+
+        foreach (['check_in' => 'checked_in_at', 'check_out' => 'checked_out_at'] as $dateField => $atField) {
+            $date = $reservation->get($dateField);
+            $at = $reservation->get($atField);
+            if (!$reservation->isDirty($dateField) || !$date instanceof Date || $at === null) {
+                continue;
+            }
+            $original = $reservation->getOriginal($dateField);
+            if ($original instanceof Date && $original->equals($date)) {
+                continue;
+            }
+            $reservation->set($atField, $at->setDate($date->year, $date->month, $date->day));
+        }
+    }
+
+    /**
+     * DELETE /api/reservations/{id} — admin only. Removes a reservation
+     * entered by mistake, as long as nothing has been transacted against it
+     * yet (see transactionOn()); after that it's part of the property's
+     * books, and cancelling is the way to undo it.
+     */
+    public function delete(int $id): void
+    {
+        $this->request->allowMethod('delete');
+
+        if (!$this->userHasRole('admin')) {
+            throw new ForbiddenException('Only an admin can delete a reservation.');
+        }
+
+        $reservations = $this->fetchTable('Reservations');
+        $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
+            ->firstOrFail();
+
+        $blocker = $this->transactionOn($reservation);
+        if ($blocker !== null) {
+            throw new BadRequestException(
+                "This reservation can't be deleted: {$blocker}."
+                . ($reservation->status === 'cancelled' ? '' : ' Cancel it instead.'),
+            );
+        }
+
+        $reservations->getConnection()->transactional(function () use ($reservations, $reservation): void {
+            $this->fetchTable('ReservationDiscounts')->deleteAll(['reservation_id' => $reservation->id]);
+            $reservations->deleteOrFail($reservation);
+
+            // A guest recorded as in the room no longer is — unless another
+            // stay still has them there.
+            if (
+                $reservation->status === 'checked_in'
+                && $reservation->room_id
+                && !$reservations->exists([
+                    'room_id' => $reservation->room_id,
+                    'status' => 'checked_in',
+                ])
+            ) {
+                $rooms = $this->fetchTable('Rooms');
+                $room = $rooms->get($reservation->room_id);
+                $room->set('status', 'available');
+                $rooms->saveOrFail($room);
+            }
+        });
+
+        $this->set('message', 'Reservation deleted.');
+        $this->viewBuilder()->setOption('serialize', ['message']);
+    }
+
+    /**
+     * What, if anything, has already been transacted against a reservation —
+     * money collected or posted for it, or the guest ordering food during the
+     * stay. Food orders are tied to the guest rather than the booking, so a
+     * non-cancelled order by the same guest dated within the stay counts.
+     *
+     * @return string|null A reason for the refusal, or null when there's none.
+     */
+    private function transactionOn(Reservation $reservation): ?string
+    {
+        $id = (int)$reservation->id;
+
+        if ((float)$reservation->downpayment > 0) {
+            return 'a downpayment was collected for it';
+        }
+
+        $invoices = $this->fetchTable('Invoices');
+        $posted = $invoices->exists(['reservation_id' => $id])
+            || $invoices->InvoiceLines->exists([
+                'source_id' => $id,
+                'source_type IN' => [
+                    'reservation',
+                    'downpayment',
+                    'downpayment_credit',
+                    'downpayment_refund',
+                    'early_check_in',
+                ],
+            ]);
+        if ($posted) {
+            return "charges for it are on the guest's invoice";
+        }
+
+        if ($reservation->guest_id && $reservation->check_in && $reservation->check_out) {
+            $ordered = $this->fetchTable('FoodOrders')->exists([
+                'property_id' => $reservation->property_id,
+                'guest_id' => $reservation->guest_id,
+                'status !=' => 'cancelled',
+                'created >=' => $reservation->check_in->format('Y-m-d') . ' 00:00:00',
+                'created <' => $reservation->check_out->addDays(1)->format('Y-m-d') . ' 00:00:00',
+            ]);
+            if ($ordered) {
+                return 'the guest has food orders during this stay';
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -40,7 +40,7 @@ origin in dev (Vite proxy).
 real lock-out — `ReservationsTableTest` (`quote()` pricing), `FoodOrdersTableTest`
 (discount/cooking-charge arithmetic), `Auth/LoginThrottleTest` (all fixture-free, entities built
 in memory), plus two HTTP-level suites: `Controller/Api/ReservationDiscountsApiTest` and
-`BackdatedReservationsApiTest` (the admin-only past-stay rule). **There are no fixtures**: each
+`BackdatedReservationsApiTest` (admin-only past stays, stay edits and delete). **There are no fixtures**: each
 builds its own property/room/rate/user in `setUp()`, removes them in
 `tearDown()`, and re-applies its auth header before *every* request (request config doesn't
 survive a request — the second call otherwise 401s). Other role enforcement, stock movements and
@@ -232,7 +232,11 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   `add()`/`edit()` call `lockRoom()` first. `ReservationsTable::conflicting()` queries the overlap.
 - **Lifecycle**: transitions are guarded by an allowed-from-state table and flip `rooms.status`.
   A `booked` reservation is editable (row click reopens `ReservationModal`, booking fields only)
-  until check-in, and not at all once a downpayment was collected — cancel and rebook.
+  until check-in, and not at all once a downpayment was collected — cancel and rebook. An
+  **admin** can also open a checked-in/out row to correct it (until its room charge is posted;
+  `correctStay()` keeps the dates consistent with the status) or **delete** it — refused by
+  `transactionOn()` once anything was transacted (downpayment, invoice/lines, or the guest's food
+  orders during the stay, matched by guest + date since orders carry no `reservation_id`).
 - **Downpayment**: an advance booking (check-in after today, guest on file) collects 50% as an
   immediately-settled invoice (`InvoicesTable::settledInvoiceWith`), so it counts as collected that
   day. `collectAdvanceDownpayment()` is shared by `add()` and `edit()`. Cancel from `booked`

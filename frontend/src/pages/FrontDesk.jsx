@@ -14,7 +14,8 @@ import {
   listRoomRates, createRoomRate, updateRoomRate,
   listBookingSources,
   listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
-  listReservations, createReservation, updateReservation, transitionReservation, setReservationPayment,
+  listReservations, createReservation, updateReservation, deleteReservation, transitionReservation,
+  setReservationPayment,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
 
@@ -131,6 +132,11 @@ export default function FrontDesk() {
   const { propertyId } = useProperty()
   const { role } = useAuth()
   const canManageRooms = role === 'owner' || role === 'admin'
+  // Anyone can fix a booking before check-in; an admin can also correct (or
+  // delete) a stay that's under way or over — the backend decides the rest.
+  const isAdmin = role === 'admin'
+  const canOpenReservation = (r) => r.status === 'booked'
+    || (isAdmin && (r.status === 'checked_in' || r.status === 'checked_out'))
   const [rooms, setRooms] = useState([])
   const [rates, setRates] = useState([])
   const [bookingSources, setBookingSources] = useState([])
@@ -411,10 +417,12 @@ export default function FrontDesk() {
                     <tr key={r.id}
                       className={[
                         r.status === 'cancelled' && 'text-muted',
-                        r.status === 'booked' && 'cursor-pointer',
+                        canOpenReservation(r) && 'cursor-pointer',
                       ].filter(Boolean).join(' ') || undefined}
-                      title={r.status === 'booked' ? 'Click to edit this booking' : undefined}
-                      onClick={() => r.status === 'booked' && setModal({ type: 'reservation', reservation: r })}>
+                      title={canOpenReservation(r)
+                        ? (isAdmin ? 'Click to edit or delete' : 'Click to edit this booking')
+                        : undefined}
+                      onClick={() => canOpenReservation(r) && setModal({ type: 'reservation', reservation: r })}>
                       <td className="font-semibold">
                         {r.guest?.full_name ?? '—'}{' '}
                         {r.guest && (
@@ -908,6 +916,27 @@ function ReservationModal({
   const canBackdate = role === 'admin'
   const isPast = !editing && Boolean(form.check_in) && form.check_in < todayStr()
   const pastEnded = isPast && Boolean(form.check_out) && form.check_out <= todayStr()
+  // A stay that's under way or over (admin-only to edit) keeps its status, so
+  // its dates can't be moved to say it hasn't happened yet.
+  const isStay = reservation?.status === 'checked_in' || reservation?.status === 'checked_out'
+  // Any room may be picked for nights that are already over; today's status
+  // says nothing about who was in it then.
+  const stayEnded = Boolean(form.check_in) && form.check_in < todayStr()
+    && Boolean(form.check_out) && form.check_out <= todayStr()
+
+  const [deleting, setDeleting] = useState(false)
+  async function remove() {
+    if (!window.confirm('Delete this reservation? This can\'t be undone.')) return
+    setDeleting(true)
+    setErr(null)
+    try {
+      await deleteReservation(reservation.id)
+      onSaved()
+    } catch (ex) {
+      setErr(ex?.response?.data?.message ?? 'Delete failed.')
+      setDeleting(false)
+    }
+  }
 
   // A walk-in is someone at the desk right now, so the stay starts today and
   // the date isn't the receptionist's to choose. The backend decides this for
@@ -1165,7 +1194,7 @@ function ReservationModal({
               <Form.Label>Room</Form.Label>
               <Form.Select value={form.room_id} onChange={set('room_id')} required>
                 {rooms.map((r) => (
-                  <option key={r.id} value={r.id} disabled={!pastEnded && r.status !== 'available' && r.id !== reservation?.room_id}>
+                  <option key={r.id} value={r.id} disabled={!stayEnded && r.status !== 'available' && r.id !== reservation?.room_id}>
                     {r.room_number} — {r.room_type ?? 'Room'}
                     {r.status !== 'available' ? ` (${r.status})` : ''}
                   </option>
@@ -1176,15 +1205,17 @@ function ReservationModal({
               <Form.Label>Check-in</Form.Label>
               <Form.Control type="date" value={form.check_in} onChange={set('check_in')}
                 min={canBackdate ? undefined : todayStr()}
-                // An admin may backdate a walk-in, but not move one ahead.
-                max={isWalkIn && canBackdate && !editing ? todayStr() : undefined}
+                // An admin may backdate a walk-in, but not move one ahead —
+                // nor move a stay that's begun to after today.
+                max={(isWalkIn && canBackdate && !editing) || isStay ? todayStr() : undefined}
                 required disabled={isWalkIn && !editing && !canBackdate} />
               {isWalkIn && !editing && !isPast && <Form.Text muted>Today — the guest is here.</Form.Text>}
             </Form.Group>
             <Form.Group className="mb-4 md:col-span-3">
               <Form.Label>Check-out</Form.Label>
               <Form.Control type="date" value={form.check_out} onChange={set('check_out')}
-                min={form.check_in || todayStr()} required />
+                min={form.check_in || todayStr()}
+                max={reservation?.status === 'checked_out' ? todayStr() : undefined} required />
             </Form.Group>
           </div>
           <div className="grid grid-cols-1 gap-x-6 md:grid-cols-12">
@@ -1496,8 +1527,13 @@ function ReservationModal({
          </div>
         </Modal.Body>
         <Modal.Footer>
+          {editing && canBackdate && (
+            <Button variant="outline-danger" className="mr-auto" disabled={busy || deleting} onClick={remove}>
+              {deleting ? <Spinner size="sm" /> : 'Delete'}
+            </Button>
+          )}
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy || deleting}>
             {busy ? <Spinner size="sm" /> : editing ? 'Save changes' : 'Book'}
           </Button>
         </Modal.Footer>

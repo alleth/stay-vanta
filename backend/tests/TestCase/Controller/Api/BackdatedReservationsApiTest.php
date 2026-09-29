@@ -126,8 +126,15 @@ class BackdatedReservationsApiTest extends TestCase
 
     protected function tearDown(): void
     {
+        $invoiceIds = $this->getTableLocator()->get('Invoices')->find()
+            ->where(['property_id' => $this->propertyId])
+            ->all()->extract('id')->toList();
+        if ($invoiceIds) {
+            $this->getTableLocator()->get('InvoiceLines')->deleteAll(['invoice_id IN' => $invoiceIds]);
+        }
         $this->getTableLocator()->get('Reservations')->deleteAll(['property_id' => $this->propertyId]);
-        foreach (['Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'Users'] as $name) {
+        $tables = ['FoodOrders', 'Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'Users'];
+        foreach ($tables as $name) {
             $this->getTableLocator()->get($name)->deleteAll(['property_id' => $this->propertyId]);
         }
         $this->getTableLocator()->get('Properties')->deleteAll(['id' => $this->propertyId]);
@@ -228,5 +235,127 @@ class BackdatedReservationsApiTest extends TestCase
             'additional_beds' => 1,
         ]));
         $this->assertResponseOk((string)$this->_response->getBody());
+    }
+
+    /**
+     * @return array<string, mixed> The saved reservation.
+     */
+    private function recordPastStay(int $from, int $to, array $extra = []): array
+    {
+        $body = $this->book(
+            $this->adminToken,
+            ['check_in' => $this->day($from), 'check_out' => $this->day($to)] + $extra,
+        );
+        $this->assertResponseCode(201, (string)$this->_response->getBody());
+
+        return $body['reservation'];
+    }
+
+    public function testAdminCanCorrectAFinishedStay(): void
+    {
+        $stay = $this->recordPastStay(-5, -2);
+
+        $this->authedAs($this->adminToken);
+        $this->patch("/api/reservations/{$stay['id']}", json_encode([
+            'check_in' => $this->day(-6),
+            'check_out' => $this->day(-1),
+        ]));
+
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $saved = json_decode((string)$this->_response->getBody(), true)['reservation'];
+        $this->assertSame('checked_out', $saved['status']);
+        // The recorded moments move with the dates.
+        $this->assertStringStartsWith($this->day(-6), $saved['checked_in_at']);
+        $this->assertStringStartsWith($this->day(-1), $saved['checked_out_at']);
+    }
+
+    public function testAFinishedStayCannotBeMovedToEndAfterToday(): void
+    {
+        $stay = $this->recordPastStay(-5, -2);
+
+        $this->authedAs($this->adminToken);
+        $this->patch("/api/reservations/{$stay['id']}", json_encode(['check_out' => $this->day(2)]));
+
+        $this->assertResponseCode(400);
+    }
+
+    public function testReceptionistCannotEditAFinishedStay(): void
+    {
+        $stay = $this->recordPastStay(-5, -2);
+
+        $this->authedAs($this->receptionistToken);
+        $this->patch("/api/reservations/{$stay['id']}", json_encode(['additional_beds' => 1]));
+
+        $this->assertResponseCode(400);
+    }
+
+    public function testAdminDeletesAStayWithNothingTransacted(): void
+    {
+        $stay = $this->recordPastStay(-2, 1);
+        $this->assertSame('occupied', $this->getTableLocator()->get('Rooms')->get($this->roomId)->status);
+
+        $this->authedAs($this->adminToken);
+        $this->delete("/api/reservations/{$stay['id']}");
+
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $this->assertFalse($this->getTableLocator()->get('Reservations')->exists(['id' => $stay['id']]));
+        // Nobody is recorded in the room any more.
+        $this->assertSame('available', $this->getTableLocator()->get('Rooms')->get($this->roomId)->status);
+    }
+
+    public function testReceptionistCannotDelete(): void
+    {
+        $stay = $this->recordPastStay(-5, -2);
+
+        $this->authedAs($this->receptionistToken);
+        $this->delete("/api/reservations/{$stay['id']}");
+
+        $this->assertResponseCode(403);
+        $this->assertTrue($this->getTableLocator()->get('Reservations')->exists(['id' => $stay['id']]));
+    }
+
+    public function testOncePaidAStayCanNeitherBeEditedNorDeleted(): void
+    {
+        $stay = $this->recordPastStay(-5, -2, ['guest_name' => 'Paid Guest']);
+
+        $this->authedAs($this->adminToken);
+        $this->post("/api/reservations/{$stay['id']}/payment", json_encode(['payment_status' => 'paid']));
+        $this->assertResponseOk((string)$this->_response->getBody());
+
+        $this->authedAs($this->adminToken);
+        $this->patch("/api/reservations/{$stay['id']}", json_encode(['additional_beds' => 1]));
+        $this->assertResponseCode(400);
+
+        $this->authedAs($this->adminToken);
+        $this->delete("/api/reservations/{$stay['id']}");
+        $this->assertResponseCode(400);
+        $this->assertTrue($this->getTableLocator()->get('Reservations')->exists(['id' => $stay['id']]));
+    }
+
+    public function testAFoodOrderDuringTheStayBlocksDelete(): void
+    {
+        $stay = $this->recordPastStay(-5, -2, ['guest_name' => 'Hungry Guest']);
+
+        $orders = $this->getTableLocator()->get('FoodOrders');
+        $admin = $this->getTableLocator()->get('Users')->find()
+            ->where(['email' => 'backdating-admin@example.test'])->firstOrFail();
+        $order = $orders->newEntity([
+            'property_id' => $this->propertyId,
+            'guest_id' => $stay['guest_id'],
+            'receptionist_id' => $admin->id,
+            'status' => 'served',
+            'payment_status' => 'paid',
+            'payment_method' => 'cash',
+            'total' => 250,
+        ]);
+        // Dated inside the stay; Timestamp leaves an already-set `created` alone.
+        $order->set('created', new DateTime($this->day(-3) . ' 12:00:00'));
+        $orders->saveOrFail($order);
+
+        $this->authedAs($this->adminToken);
+        $this->delete("/api/reservations/{$stay['id']}");
+
+        $this->assertResponseCode(400);
+        $this->assertStringContainsString('food orders', (string)$this->_response->getBody());
     }
 }

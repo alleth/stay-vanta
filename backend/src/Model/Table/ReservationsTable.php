@@ -188,12 +188,22 @@ class ReservationsTable extends Table
 
         $rules->add(
             function (Reservation $reservation): bool {
-                // A past stay an admin is entering now is recorded already
+                // A past stay an admin is entering (or correcting) is already
                 // checked out, so it holds no room — but it still can't share
                 // nights with a stay that really did happen in that room.
-                $recordingPast = $reservation->isNew()
-                    && $reservation->check_in instanceof Date
-                    && $reservation->check_in->lessThan(Date::today());
+                $recordingPast = $reservation->check_in instanceof Date
+                    && $reservation->check_in->lessThan(Date::today())
+                    && (
+                        $reservation->isNew()
+                        || (
+                            $reservation->status === 'checked_out'
+                            && (
+                                $reservation->isDirty('check_in')
+                                || $reservation->isDirty('check_out')
+                                || $reservation->isDirty('room_id')
+                            )
+                        )
+                    );
 
                 // A booking that no longer holds the room can't collide.
                 if (
