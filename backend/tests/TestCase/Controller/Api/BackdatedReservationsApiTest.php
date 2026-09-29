@@ -389,6 +389,61 @@ class BackdatedReservationsApiTest extends TestCase
         $this->assertSame(2, $stats['unpaid']);
     }
 
+    public function testOnceSettledAReservationCantBeMarkedUnpaidEditedOrDeleted(): void
+    {
+        // A booking that isn't checked in yet: before this rule, only stays
+        // already under way were locked once their charge was posted.
+        $body = $this->book($this->adminToken, [
+            'check_in' => $this->day(2),
+            'check_out' => $this->day(4),
+            'source' => 'agoda',
+            'booking_reference' => 'AG-SETTLED',
+        ]);
+        $this->assertResponseCode(201, (string)$this->_response->getBody());
+        $id = $body['reservation']['id'];
+
+        // An invoice needs a guest. Attached after booking on purpose: booked
+        // with one, this advance booking would take a downpayment, and that
+        // locks edits for its own reason — this test is about settlement.
+        $guests = $this->getTableLocator()->get('Guests');
+        $guest = $guests->saveOrFail($guests->newEntity([
+            'property_id' => $this->propertyId,
+            'full_name' => 'Settled Guest',
+            'guest_type' => 'local',
+        ]));
+        $reservations = $this->getTableLocator()->get('Reservations');
+        $reservations->saveOrFail($reservations->get($id)->set('guest_id', $guest->id));
+
+        $this->authedAs($this->adminToken);
+        $this->post("/api/reservations/{$id}/payment", json_encode(['payment_status' => 'paid']));
+        $this->assertResponseOk((string)$this->_response->getBody());
+
+        $line = $this->getTableLocator()->get('InvoiceLines')->find()
+            ->where(['source_type' => 'reservation', 'source_id' => $id])->firstOrFail();
+        $this->authedAs($this->adminToken);
+        $this->post("/api/invoices/{$line->invoice_id}/settle", json_encode([]));
+        $this->assertResponseOk((string)$this->_response->getBody());
+
+        $this->authedAs($this->adminToken);
+        $this->post("/api/reservations/{$id}/payment", json_encode(['payment_status' => 'unpaid']));
+        $this->assertResponseCode(400);
+
+        $this->authedAs($this->adminToken);
+        $this->patch("/api/reservations/{$id}", json_encode(['check_out' => $this->day(5)]));
+        $this->assertResponseCode(400);
+
+        $this->authedAs($this->adminToken);
+        $this->delete("/api/reservations/{$id}");
+        $this->assertResponseCode(400);
+        $this->assertStringNotContainsString('Cancel it instead', (string)$this->_response->getBody());
+
+        // The listing tells the table so.
+        $this->authedAs($this->adminToken);
+        $this->get('/api/reservations?limit=25');
+        $rows = json_decode((string)$this->_response->getBody(), true)['reservations'];
+        $this->assertSame('settled', $rows[0]['room_charge_invoice']);
+    }
+
     public function testAFoodOrderDuringTheStayBlocksDelete(): void
     {
         $stay = $this->recordPastStay(-5, -2, ['guest_name' => 'Hungry Guest']);

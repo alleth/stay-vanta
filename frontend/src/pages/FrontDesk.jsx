@@ -146,8 +146,11 @@ export default function FrontDesk() {
   // Anyone can fix a booking before check-in; an admin can also correct (or
   // delete) a stay that's under way or over — the backend decides the rest.
   const isAdmin = role === 'admin'
-  const canOpenReservation = (r) => r.status === 'booked'
-    || (isAdmin && (r.status === 'checked_in' || r.status === 'checked_out'))
+  // Once its invoice is settled a reservation is part of the books: no edit,
+  // no delete, no "Mark unpaid" (the backend refuses all three too).
+  const isSettled = (r) => r.room_charge_invoice === 'settled'
+  const canOpenReservation = (r) => !isSettled(r) && (r.status === 'booked'
+    || (isAdmin && (r.status === 'checked_in' || r.status === 'checked_out')))
   const [rooms, setRooms] = useState([])
   const [rates, setRates] = useState([])
   const [bookingSources, setBookingSources] = useState([])
@@ -518,6 +521,12 @@ export default function FrontDesk() {
                             invoice not settled
                           </div>
                         )}
+                        {isSettled(r) && (
+                          <div className="mt-1 whitespace-nowrap text-[11px] text-emerald-700 dark:text-emerald-400"
+                            title="Collected — it can no longer be edited, deleted or marked unpaid.">
+                            invoice settled
+                          </div>
+                        )}
                       </td>
                       <td className="min-w-[170px] text-xs text-muted">
                         <div>Booked: {fmtDateTime(r.created) ?? '—'}</div>
@@ -541,7 +550,7 @@ export default function FrontDesk() {
                               {pending === `check-out-${r.id}` ? <Spinner size="sm" /> : 'Check out'}
                             </Button>
                           )}
-                          {r.status !== 'cancelled' && (
+                          {r.status !== 'cancelled' && !isSettled(r) && (
                             <Button size="sm" variant="outline-secondary"
                               disabled={pending !== null}
                               onClick={() => togglePayment(r)}>

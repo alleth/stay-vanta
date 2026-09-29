@@ -254,6 +254,9 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   `correctStay()` keeps the dates consistent with the status) or **delete** it — refused by
   `transactionOn()` once anything was transacted (downpayment, invoice/lines, or the guest's food
   orders during the stay, matched by guest + date since orders carry no `reservation_id`).
+  **Once the room charge's invoice is settled (`isSettled()`), a reservation of any status is
+  locked**: no edit, no delete, no Mark unpaid — backend-enforced; the table hides those actions
+  and shows "invoice settled".
 - **Downpayment**: an advance booking (check-in after today, guest on file) collects 50% as an
   immediately-settled invoice (`InvoicesTable::settledInvoiceWith`), so it counts as collected that
   day. `collectAdvanceDownpayment()` is shared by `add()` and `edit()`. Cancel from `booked`

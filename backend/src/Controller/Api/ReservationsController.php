@@ -176,6 +176,19 @@ class ReservationsController extends AppController
     }
 
     /**
+     * Whether the invoice carrying this reservation's room charge has been
+     * settled — the money collected and its SI/OR numbers issued. From then
+     * on the reservation is part of the books: it can't be edited, deleted or
+     * marked unpaid.
+     */
+    private function isSettled(Reservation $reservation): bool
+    {
+        $invoice = $this->fetchTable('Invoices')->invoiceForLine('reservation', (int)$reservation->id);
+
+        return $invoice !== null && $invoice->status === 'settled';
+    }
+
+    /**
      * A `Y-m-d` query parameter, or null when it's absent.
      *
      * @throws \Cake\Http\Exception\BadRequestException When it's present but malformed.
@@ -422,6 +435,11 @@ class ReservationsController extends AppController
         $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
             ->firstOrFail();
 
+        if ($this->isSettled($reservation)) {
+            throw new BadRequestException(
+                "This reservation's invoice is already settled, so it can no longer be edited.",
+            );
+        }
         $isStay = in_array($reservation->status, ['checked_in', 'checked_out'], true);
         if ($reservation->status !== 'booked' && !($isStay && $this->userHasRole('admin'))) {
             throw new BadRequestException("Only a booking that hasn't checked in yet can be edited.");
@@ -641,7 +659,7 @@ class ReservationsController extends AppController
         if ($blocker !== null) {
             throw new BadRequestException(
                 "This reservation can't be deleted: {$blocker}."
-                . ($reservation->status === 'cancelled' ? '' : ' Cancel it instead.'),
+                . ($reservation->status === 'cancelled' || $this->isSettled($reservation) ? '' : ' Cancel it instead.'),
             );
         }
 
@@ -683,6 +701,9 @@ class ReservationsController extends AppController
     {
         $id = (int)$reservation->id;
 
+        if ($this->isSettled($reservation)) {
+            return 'its invoice is already settled';
+        }
         if ((float)$reservation->downpayment > 0) {
             return 'a downpayment was collected for it';
         }
@@ -858,6 +879,13 @@ class ReservationsController extends AppController
         $status = $this->request->getData('payment_status');
         if (!in_array($status, ReservationsTable::PAYMENT_STATUSES, true)) {
             throw new BadRequestException('payment_status must be unpaid or paid.');
+        }
+        // Once the invoice is settled the money has been collected (and its
+        // SI/OR numbers issued), so "unpaid" would contradict the books.
+        if ($status === 'unpaid' && $this->isSettled($reservation)) {
+            throw new BadRequestException(
+                "This reservation's invoice is already settled, so it can't be marked unpaid.",
+            );
         }
 
         $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $status) {

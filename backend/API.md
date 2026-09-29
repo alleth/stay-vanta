@@ -136,7 +136,7 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   also edit a `checked_in`/`checked_out` stay until its room charge is posted (400 after): the
   status stays, so a stay's `check_in` can't move after today (nor a finished stay's `check_out`),
   `checked_in_at`/`checked_out_at` follow their dates, and a checked-in guest's room change moves
-  the occupied flag.
+  the occupied flag. **400 for any status once the room charge's invoice is settled.**
 - `DELETE /api/reservations/{id}` — **admin only** (403), any status. 400 once anything has been
   transacted against it: a downpayment, an invoice or invoice line for it, or a non-cancelled food
   order by the same guest dated within the stay (food orders link to the guest, not the booking).
@@ -149,7 +149,8 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
     (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`), and reverses room charge, credit and early
     check-in fee.
 - `POST /api/reservations/{id}/payment` (any authed) — `{payment_status: unpaid|paid}`; marking
-  `paid` posts the room charge onto the guest's invoice immediately.
+  `paid` posts the room charge onto the guest's invoice immediately. Marking `unpaid` is **400**
+  once that invoice is settled (the money's collected and its SI/OR numbers issued).
 
 ## Guests
 - `GET /api/guests[?guest_type=&q=&page=&limit=]` → `{guests,total,page,limit}`. `limit` is only
