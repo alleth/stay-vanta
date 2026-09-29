@@ -6,6 +6,7 @@ namespace App\Controller\Api;
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
+use App\Model\Table\ReservationExtraChargesTable;
 use App\Model\Table\ReservationsTable;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -43,7 +44,7 @@ class ReservationsController extends AppController
             $reservations->find()
                 // ReservationDiscounts rides along because quote() prices from
                 // it — without it every row would cost one extra query.
-                ->contain(['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts'])
+                ->contain(['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts', 'ReservationExtraCharges'])
                 ->orderBy(['Reservations.check_in' => 'DESC'])
                 ->limit(200),
         );
@@ -109,6 +110,7 @@ class ReservationsController extends AppController
         // caller's mistake, not a reason to have started writing rows.
         $totalGuests = $this->resolveTotalGuests();
         $beneficiaries = $this->parseBeneficiaries($totalGuests);
+        $extras = $this->parseExtras($propertyId) ?? [];
         $backdated = $this->isBackdated(
             $this->request->getData('source') ?? BookingSourcesTable::WALK_IN,
             $this->request->getData('check_in'),
@@ -121,6 +123,7 @@ class ReservationsController extends AppController
                 $propertyId,
                 $totalGuests,
                 $beneficiaries,
+                $extras,
                 $backdated,
                 &$reservation,
             ): bool {
@@ -217,6 +220,7 @@ class ReservationsController extends AppController
                 // Before the downpayment below: it quotes the booking, and the
                 // quote prices from these.
                 $this->saveBeneficiaries($reservation, $beneficiaries);
+                $this->saveExtras($reservation, $extras);
 
                 // The room is taken from this moment, exactly as transition()
                 // does on check-in. No early check-in fee: that charge is for
@@ -348,6 +352,8 @@ class ReservationsController extends AppController
         $replaceBeneficiaries = $this->request->getData('discount_beneficiaries') !== null;
         $totalGuests = $this->resolveTotalGuests((int)($reservation->total_guests ?? 1));
         $beneficiaries = $replaceBeneficiaries ? $this->parseBeneficiaries($totalGuests) : [];
+        // Null (key not sent) leaves the booking's extra charges as they are.
+        $extras = $this->parseExtras($propertyId, $reservation);
         if (!$replaceBeneficiaries) {
             // The guest count can still be edited on its own, and shrinking it
             // below the beneficiaries already on file would price the discount
@@ -375,6 +381,7 @@ class ReservationsController extends AppController
                 $totalGuests,
                 $beneficiaries,
                 $replaceBeneficiaries,
+                $extras,
             ): bool {
                 if ($roomId) {
                     $reservations->lockRoom((int)$roomId);
@@ -412,6 +419,9 @@ class ReservationsController extends AppController
 
                 if ($replaceBeneficiaries) {
                     $this->saveBeneficiaries($reservation, $beneficiaries);
+                }
+                if ($extras !== null) {
+                    $this->saveExtras($reservation, $extras);
                 }
 
                 // A guest still in the room moves with the correction.
@@ -509,6 +519,7 @@ class ReservationsController extends AppController
 
         $reservations->getConnection()->transactional(function () use ($reservations, $reservation): void {
             $this->fetchTable('ReservationDiscounts')->deleteAll(['reservation_id' => $reservation->id]);
+            $this->fetchTable('ReservationExtraCharges')->deleteAll(['reservation_id' => $reservation->id]);
             $reservations->deleteOrFail($reservation);
 
             // A guest recorded as in the room no longer is — unless another
@@ -869,6 +880,18 @@ class ReservationsController extends AppController
                         (int)$reservation->id,
                     );
                 }
+                // Extra charges ride with the room charge, one line each, and
+                // under the same `reservation` source so the idempotency check
+                // above, cancel's reversal and delete's guard all cover them.
+                foreach ($this->fetchTable('Reservations')->extrasFor($reservation) as $extra) {
+                    $invoices->addLine(
+                        $invoice,
+                        sprintf('%s × %d', $extra->name, (int)$extra->quantity),
+                        round((float)$extra->amount * (int)$extra->quantity, 2),
+                        'reservation',
+                        (int)$reservation->id,
+                    );
+                }
                 $hasChargeLine = true;
             }
         }
@@ -988,6 +1011,100 @@ class ReservationsController extends AppController
 
         $reservation->set('reservation_discounts', $saved);
         $reservation->setDirty('reservation_discounts', false);
+    }
+
+    /**
+     * The extra charges picked on the booking, from `extra_charges[]`
+     * (`{extra_charge_id, quantity}`), resolved to the rows saveExtras()
+     * writes — or null when the key wasn't sent (an edit then leaves them).
+     *
+     * Only the admin's custom charges can be picked: the built-in early
+     * check-in fee is billed by check-in itself. A charge already on the
+     * booking keeps the name and amount it was picked at, even if the admin
+     * has since repriced, deactivated or deleted it; a newly picked one must
+     * be active and is snapshotted as it is now. The same charge sent twice
+     * is one line with the quantities added.
+     *
+     * @return list<array{extra_charge_id: int, name: string, amount: string, quantity: int}>|null
+     */
+    private function parseExtras(int $propertyId, ?Reservation $current = null): ?array
+    {
+        $raw = $this->request->getData('extra_charges');
+        if ($raw === null) {
+            return null;
+        }
+        if (!is_array($raw)) {
+            throw new BadRequestException('extra_charges must be a list.');
+        }
+
+        $max = ReservationExtraChargesTable::MAX_QUANTITY;
+        $quantities = [];
+        foreach ($raw as $row) {
+            $id = (int)($row['extra_charge_id'] ?? 0);
+            if ($id <= 0) {
+                throw new BadRequestException('Each extra charge needs an extra_charge_id.');
+            }
+            $quantities[$id] = ($quantities[$id] ?? 0) + (int)($row['quantity'] ?? 1);
+        }
+        if ($quantities === []) {
+            return [];
+        }
+
+        $charges = $this->fetchTable('ExtraCharges')->find()
+            ->where([
+                'ExtraCharges.property_id' => $propertyId,
+                'ExtraCharges.id IN' => array_keys($quantities),
+                'ExtraCharges.code IS' => null,
+            ])
+            ->all()
+            ->indexBy('id')
+            ->toArray();
+        $onBooking = [];
+        if ($current !== null) {
+            foreach ($this->fetchTable('Reservations')->extrasFor($current) as $extra) {
+                $onBooking[(int)$extra->extra_charge_id] = $extra;
+            }
+        }
+
+        $rows = [];
+        foreach ($quantities as $id => $quantity) {
+            if ($quantity < 1 || $quantity > $max) {
+                throw new BadRequestException("An extra charge's quantity must be between 1 and {$max}.");
+            }
+            $source = $onBooking[$id] ?? (($charges[$id] ?? null)?->is_active ? $charges[$id] : null);
+            if ($source === null) {
+                throw new BadRequestException('One of the extra charges picked is no longer available.');
+            }
+            $rows[] = [
+                'extra_charge_id' => $id,
+                'name' => (string)$source->name,
+                'amount' => (string)$source->amount,
+                'quantity' => $quantity,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Replace a booking's extra charges with `$extras`, wholesale and set
+     * back onto the entity clean — as saveBeneficiaries() does, and for the
+     * same reason (quote() prices from them moments later).
+     *
+     * @param list<array{extra_charge_id: int, name: string, amount: string, quantity: int}> $extras
+     */
+    private function saveExtras(Reservation $reservation, array $extras): void
+    {
+        $table = $this->fetchTable('ReservationExtraCharges');
+        $table->deleteAll(['reservation_id' => $reservation->id]);
+
+        $saved = [];
+        foreach ($extras as $extra) {
+            $saved[] = $table->saveOrFail($table->newEntity(['reservation_id' => $reservation->id] + $extra));
+        }
+
+        $reservation->set('reservation_extra_charges', $saved);
+        $reservation->setDirty('reservation_extra_charges', false);
     }
 
     /**
@@ -1231,7 +1348,7 @@ class ReservationsController extends AppController
         $reservations = $this->fetchTable('Reservations');
         $full = $reservations->get(
             $reservation->id,
-            contain: ['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts'],
+            contain: ['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts', 'ReservationExtraCharges'],
         );
         $full->set('quote', $reservations->quote($full, $this->resolveBaseRate((int)$full->property_id, $full->room_id)));
 

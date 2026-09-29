@@ -86,7 +86,7 @@ const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : null)
 // (negative), then the total and any advance-booking downpayment. Shared by
 // the side rail (wider screens) and the Pricing section (phones) so the two
 // can't drift apart.
-function EstimateBreakdown({ subtotalLabel, subtotal, discounts, total, downpayment }) {
+function EstimateBreakdown({ subtotalLabel, subtotal, discounts, extras = [], total, downpayment }) {
   if (subtotal <= 0) {
     return <div className="sv-serif mt-1 text-xl font-bold">—</div>
   }
@@ -102,6 +102,13 @@ function EstimateBreakdown({ subtotalLabel, subtotal, discounts, total, downpaym
           <span className="whitespace-nowrap tabular-nums text-emerald-700 dark:text-emerald-400">
             −{formatMoney(d.amount)}
           </span>
+        </div>
+      ))}
+      {/* Added after the discounts, which don't cover them. */}
+      {extras.map((x) => (
+        <div key={x.label} className="mt-1 flex items-baseline justify-between gap-2">
+          <span className="text-muted">{x.label}</span>
+          <span className="whitespace-nowrap tabular-nums">+{formatMoney(x.amount)}</span>
         </div>
       ))}
       <div className="mt-2 flex items-baseline justify-between gap-2 border-t border-line pt-2">
@@ -473,6 +480,11 @@ export default function FrontDesk() {
                             −{formatMoney(r.quote.referral_discount)} (referral)
                           </div>
                         )}
+                        {Number(r.quote?.extras) > 0 && (
+                          <div className="whitespace-nowrap text-[11px] text-muted">
+                            +{formatMoney(r.quote.extras)} (extras)
+                          </div>
+                        )}
                         {Number(r.downpayment) > 0 && (
                           <div className="whitespace-nowrap text-xs text-muted">DP {formatMoney(r.downpayment)}</div>
                         )}
@@ -783,6 +795,7 @@ export default function FrontDesk() {
 
       {modal?.type === 'reservation' && (
         <ReservationModal rooms={rooms} rates={rates} bookingSources={bookingSources} promoRates={promoRates}
+          extraCharges={extraCharges}
           propertyId={propertyId} defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
           reservation={modal.reservation}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
@@ -851,7 +864,7 @@ export default function FrontDesk() {
 // blocks the edit entirely once checked in or once a downpayment has been
 // collected against the original quote (cancel and rebook instead).
 function ReservationModal({
-  rooms, rates, bookingSources, promoRates, propertyId, defaultRoomId, defaultCheckIn, reservation,
+  rooms, rates, bookingSources, promoRates, extraCharges = [], propertyId, defaultRoomId, defaultCheckIn, reservation,
   onClose, onSaved,
 }) {
   const editing = Boolean(reservation)
@@ -892,6 +905,26 @@ function ReservationModal({
     })),
   )
   const [totalGuests, setTotalGuests] = useState(Number(reservation?.total_guests) || 1)
+
+  // The admin's custom extra charges (Extra Charges tab), each with a
+  // quantity: {extra_charge_id: qty}. A charge already on the booking is
+  // offered at the name/amount it was picked at, even if it has since been
+  // repriced or switched off — the backend keeps that snapshot too. Early
+  // check-in isn't offered: check-in itself bills that.
+  const [extraQty, setExtraQty] = useState(() => Object.fromEntries(
+    (reservation?.reservation_extra_charges ?? []).map((x) => [x.extra_charge_id, x.quantity]),
+  ))
+  const onBooking = reservation?.reservation_extra_charges ?? []
+  const extraOptions = [
+    ...onBooking.map((x) => ({ id: x.extra_charge_id, name: x.name, amount: x.amount })),
+    ...extraCharges
+      .filter((c) => !c.code && c.is_active && !onBooking.some((x) => x.extra_charge_id === c.id))
+      .map((c) => ({ id: c.id, name: c.name, amount: c.amount })),
+  ]
+  const pickedExtras = extraOptions
+    .filter((o) => extraQty[o.id] > 0)
+    .map((o) => ({ ...o, quantity: extraQty[o.id] }))
+  const setExtra = (id, qty) => setExtraQty((q) => ({ ...q, [id]: qty }))
   const addBeneficiary = () => {
     setBeneficiaries((bs) => [...bs, { key: Date.now(), discount_type: 'senior', name: '', id_number: '' }])
     // Never fewer guests than beneficiaries — the backend rejects that, and it
@@ -985,7 +1018,12 @@ function ReservationModal({
     ? Math.min(Number(form.discount_amount) || 0, estRemaining)
     : 0
   const estDiscount = estChannelDiscount + estStatutoryDiscount + estReferralDiscount
-  const estTotal = Math.max(0, estSubtotal - estDiscount)
+  const extraLines = pickedExtras.map((x) => ({
+    label: `${x.name} × ${x.quantity}`,
+    amount: Number(x.amount) * x.quantity,
+  }))
+  const estExtras = extraLines.reduce((sum, x) => sum + x.amount, 0)
+  const estTotal = Math.max(0, estSubtotal - estDiscount) + estExtras
   const isAdvance = Boolean(form.check_in) && form.check_in > todayStr()
   const downpayment = isAdvance ? estTotal * 0.5 : 0
   // Only the discounts actually applied, each as its own line.
@@ -1005,6 +1043,7 @@ function ReservationModal({
       },
       estReferralDiscount > 0 && { label: 'Referral', amount: estReferralDiscount },
     ].filter(Boolean),
+    extras: extraLines,
     total: estTotal,
     downpayment,
   }
@@ -1087,6 +1126,8 @@ function ReservationModal({
     payload.discount_beneficiaries = beneficiaries.map((b) => ({
       discount_type: b.discount_type, name: b.name.trim(), id_number: b.id_number.trim(),
     }))
+    // Always sent too, so unticking the last one clears them.
+    payload.extra_charges = pickedExtras.map((x) => ({ extra_charge_id: x.id, quantity: x.quantity }))
     if (guestId) { payload.guest_id = guestId; delete payload.guest_name }
     return payload
   }
@@ -1504,6 +1545,32 @@ function ReservationModal({
                 </>
               )}
             </Form.Group>
+            {extraOptions.length > 0 && (
+              <Form.Group className="mb-4">
+                <Form.Label>Extra charges</Form.Label>
+                {extraOptions.map((o) => {
+                  const qty = extraQty[o.id] ?? 0
+                  return (
+                    <div key={o.id} className="mb-2 flex min-h-9 items-center gap-3">
+                      <Form.Check type="checkbox" className="flex-1"
+                        label={`${o.name} — ${formatMoney(o.amount)}`}
+                        checked={qty > 0}
+                        onChange={(e) => setExtra(o.id, e.target.checked ? 1 : 0)} />
+                      {qty > 0 && (
+                        <div className="w-20 shrink-0">
+                          <Form.Control type="number" min={1} max={99} value={qty}
+                            aria-label={`${o.name} quantity`}
+                            onChange={(e) => setExtra(o.id, Math.min(99, Math.max(1, Number(e.target.value) || 1)))} />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                <Form.Text muted>
+                  Added on top of the room after its discounts, and billed with the room charge.
+                </Form.Text>
+              </Form.Group>
+            )}
             {/* The rail carries this on wider screens, where it stays in view;
                 on a phone the rail is gone, so it belongs here instead. */}
             {estSubtotal > 0 && (
@@ -1518,7 +1585,7 @@ function ReservationModal({
               <Alert variant="info" className="mb-0 px-4 py-2">
                 <strong>Advance booking</strong> — collect a downpayment of{' '}
                 <strong>{formatMoney(downpayment)}</strong> (50% of the {formatMoney(estTotal)} total,
-                promo rate and discount included). If the booking is later cancelled, 10% of the
+                promo rate, discounts and extras included). If the booking is later cancelled, 10% of the
                 downpayment is retained.
               </Alert>
             )}

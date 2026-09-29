@@ -5,6 +5,7 @@ namespace App\Test\TestCase\Model\Table;
 
 use App\Model\Entity\Reservation;
 use App\Model\Entity\ReservationDiscount;
+use App\Model\Entity\ReservationExtraCharge;
 use App\Model\Table\ReservationsTable;
 use Cake\I18n\Date;
 use Cake\ORM\Locator\LocatorAwareTrait;
@@ -264,5 +265,32 @@ class ReservationsTableTest extends TestCase
 
         $this->assertSame(0.0, $quote['subtotal']);
         $this->assertSame(0.0, $quote['total']);
+    }
+
+    public function testExtraChargesAreAddedAfterTheDiscountsAndNotDiscounted(): void
+    {
+        // 2 nights × 1500 = 3000; one senior of one guest takes 20% = 600 off
+        // the room only. The extras (2 × 150 towels + 1 × 500 extra bed = 800)
+        // go on top of what's left: 3000 − 600 + 800 = 3200.
+        $booking = $this->booking('2026-03-01', '2026-03-03', [
+            'reservation_discounts' => $this->beneficiaries('senior'),
+            'reservation_extra_charges' => [
+                new ReservationExtraCharge(['name' => 'Extra towel', 'amount' => '150.00', 'quantity' => 2]),
+                new ReservationExtraCharge(['name' => 'Extra bed', 'amount' => '500.00', 'quantity' => 1]),
+            ],
+        ]);
+        $quote = $this->Reservations->quote($booking, 1500.0);
+
+        $this->assertSame(600.0, $quote['statutory_discount']);
+        $this->assertSame(800.0, $quote['extras']);
+        $this->assertSame(3200.0, $quote['total']);
+    }
+
+    public function testNoExtraChargesAddNothing(): void
+    {
+        $quote = $this->Reservations->quote($this->booking('2026-03-01', '2026-03-03'), 1500.0);
+
+        $this->assertSame(0.0, $quote['extras']);
+        $this->assertSame(3000.0, $quote['total']);
     }
 }

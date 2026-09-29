@@ -82,7 +82,8 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   A row = booking source + `multiplier` (> 0, of the room's original rate), optionally
   room-specific via `room_id`. Writes take a typed `source_name`, never a `source` code —
   `BookingSourcesTable::resolveOrCreate()` matches by name (case-insensitive) or creates one.
-- `GET /api/extra-charges` (any authed; **auto-seeds** the built-in `early_check_in` row) ·
+- `GET /api/extra-charges` (any authed; **auto-seeds** the built-in `early_check_in` row; the
+  active custom ones are what the booking form offers as `extra_charges`) ·
   `POST /api/extra-charges` (**owner/admin only**; custom charge, `code` null) ·
   `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; amount/active — the built-in row's
   name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the
@@ -95,6 +96,12 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   - `total_guests` (default 1) + `discount_beneficiaries[]` (`{discount_type: senior|pwd, name,
     id_number}`); beneficiaries can't outnumber `total_guests`.
   - `referral` = `discount_amount` (optional, must be `> 0` when set).
+  - `extra_charges[]` (`{extra_charge_id, quantity 1–99}`) — the admin's custom extra charges
+    (never the built-in early check-in). Name + unit amount are snapshotted onto
+    `reservation_extra_charges`; a charge already on the booking keeps its snapshot even if since
+    repriced/deactivated, a new pick must be active. Added to the quote **after** the discounts
+    (`quote.extras`) and billed with the room charge as `Name × qty` lines. On edit, sending the key
+    replaces them wholesale; omitting it leaves them.
   - `guest_id` reuses a guest and fills that guest's empty fields (never overwrites); `guest_name`
     creates one inline in the same transaction.
   - `promo_rate` is **never client-supplied** — resolved server-side from `promo_rates`.

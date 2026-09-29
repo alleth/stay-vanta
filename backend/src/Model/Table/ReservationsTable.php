@@ -62,6 +62,7 @@ class ReservationsTable extends Table
             'foreignKey' => 'receptionist_id',
         ]);
         $this->hasMany('ReservationDiscounts', ['dependent' => true]);
+        $this->hasMany('ReservationExtraCharges', ['dependent' => true]);
     }
 
     public function validationDefault(Validator $validator): Validator
@@ -353,6 +354,29 @@ class ReservationsTable extends Table
     }
 
     /**
+     * The extra charges picked on a booking — contained rows if present,
+     * otherwise loaded, for the same reason as beneficiariesFor(): a caller
+     * that forgot to contain them would quietly under-bill.
+     *
+     * @return list<\App\Model\Entity\ReservationExtraCharge>
+     */
+    public function extrasFor(Reservation $reservation): array
+    {
+        if ($reservation->has('reservation_extra_charges')) {
+            return array_values((array)$reservation->reservation_extra_charges);
+        }
+        if (!$reservation->id) {
+            return [];
+        }
+
+        return TableRegistry::getTableLocator()->get('ReservationExtraCharges')->find()
+            ->where(['ReservationExtraCharges.reservation_id' => $reservation->id])
+            ->orderBy(['ReservationExtraCharges.id' => 'ASC'])
+            ->all()
+            ->toList();
+    }
+
+    /**
      * Compute a price quote for a reservation given the resolved nightly rate.
      * The promo rate (an OTA-negotiated nightly price) overrides the base rate
      * when present.
@@ -381,10 +405,16 @@ class ReservationsTable extends Table
      * actually pays, and the statutory 20% is a share of *that*. A fixed
      * amount is capped at the subtotal.
      *
+     * Extra charges picked on the booking (`extras`, each `amount × quantity`)
+     * are added after all of that: they're services on top of the room, not
+     * the room, so neither the statutory 20% nor the referral covers them —
+     * the same reason a food order's cooking charge is added after its
+     * discount.
+     *
      * @return array{
      *     nights:int, nightly_rate:float, subtotal:float, channel_discount:float,
      *     statutory_discount:float, statutory_shares:list<float>,
-     *     referral_discount:float, discount:float, total:float
+     *     referral_discount:float, discount:float, extras:float, total:float
      * }
      */
     public function quote(Reservation $reservation, float $baseNightlyRate): array
@@ -414,6 +444,12 @@ class ReservationsTable extends Table
 
         $discount = round($channelDiscount + $statutoryDiscount + $referralDiscount, 2);
 
+        $extras = 0.0;
+        foreach ($this->extrasFor($reservation) as $extra) {
+            $extras += round((float)$extra->amount * (int)$extra->quantity, 2);
+        }
+        $extras = round($extras, 2);
+
         return [
             'nights' => $nights,
             'nightly_rate' => round($nightly, 2),
@@ -423,7 +459,8 @@ class ReservationsTable extends Table
             'statutory_shares' => $split['shares'],
             'referral_discount' => $referralDiscount,
             'discount' => $discount,
-            'total' => round($subtotal - $discount, 2),
+            'extras' => $extras,
+            'total' => round($subtotal - $discount + $extras, 2),
         ];
     }
 

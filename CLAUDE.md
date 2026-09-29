@@ -37,7 +37,7 @@ origin in dev (Vite proxy).
   `psalm.xml` exist but neither tool is installed — add it to `require-dev` before running it.
 
 **Test coverage is deliberately narrow**: only where a wrong number reaches a real folio or a
-real lock-out — `ReservationsTableTest` (`quote()` pricing), `FoodOrdersTableTest`
+real lock-out — `ReservationsTableTest` (`quote()` pricing, incl. extras), `FoodOrdersTableTest`
 (discount/cooking-charge arithmetic), `Auth/LoginThrottleTest` (all fixture-free, entities built
 in memory), plus two HTTP-level suites: `Controller/Api/ReservationDiscountsApiTest` and
 `BackdatedReservationsApiTest` (admin-only past stays, stay edits and delete). **There are no fixtures**: each
@@ -206,8 +206,11 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   (`resolveBaseRate()`: room-specific `room_rates` row, else cheapest property-wide). Order of
   deductions: **channel discount first** (percent, or fixed capped at subtotal), then the statutory
   share, then the **referral** (`discount_amount`, flat pesos, optional but `> 0` if set, capped so
-  the total can't go negative). Statutory and referral stack. `quote()` returns each component
-  separately so `postRoomCharge()` can itemize them.
+  the total can't go negative). Statutory and referral stack. Then the booking's **extra
+  charges** (`reservation_extra_charges`, admin-configured custom charges × quantity, name/amount
+  snapshotted at pick time) are added on top — never discounted. `quote()` returns each component
+  separately so `postRoomCharge()` can itemize them; extras post as `reservation`-sourced lines, so
+  idempotency, cancel reversal and the delete guard cover them for free.
 - **`promo_rate` is never client-supplied**: `promo_rates` holds an admin-set `multiplier` per
   booking source (room-specific wins, `PromoRatesTable::multiplierFor()`); add/edit stamp
   base × multiplier server-side.
