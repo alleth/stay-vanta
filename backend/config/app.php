@@ -54,6 +54,10 @@ return [
         'encoding' => env('APP_ENCODING', 'UTF-8'),
         'defaultLocale' => env('APP_DEFAULT_LOCALE', 'en_US'),
         'defaultTimezone' => env('APP_DEFAULT_TIMEZONE', 'UTC'),
+        // Where the hotels are: decides what "today", a day, a week and a month
+        // mean for reports and day filters. Stored timestamps stay in
+        // defaultTimezone (UTC); see App\Model\BusinessTime.
+        'businessTimezone' => env('APP_BUSINESS_TIMEZONE', 'Asia/Manila'),
         'base' => false,
         'dir' => 'src',
         'webroot' => 'webroot',

@@ -3,9 +3,9 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
-use Cake\I18n\DateTime;
 
 /**
  * Role dashboards.
@@ -47,8 +47,7 @@ class ReportsController extends AppController
             ->count();
 
         // Project the recurring monthly fee onto each period.
-        $now = DateTime::now();
-        $monthsElapsed = (int)$now->format('n'); // Jan = 1 ... current month
+        $monthsElapsed = (int)BusinessTime::now()->format('n'); // Jan = 1 ... current month
 
         $this->set('dashboard', [
             'counts' => [
@@ -95,11 +94,12 @@ class ReportsController extends AppController
         $openFoodOrders = $this->fetchTable('FoodOrders')
             ->find()->where(['property_id' => $propertyId, 'status' => 'open'])->count();
 
-        $now = DateTime::now();
+        // Week/month/year as the hotel counts them, not as UTC does.
+        $now = BusinessTime::now();
         $ranges = [
-            'week' => $now->startOfWeek(),
-            'month' => $now->startOfMonth(),
-            'ytd' => $now->startOfYear(),
+            'week' => BusinessTime::stored($now->startOfWeek()),
+            'month' => BusinessTime::stored($now->startOfMonth()),
+            'ytd' => BusinessTime::stored($now->startOfYear()),
             'all_time' => null,
         ];
 
@@ -131,6 +131,7 @@ class ReportsController extends AppController
                 'open_food_orders' => $openFoodOrders,
             ],
             'revenue' => $revenue,
+            'outstanding' => $this->outstanding($propertyId),
         ]);
         $this->viewBuilder()->setOption('serialize', ['dashboard']);
     }
@@ -164,25 +165,27 @@ class ReportsController extends AppController
         if ($rangeFrom !== null || $rangeTo !== null) {
             $rangeFrom = $this->assertDateFormat($rangeFrom, 'from');
             $rangeTo = $this->assertDateFormat($rangeTo, 'to');
-            $from = DateTime::parse($rangeFrom . ' 00:00:00');
-            $to = DateTime::parse($rangeTo . ' 00:00:00')->addDays(1);
-            if ($to <= $from) {
+            if ($rangeTo < $rangeFrom) {
                 throw new BadRequestException('to must be on or after from.');
             }
+            $from = BusinessTime::startOf($rangeFrom);
+            $to = BusinessTime::endOf($rangeTo);
             $scope = 'range';
             $label = $rangeFrom . ' – ' . $rangeTo;
         } elseif ($month !== null || $year !== null) {
             if (!is_numeric($month) || !is_numeric($year) || (int)$month < 1 || (int)$month > 12) {
                 throw new BadRequestException('Provide a valid month (1-12) and year.');
             }
-            $from = DateTime::create((int)$year, (int)$month, 1, 0, 0, 0);
-            $to = $from->addMonths(1);
+            [$from, $to] = $this->monthBounds((int)$year, (int)$month);
             $scope = 'month';
-            $label = $from->format('Y-m');
+            $label = sprintf('%04d-%02d', (int)$year, (int)$month);
         } else {
-            $date = $this->assertDateFormat($this->request->getQuery('date') ?: date('Y-m-d'), 'date');
-            $from = DateTime::parse($date . ' 00:00:00');
-            $to = $from->addDays(1);
+            $date = $this->assertDateFormat(
+                $this->request->getQuery('date') ?: BusinessTime::todayString(),
+                'date',
+            );
+            $from = BusinessTime::startOf($date);
+            $to = BusinessTime::endOf($date);
             $scope = 'day';
             $label = $date;
         }
@@ -214,8 +217,42 @@ class ReportsController extends AppController
             'invoices' => ['total' => $invTotal, 'count' => (int)($invRow['c'] ?? 0)],
             'food_orders' => ['total' => $foodTotal, 'count' => (int)($foodRow['c'] ?? 0)],
             'total' => round($invTotal + $foodTotal, 2),
+            // Not part of the window: what's still owed right now.
+            'outstanding' => $this->outstanding($propertyId),
         ]);
         $this->viewBuilder()->setOption('serialize', ['collection']);
+    }
+
+    /**
+     * What's been charged but not yet collected: the total still on the
+     * property's open invoices — room charges from Mark paid, food charged to
+     * the room, early check-in fees — until someone settles them on Food &
+     * Orders → Invoices. A snapshot of now, not tied to any date window.
+     *
+     * @return array{total: float, count: int}
+     */
+    private function outstanding(int $propertyId): array
+    {
+        $query = $this->fetchTable('Invoices')->find()
+            ->where(['property_id' => $propertyId, 'status' => 'open']);
+        $row = $query->select(['s' => $query->func()->sum('total'), 'c' => $query->func()->count('*')])
+            ->disableHydration()->first();
+
+        return ['total' => round((float)($row['s'] ?? 0), 2), 'count' => (int)($row['c'] ?? 0)];
+    }
+
+    /**
+     * A calendar month on the hotel's clock, as stored-timezone bounds
+     * `[first moment, first moment of the next month)`.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function monthBounds(int $year, int $month): array
+    {
+        $first = sprintf('%04d-%02d-01', $year, $month);
+        $next = $month === 12 ? sprintf('%04d-01-01', $year + 1) : sprintf('%04d-%02d-01', $year, $month + 1);
+
+        return [BusinessTime::startOf($first), BusinessTime::startOf($next)];
     }
 
     /**
@@ -256,7 +293,7 @@ class ReportsController extends AppController
         }
         $propertyId = (int)$this->currentUser->property_id;
 
-        $year = (string)($this->request->getQuery('year') ?: date('Y'));
+        $year = (string)($this->request->getQuery('year') ?: BusinessTime::now()->format('Y'));
         if (!preg_match('/^\d{4}$/', $year)) {
             throw new BadRequestException('year must be a 4-digit number.');
         }
@@ -267,15 +304,18 @@ class ReportsController extends AppController
         $foodOrders = $this->fetchTable('FoodOrders');
         $months = [];
         for ($m = 1; $m <= 12; $m++) {
-            $from = DateTime::create($year, $m, 1, 0, 0, 0);
-            $to = $from->addMonths(1);
+            [$from, $to] = $this->monthBounds($year, $m);
 
+            // check_in is already a local date, so it's bucketed by the plain
+            // calendar month; only the timestamp columns below need converting.
+            $firstDay = sprintf('%04d-%02d-01', $year, $m);
+            $nextFirstDay = $m === 12 ? sprintf('%04d-01-01', $year + 1) : sprintf('%04d-%02d-01', $year, $m + 1);
             $count = $reservations->find()
                 ->where([
                     'property_id' => $propertyId,
                     'status !=' => 'cancelled',
-                    'check_in >=' => $from->toDateString(),
-                    'check_in <' => $to->toDateString(),
+                    'check_in >=' => $firstDay,
+                    'check_in <' => $nextFirstDay,
                 ])
                 ->count();
 

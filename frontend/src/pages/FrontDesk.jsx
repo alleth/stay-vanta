@@ -23,12 +23,13 @@ import {
 // Standard check-in is from noon; arriving earlier in the day is an early check-in.
 const isEarlyCheckInNow = () => new Date().getHours() < 12
 
-const todayStr = () => new Date().toISOString().slice(0, 10)
+// Today on the device's own clock (the hotel's), not UTC.
+const todayStr = () => new Date().toLocaleDateString('en-CA')
 // Monday of the current week as YYYY-MM-DD.
 function startOfWeek() {
   const d = new Date()
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-  return d.toISOString().slice(0, 10)
+  return d.toLocaleDateString('en-CA')
 }
 
 const RESERVATIONS_PER_PAGE = 25
@@ -508,6 +509,14 @@ export default function FrontDesk() {
                         <Badge bg={r.payment_status === 'paid' ? 'success' : 'secondary'}>
                           {r.payment_status === 'paid' ? 'paid' : 'unpaid'}
                         </Badge>
+                        {/* Marked paid is a desk flag; the money only counts as
+                            collected once the guest's invoice is settled. */}
+                        {r.payment_status === 'paid' && r.room_charge_invoice === 'open' && (
+                          <div className="mt-1 whitespace-nowrap text-[11px] text-amber-700 dark:text-amber-400"
+                            title="Settle it on Food & Orders → Invoices for it to count as collected.">
+                            invoice not settled
+                          </div>
+                        )}
                       </td>
                       <td className="min-w-[170px] text-xs text-muted">
                         <div>Booked: {fmtDateTime(r.created) ?? '—'}</div>

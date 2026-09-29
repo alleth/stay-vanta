@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
 
+use App\Model\BusinessTime;
 use App\Model\Table\UsersTable;
-use Cake\I18n\Date;
 use Cake\I18n\DateTime;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\TestSuite\IntegrationTestTrait;
@@ -118,8 +118,8 @@ class ReservationDiscountsApiTest extends TestCase
     {
         $this->post('/api/reservations', json_encode([
             'room_id' => $this->roomId,
-            'check_in' => Date::today()->format('Y-m-d'),
-            'check_out' => Date::today()->addDays(3)->format('Y-m-d'),
+            'check_in' => BusinessTime::today()->format('Y-m-d'),
+            'check_out' => BusinessTime::today()->addDays(3)->format('Y-m-d'),
             'source' => 'walk_in',
             'guest_name' => 'Test Guest',
             'total_guests' => 3,
@@ -163,8 +163,8 @@ class ReservationDiscountsApiTest extends TestCase
 
         $this->post('/api/reservations', json_encode([
             'room_id' => $this->roomId,
-            'check_in' => Date::today()->format('Y-m-d'),
-            'check_out' => Date::today()->addDays(3)->format('Y-m-d'),
+            'check_in' => BusinessTime::today()->format('Y-m-d'),
+            'check_out' => BusinessTime::today()->addDays(3)->format('Y-m-d'),
             'source' => 'agoda',
             'booking_reference' => 'AG-123',
             'guest_name' => 'Test Guest',
@@ -213,8 +213,8 @@ class ReservationDiscountsApiTest extends TestCase
     {
         $this->post('/api/reservations', json_encode([
             'room_id' => $this->roomId,
-            'check_in' => Date::today()->format('Y-m-d'),
-            'check_out' => Date::today()->addDays(2)->format('Y-m-d'),
+            'check_in' => BusinessTime::today()->format('Y-m-d'),
+            'check_out' => BusinessTime::today()->addDays(2)->format('Y-m-d'),
             'source' => 'walk_in',
             'guest_name' => 'Test Guest',
             'total_guests' => 1,
@@ -247,8 +247,8 @@ class ReservationDiscountsApiTest extends TestCase
         // Authorization header into an array and the request 401s.
         $this->post('/api/reservations', json_encode($extra + [
             'room_id' => $this->roomId,
-            'check_in' => Date::today()->format('Y-m-d'),
-            'check_out' => Date::today()->addDays(3)->format('Y-m-d'),
+            'check_in' => BusinessTime::today()->format('Y-m-d'),
+            'check_out' => BusinessTime::today()->addDays(3)->format('Y-m-d'),
             'source' => 'agoda',
             'booking_reference' => 'AG-456',
             'guest_name' => 'Test Guest',
@@ -284,7 +284,7 @@ class ReservationDiscountsApiTest extends TestCase
     {
         $this->post('/api/reservations', json_encode([
             'room_id' => $this->roomId,
-            'check_out' => Date::today()->addDays(2)->format('Y-m-d'),
+            'check_out' => BusinessTime::today()->addDays(2)->format('Y-m-d'),
             'source' => 'walk_in',
             'guest_name' => 'Test Guest',
             'channel_discount_type' => 'fixed',
@@ -314,8 +314,8 @@ class ReservationDiscountsApiTest extends TestCase
     {
         $this->post('/api/reservations', json_encode([
             'room_id' => $this->roomId,
-            'check_in' => Date::today()->format('Y-m-d'),
-            'check_out' => Date::today()->addDays(2)->format('Y-m-d'),
+            'check_in' => BusinessTime::today()->format('Y-m-d'),
+            'check_out' => BusinessTime::today()->addDays(2)->format('Y-m-d'),
             'source' => 'walk_in',
             'guest_name' => 'Test Guest',
             'discount_beneficiaries' => [

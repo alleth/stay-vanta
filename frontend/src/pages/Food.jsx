@@ -31,7 +31,8 @@ const vatBreakdown = (total) => {
 
 const PAYMENT_METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', maya: 'Maya', gotyme: 'GoTyme' }
 
-const todayStr = () => new Date().toISOString().slice(0, 10)
+// Today on the device's own clock (the hotel's), not UTC.
+const todayStr = () => new Date().toLocaleDateString('en-CA')
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : '—')
 
 export default function Food() {

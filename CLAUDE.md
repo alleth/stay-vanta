@@ -179,7 +179,16 @@ would make the key attacker-controlled.
 ### Money: revenue, invoices, receipts
 - **Hotel revenue = collected**: Σ settled `invoices.total` (by `settled_at`, stamped in
   `InvoicesController::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room food
-  already lives inside invoices, so only `paid` orders are added.
+  already lives inside invoices, so only `paid` orders are added. **Marking a reservation paid is
+  not collecting it**: it posts the room charge to the guest's *open* invoice, which counts only
+  once settled (Settle is where SI/OR booklet numbers are assigned — deliberately kept). So reports
+  also return `outstanding` (Σ open invoices), shown as "Not yet settled" on the Dashboard, and
+  the Reservations table flags "invoice not settled" (`room_charge_invoice`).
+- **Days are the hotel's, not UTC's.** Timestamps are stored UTC, but "today", daily/weekly/monthly
+  windows and every day filter go through `App\Model\BusinessTime` (`App.businessTimezone`, env
+  `APP_BUSINESS_TIMEZONE`, default Asia/Manila): `startOf()`/`endOf()` for datetime bounds,
+  `today()` for comparing date columns. Never `Date::today()`/`date('Y-m-d')` for business dates.
+  The frontend's `todayStr()` uses `toLocaleDateString('en-CA')` (local), never `toISOString()`.
 - Invoice lines go through `InvoicesTable` (`openInvoiceFor()`, `addLine()`, `invoiceForLine()`,
   `removeLinesFor()` — which recomputes the total from remaining lines, so multi-line reversals are
   order-independent). **Discounts are always itemized as their own negative lines** naming who got

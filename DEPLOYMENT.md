@@ -32,6 +32,7 @@ Create a service from this repo, then set its **Root Directory** to `backend`
 | `DEBUG` | `false` | Never `true` in production. |
 | `APP_FULL_BASE_URL` | `https://<your-api>.up.railway.app` | **Required** — the API blocks requests otherwise (Host-header protection). |
 | `CORS_ORIGINS` | `https://<your-app>.pages.dev` | Comma-separated; the SPA's origin(s). Without this the browser blocks the SPA in prod. |
+| `APP_BUSINESS_TIMEZONE` | `Asia/Manila` | *Optional* (that's the default). Where the hotels are — what "today" and the report day/week/month cut-offs mean. Leave `APP_DEFAULT_TIMEZONE` unset (UTC): stored timestamps are UTC. |
 
 > `DATABASE_URL` is a full DSN (`mysql://user:pass@host:port/db`). If you prefer
 > discrete vars, set `DB_HOST/DB_PORT/DB_USERNAME/DB_PASSWORD/DB_DATABASE` instead.

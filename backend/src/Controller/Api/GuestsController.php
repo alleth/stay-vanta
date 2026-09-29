@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
 
 /**
@@ -62,7 +63,8 @@ class GuestsController extends AppController
     public function stats(): void
     {
         $guests = $this->fetchTable('Guests');
-        $startOfToday = date('Y-m-d 00:00:00');
+        // The hotel's midnight, not UTC's (see BusinessTime).
+        $startOfToday = BusinessTime::startOf(BusinessTime::todayString());
         $base = fn () => $this->scopeToProperty($guests->find())
             ->where(['Guests.created >=' => $startOfToday]);
 

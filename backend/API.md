@@ -17,11 +17,16 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
 - `GET /api/reports/owner-dashboard` (owner-only) — subscription revenue (week/month/YTD from
   each subscriber's monthly fee) + counts (hotels, active subscriptions, admins).
 - `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items,
-  occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time).
+  occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time) +
+  `outstanding` `{total, count}` (see below).
 - `GET /api/reports/daily-collection[?date=YYYY-MM-DD | ?month=&year= | ?from=&to=]` — money
   collected in the window (settled invoices by `settled_at` + paid food orders); defaults to
   today. **The month+year and from/to forms are owner/admin-only** — a receptionist may only view
-  one day (their entire Dashboard is this report).
+  one day (their entire Dashboard is this report). Also returns `outstanding` `{total, count}`:
+  what's on the property's **open** invoices right now (Mark-paid room charges, charged food…) —
+  not collected until settled, and not tied to the window.
+- All report dates/weeks/months are the **hotel's** (`App.businessTimezone`, default
+  Asia/Manila), not UTC — see `App\Model\BusinessTime`.
 - `GET /api/reports/monthly-summary[?year=YYYY]` (**admin-only**, own property) — seasonality per
   calendar month of the year (default current): count of non-cancelled reservations (bucketed by
   `check_in`) and collected revenue (same definition as `admin-dashboard`). One pair of queries
@@ -89,7 +94,8 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the
   built-in row).
 - `GET /api/reservations[?status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]` →
-  `{reservations,total,page,limit}`, each row with a computed `quote`. `since` is the table's
+  `{reservations,total,page,limit}`, each row with a computed `quote` and `room_charge_invoice`
+  (`null` = room charge not posted yet, `open` = on the guest's tab but not collected, `settled`). `since` is the table's
   window (booked/checked-in always; checked-out/cancelled only if that happened on/after it);
   `on_date` = non-cancelled stays touching the date (Calendar tab). `limit` is clamped 5–100 only
   when passed; omitted, it's the old wide window (200) — Food & Orders' checked-in picker relies on it.

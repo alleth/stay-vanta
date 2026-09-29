@@ -12,7 +12,9 @@ import { StatCard } from '../components/StatCard'
 // never pays for it.
 const Chart = lazy(() => import('react-apexcharts'))
 
-const todayStr = () => new Date().toISOString().slice(0, 10)
+// Today on the device's own clock (the hotel's), not UTC — toISOString() would
+// still say "yesterday" until 8 AM in Manila.
+const todayStr = () => new Date().toLocaleDateString('en-CA')
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -147,6 +149,7 @@ function CollectionReport({ allowMonthly }) {
           {data && (
             <span className="ml-auto text-sm text-muted">
               {data.invoices.count} settled invoice(s) · {data.food_orders.count} paid food order(s)
+              {data.outstanding?.count > 0 && ` · ${data.outstanding.count} open invoice(s)`}
             </span>
           )}
         </Card.Body>
@@ -161,8 +164,18 @@ function CollectionReport({ allowMonthly }) {
             { label: 'Total collected', value: data.total },
             { label: 'Invoices settled', value: data.invoices.total },
             { label: 'Food orders paid', value: data.food_orders.total },
+            // Not part of the window above: what's charged right now but not
+            // yet collected — room charges from Mark paid, food charged to the
+            // room — until the invoice is settled on Food & Orders → Invoices.
+            { label: 'Not yet settled', value: data.outstanding?.total ?? 0 },
           ]}
         />
+      )}
+      {!rangeInvalid && data?.outstanding?.total > 0 && (
+        <p className="-mt-5 mb-8 text-xs text-muted">
+          “Not yet settled” is what’s on open invoices right now (e.g. reservations marked paid). It
+          counts as collected once the invoice is settled on Food &amp; Orders → Invoices.
+        </p>
       )}
     </>
   )

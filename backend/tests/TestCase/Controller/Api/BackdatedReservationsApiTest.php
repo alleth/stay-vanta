@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
 
+use App\Model\BusinessTime;
 use App\Model\Table\UsersTable;
-use Cake\I18n\Date;
 use Cake\I18n\DateTime;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\TestSuite\IntegrationTestTrait;
@@ -105,9 +105,21 @@ class BackdatedReservationsApiTest extends TestCase
         ]);
     }
 
+    /**
+     * A date relative to the hotel's today (what "past" is measured against).
+     */
     private function day(int $offset): string
     {
-        return Date::today()->addDays($offset)->format('Y-m-d');
+        return BusinessTime::today()->addDays($offset)->format('Y-m-d');
+    }
+
+    /**
+     * The hotel-local date of a serialized timestamp — stored times are UTC,
+     * so a local midnight reads as the previous day in UTC.
+     */
+    private function localDay(string $timestamp): string
+    {
+        return DateTime::parse($timestamp)->setTimezone(BusinessTime::timezone())->format('Y-m-d');
     }
 
     /**
@@ -180,8 +192,8 @@ class BackdatedReservationsApiTest extends TestCase
         $this->assertSame('checked_out', $reservation['status']);
         $this->assertSame($this->day(-5), $reservation['check_in']);
         // The event times are the stay's own dates, not the moment of entry.
-        $this->assertStringStartsWith($this->day(-5), $reservation['checked_in_at']);
-        $this->assertStringStartsWith($this->day(-2), $reservation['checked_out_at']);
+        $this->assertSame($this->day(-5), $this->localDay($reservation['checked_in_at']));
+        $this->assertSame($this->day(-2), $this->localDay($reservation['checked_out_at']));
         $this->assertSame('available', $this->getTableLocator()->get('Rooms')->get($this->roomId)->status);
     }
 
@@ -265,8 +277,8 @@ class BackdatedReservationsApiTest extends TestCase
         $saved = json_decode((string)$this->_response->getBody(), true)['reservation'];
         $this->assertSame('checked_out', $saved['status']);
         // The recorded moments move with the dates.
-        $this->assertStringStartsWith($this->day(-6), $saved['checked_in_at']);
-        $this->assertStringStartsWith($this->day(-1), $saved['checked_out_at']);
+        $this->assertSame($this->day(-6), $this->localDay($saved['checked_in_at']));
+        $this->assertSame($this->day(-1), $this->localDay($saved['checked_out_at']));
     }
 
     public function testAFinishedStayCannotBeMovedToEndAfterToday(): void

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
@@ -66,7 +67,7 @@ class ReservationsController extends AppController
 
         $since = $this->queryDate('since');
         if ($since !== null) {
-            $from = $since . ' 00:00:00';
+            $from = BusinessTime::startOf($since);
             $query->where(['OR' => [
                 'Reservations.status IN' => ReservationsTable::HOLDS_ROOM,
                 ['Reservations.status' => 'checked_out', 'Reservations.checked_out_at >=' => $from],
@@ -89,15 +90,19 @@ class ReservationsController extends AppController
         $page = max(1, (int)($this->request->getQuery('page') ?? 1));
         $query->limit($limit)->offset(($page - 1) * $limit);
 
-        // Attach a price quote to each reservation.
-        $rows = $query->all()->map(function (Reservation $r) use ($reservations) {
-            $r->set('quote', $reservations->quote($r, $this->resolveBaseRate((int)$r->property_id, $r->room_id)));
+        $rows = $query->all()->toList();
+        $chargeStatus = $this->roomChargeStatuses(array_map(fn(Reservation $r): int => (int)$r->id, $rows));
 
-            return $r;
-        });
+        // Attach a price quote to each reservation, and where its room charge
+        // stands: null (not posted yet), 'open' (on the guest's tab, not yet
+        // collected) or 'settled' (collected).
+        foreach ($rows as $r) {
+            $r->set('quote', $reservations->quote($r, $this->resolveBaseRate((int)$r->property_id, $r->room_id)));
+            $r->set('room_charge_invoice', $chargeStatus[(int)$r->id] ?? null);
+        }
 
         $this->set([
-            'reservations' => $rows->toList(),
+            'reservations' => $rows,
             'total' => $total,
             'page' => $page,
             'limit' => $limit,
@@ -118,18 +123,18 @@ class ReservationsController extends AppController
     public function stats(): void
     {
         $reservations = $this->fetchTable('Reservations');
-        $today = Date::today()->format('Y-m-d');
+        $today = BusinessTime::today()->format('Y-m-d');
         $count = fn(array $where): int => $this->scopeToProperty($reservations->find()->where($where))->count();
 
         $this->set([
             'booked' => $count(['Reservations.status' => 'booked']),
             'checked_out_today' => $count([
                 'Reservations.status' => 'checked_out',
-                'Reservations.checked_out_at >=' => $today . ' 00:00:00',
+                'Reservations.checked_out_at >=' => BusinessTime::startOf($today),
             ]),
             'cancelled_today' => $count([
                 'Reservations.status' => 'cancelled',
-                'Reservations.cancelled_at >=' => $today . ' 00:00:00',
+                'Reservations.cancelled_at >=' => BusinessTime::startOf($today),
             ]),
             'unpaid' => $count([
                 'Reservations.status !=' => 'cancelled',
@@ -137,6 +142,37 @@ class ReservationsController extends AppController
             ]),
         ]);
         $this->viewBuilder()->setOption('serialize', ['booked', 'checked_out_today', 'cancelled_today', 'unpaid']);
+    }
+
+    /**
+     * The status of the invoice each reservation's room charge sits on, keyed
+     * by reservation id — one query for the whole page. "Marked paid" is only
+     * a Front Desk flag; the money counts as collected once that invoice is
+     * settled, so the table needs this to show which paid stays are still
+     * sitting on an open tab.
+     *
+     * @param list<int> $ids
+     * @return array<int, string> reservation id → 'open' | 'settled'
+     */
+    private function roomChargeStatuses(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $rows = $this->fetchTable('InvoiceLines')->find()
+            ->select(['source_id', 'status' => 'Invoices.status'])
+            ->innerJoinWith('Invoices')
+            ->where(['InvoiceLines.source_type' => 'reservation', 'InvoiceLines.source_id IN' => $ids])
+            ->disableHydration()
+            ->all();
+
+        $statuses = [];
+        foreach ($rows as $row) {
+            $statuses[(int)$row['source_id']] = (string)$row['status'];
+        }
+
+        return $statuses;
     }
 
     /**
@@ -263,7 +299,7 @@ class ReservationsController extends AppController
                 $isWalkIn = $source === BookingSourcesTable::WALK_IN;
                 $channelDiscount = $this->resolveChannelDiscount($source);
                 $checkIn = $isWalkIn && !$backdated
-                    ? Date::today()->format('Y-m-d')
+                    ? BusinessTime::today()->format('Y-m-d')
                     : $this->request->getData('check_in');
                 $checkOut = $this->request->getData('check_out');
 
@@ -275,10 +311,10 @@ class ReservationsController extends AppController
                 $checkedInAt = $isWalkIn ? new DateTime() : null;
                 $checkedOutAt = null;
                 if ($backdated) {
-                    $ended = is_string($checkOut) && $checkOut <= Date::today()->format('Y-m-d');
+                    $ended = is_string($checkOut) && $checkOut <= BusinessTime::today()->format('Y-m-d');
                     $status = $ended ? 'checked_out' : 'checked_in';
-                    $checkedInAt = new DateTime($checkIn);
-                    $checkedOutAt = $ended ? new DateTime($checkOut) : null;
+                    $checkedInAt = BusinessTime::midnightOf($checkIn);
+                    $checkedOutAt = $ended ? BusinessTime::midnightOf($checkOut) : null;
                 }
 
                 $reservation = $reservations->newEntity([
@@ -557,7 +593,7 @@ class ReservationsController extends AppController
      */
     private function correctStay(Reservation $reservation): void
     {
-        $today = Date::today();
+        $today = BusinessTime::today();
         if ($reservation->check_in instanceof Date && $reservation->check_in->greaterThan($today)) {
             throw new BadRequestException("A stay that's already begun can't start after today.");
         }
@@ -579,7 +615,7 @@ class ReservationsController extends AppController
             if ($original instanceof Date && $original->equals($date)) {
                 continue;
             }
-            $reservation->set($atField, $at->setDate($date->year, $date->month, $date->day));
+            $reservation->set($atField, BusinessTime::onDate($at, $date->format('Y-m-d')));
         }
     }
 
@@ -672,8 +708,8 @@ class ReservationsController extends AppController
                 'property_id' => $reservation->property_id,
                 'guest_id' => $reservation->guest_id,
                 'status !=' => 'cancelled',
-                'created >=' => $reservation->check_in->format('Y-m-d') . ' 00:00:00',
-                'created <' => $reservation->check_out->addDays(1)->format('Y-m-d') . ' 00:00:00',
+                'created >=' => BusinessTime::startOf($reservation->check_in->format('Y-m-d')),
+                'created <' => BusinessTime::endOf($reservation->check_out->format('Y-m-d')),
             ]);
             if ($ordered) {
                 return 'the guest has food orders during this stay';
@@ -1394,7 +1430,7 @@ class ReservationsController extends AppController
     {
         return is_string($value)
             && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1
-            && $value < Date::today()->format('Y-m-d');
+            && $value < BusinessTime::today()->format('Y-m-d');
     }
 
     /**
@@ -1408,7 +1444,7 @@ class ReservationsController extends AppController
      */
     private function collectAdvanceDownpayment(Reservation $reservation, int $propertyId, int $guestId): void
     {
-        if ($reservation->check_in === null || $reservation->check_in <= Date::today()) {
+        if ($reservation->check_in === null || $reservation->check_in <= BusinessTime::today()) {
             return;
         }
 

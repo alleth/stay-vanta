@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\ORM\Query\SelectQuery;
@@ -61,8 +62,8 @@ class FoodOrdersController extends AppController
         if ($date === null || $date === 'all' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             return;
         }
-        $next = date('Y-m-d', strtotime($date . ' +1 day'));
-        $query->where([$column . ' >=' => $date . ' 00:00:00', $column . ' <' => $next . ' 00:00:00']);
+        // The hotel's day, not UTC's (see BusinessTime).
+        $query->where([$column . ' >=' => BusinessTime::startOf($date), $column . ' <' => BusinessTime::endOf($date)]);
     }
 
     /**

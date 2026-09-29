@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Model\Table;
 
+use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
 use Cake\I18n\Date;
@@ -193,7 +194,7 @@ class ReservationsTable extends Table
                 // checked out, so it holds no room — but it still can't share
                 // nights with a stay that really did happen in that room.
                 $recordingPast = $reservation->check_in instanceof Date
-                    && $reservation->check_in->lessThan(Date::today())
+                    && $reservation->check_in->lessThan(BusinessTime::today())
                     && (
                         $reservation->isNew()
                         || (

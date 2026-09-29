@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
 use Cake\I18n\DateTime;
 use RuntimeException;
@@ -33,13 +34,15 @@ class InvoicesController extends AppController
         // (an unsettled invoice from a previous day must not disappear).
         $date = $this->request->getQuery('date');
         if ($date !== null && $date !== 'all' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            $next = date('Y-m-d', strtotime($date . ' +1 day'));
-            $query->where(function (\Cake\Database\Expression\QueryExpression $exp) use ($date, $next) {
+            // The hotel's day, not UTC's (see BusinessTime).
+            $from = BusinessTime::startOf($date);
+            $to = BusinessTime::endOf($date);
+            $query->where(function (\Cake\Database\Expression\QueryExpression $exp) use ($from, $to) {
                 return $exp->or([
                     'Invoices.status' => 'open',
                     $exp->and([
-                        'Invoices.created >=' => $date . ' 00:00:00',
-                        'Invoices.created <' => $next . ' 00:00:00',
+                        'Invoices.created >=' => $from,
+                        'Invoices.created <' => $to,
                     ]),
                 ]);
             });
