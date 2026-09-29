@@ -51,6 +51,15 @@ export const deletePromoRate = (id) =>
 export const listReservations = (propertyId, params = {}) =>
   client.get('/reservations', { params: withProp(params, propertyId) }).then((r) => r.data.reservations)
 
+// The Reservations table's paginated view → {reservations, total, page, limit}.
+// `since` (YYYY-MM-DD) keeps finished stays from before it out; omit for all.
+export const pageReservations = (propertyId, params = {}) =>
+  client.get('/reservations', { params: withProp(params, propertyId) }).then((r) => r.data)
+
+// The summary cards → {booked, checked_out_today, cancelled_today, unpaid}.
+export const reservationStats = (propertyId) =>
+  client.get('/reservations/stats', { params: withProp({}, propertyId) }).then((r) => r.data)
+
 export const createReservation = (data, propertyId) =>
   client.post('/reservations', withProp(data, propertyId)).then((r) => r.data.reservation)
 

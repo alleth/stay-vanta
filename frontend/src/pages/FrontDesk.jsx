@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ListGroup, InputGroup,
+  Tab, Tabs, Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ListGroup, InputGroup, Pagination,
 } from '../components/ui'
 import { useProperty } from '../context/PropertyContext'
 import { useAuth } from '../context/AuthContext'
@@ -14,7 +14,8 @@ import {
   listRoomRates, createRoomRate, updateRoomRate,
   listBookingSources,
   listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
-  listReservations, createReservation, updateReservation, deleteReservation, transitionReservation,
+  listReservations, pageReservations, reservationStats,
+  createReservation, updateReservation, deleteReservation, transitionReservation,
   setReservationPayment,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
@@ -29,7 +30,8 @@ function startOfWeek() {
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
   return d.toISOString().slice(0, 10)
 }
-const dateOf = (ts) => (ts ? new Date(ts).toISOString().slice(0, 10) : null)
+
+const RESERVATIONS_PER_PAGE = 25
 
 // 'walk_in' is fixed — always available, never admin-managed, never eligible
 // for a promo rate. Every other source comes from the property's own
@@ -148,7 +150,14 @@ export default function FrontDesk() {
   const [rates, setRates] = useState([])
   const [bookingSources, setBookingSources] = useState([])
   const [promoRates, setPromoRates] = useState([])
-  const [reservations, setReservations] = useState([])
+  // Three separate views of reservations, each fetched for its own purpose —
+  // the table's current page, the calendar date's stays, and the card counts —
+  // so none of them is computed from a truncated list.
+  const [reservations, setReservations] = useState([]) // the table's page
+  const [resTotal, setResTotal] = useState(0)
+  const [resPage, setResPage] = useState(1)
+  const [calReservations, setCalReservations] = useState([])
+  const [resStats, setResStats] = useState({ booked: 0, checked_out_today: 0, cancelled_today: 0, unpaid: 0 })
   const [extraCharges, setExtraCharges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -161,18 +170,32 @@ export default function FrontDesk() {
   const [earlyConfirm, setEarlyConfirm] = useState(null) // reservation pending an early check-in
   const today = todayStr()
 
+  // Front Desk shows a "fresh start" each day: pending bookings (booked /
+  // checked_in) always show, but completed transactions (checked_out /
+  // cancelled) only show if they happened within the selected window — the
+  // server applies it, since the table is paginated there.
+  const since = resFilter === 'all' ? undefined : resFilter === 'week' ? startOfWeek() : today
+
   const refresh = useCallback(async () => {
     if (!propertyId) return
     try {
-      const [rm, rt, bs, pr, rs, ec] = await Promise.all([
+      const [rm, rt, bs, pr, pageData, cal, st, ec] = await Promise.all([
         listRooms(propertyId), listRoomRates(propertyId), listBookingSources(propertyId),
-        listPromoRates(propertyId), listReservations(propertyId), listExtraCharges(propertyId),
+        listPromoRates(propertyId),
+        pageReservations(propertyId, { page: resPage, limit: RESERVATIONS_PER_PAGE, since }),
+        listReservations(propertyId, { on_date: calDate }),
+        reservationStats(propertyId), listExtraCharges(propertyId),
       ])
       setRooms(rm)
       setRates(rt)
       setBookingSources(bs)
       setPromoRates(pr)
-      setReservations(rs)
+      // A delete can empty the last page; step back rather than show nothing.
+      if (pageData.reservations.length === 0 && resPage > 1) setResPage((p) => p - 1)
+      setReservations(pageData.reservations)
+      setResTotal(pageData.total ?? 0)
+      setCalReservations(cal)
+      setResStats(st)
       setExtraCharges(ec)
       setError(null)
     } catch {
@@ -180,7 +203,7 @@ export default function FrontDesk() {
     } finally {
       setLoading(false)
     }
-  }, [propertyId])
+  }, [propertyId, resPage, since, calDate])
 
   // The active early check-in fee (0 if none) — shown in the warning and billed
   // automatically by the backend when an early check-in is confirmed.
@@ -204,35 +227,25 @@ export default function FrontDesk() {
     available: rooms.filter((r) => r.status === 'available').length,
     occupied: rooms.filter((r) => r.status === 'occupied').length,
     maintenance: rooms.filter((r) => r.status === 'maintenance').length,
-    reservations: reservations.filter((r) => r.status === 'booked').length,
-    checkedOutToday: reservations.filter((r) => r.status === 'checked_out' && dateOf(r.checked_out_at) === today).length,
-    cancelledToday: reservations.filter((r) => r.status === 'cancelled' && dateOf(r.cancelled_at) === today).length,
-  }), [rooms, reservations, today])
+    reservations: resStats.booked,
+    checkedOutToday: resStats.checked_out_today,
+    cancelledToday: resStats.cancelled_today,
+    unpaid: resStats.unpaid ?? 0,
+  }), [rooms, resStats])
 
-  // Front Desk shows a "fresh start" each day: pending bookings (booked /
-  // checked_in) always show, but completed transactions (checked_out / cancelled)
-  // only show if they happened within the selected window (today / this week / all).
-  const visibleReservations = useMemo(() => {
-    if (resFilter === 'all') return reservations
-    const from = resFilter === 'week' ? startOfWeek() : today
-    return reservations.filter((r) => {
-      if (r.status === 'booked' || r.status === 'checked_in') return true
-      const when = r.status === 'cancelled' ? dateOf(r.cancelled_at) : dateOf(r.checked_out_at)
-      return when !== null && when >= from
-    })
-  }, [reservations, resFilter, today])
+  const resPages = Math.max(1, Math.ceil(resTotal / RESERVATIONS_PER_PAGE))
 
-  // Date filter: which rooms are free, and which reservations fall on calDate.
-  // A reservation occupies a room for the nights [check_in, check_out), so the
-  // check-out day itself is free again.
+  // Date filter: which rooms are free, and which reservations fall on calDate
+  // (the server returns only stays touching it). A reservation occupies a room
+  // for the nights [check_in, check_out), so the check-out day is free again.
   const occupiedOnDate = useMemo(() => {
     const occ = new Set()
-    for (const r of reservations) {
+    for (const r of calReservations) {
       if (r.status === 'cancelled' || !r.check_in || !r.check_out) continue
       if (r.check_in <= calDate && calDate < r.check_out) occ.add(r.room_id)
     }
     return occ
-  }, [reservations, calDate])
+  }, [calReservations, calDate])
 
   const availableOnDate = useMemo(
     () => rooms.filter((r) => r.status !== 'maintenance' && !occupiedOnDate.has(r.id)),
@@ -241,10 +254,10 @@ export default function FrontDesk() {
 
   // Reservations touching the date (inclusive of arrival & departure days).
   const reservationsOnDate = useMemo(
-    () => reservations.filter((r) =>
+    () => calReservations.filter((r) =>
       r.status !== 'cancelled' && r.check_in && r.check_out
       && r.check_in <= calDate && calDate <= r.check_out),
-    [reservations, calDate],
+    [calReservations, calDate],
   )
 
   async function runTransition(id, transition, data = {}) {
@@ -376,28 +389,29 @@ export default function FrontDesk() {
 
       {loading ? (
         <>
-          <SkeletonCards count={6} />
+          <SkeletonCards count={7} />
           <SkeletonTable rows={5} />
         </>
       ) : (
         <>
-        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
           <StatCard label="Available rooms" value={counts.available} variant="success" />
           <StatCard label="Occupied rooms" value={counts.occupied} variant="danger" />
           <StatCard label="Maintenance" value={counts.maintenance} variant="warning" />
           <StatCard label="Reservations" value={counts.reservations} variant="primary" />
           <StatCard label="Checked out today" value={counts.checkedOutToday} variant="secondary" />
           <StatCard label="Cancelled today" value={counts.cancelledToday} variant="dark" />
+          <StatCard label="Unpaid" value={counts.unpaid} variant="info" />
         </div>
 
         <Tabs defaultActiveKey="reservations" className="mb-4">
           {/* ---- Reservations ---- */}
-          <Tab eventKey="reservations" title={`Reservations (${visibleReservations.length})`}>
+          <Tab eventKey="reservations" title={`Reservations (${resTotal})`}>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <Form.Group className="mb-0 flex items-center gap-2">
                 <Form.Label className="mb-0 text-muted">Show</Form.Label>
                 <Form.Select size="sm" value={resFilter} style={{ width: 'auto' }}
-                  onChange={(e) => setResFilter(e.target.value)}>
+                  onChange={(e) => { setResFilter(e.target.value); setResPage(1) }}>
                   <option value="today">Today&apos;s activity</option>
                   <option value="week">This week</option>
                   <option value="all">All</option>
@@ -417,10 +431,10 @@ export default function FrontDesk() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleReservations.length === 0 && (
+                  {reservations.length === 0 && (
                     <tr><td colSpan={10} className="py-6 text-center text-muted">No reservations to show.</td></tr>
                   )}
-                  {visibleReservations.map((r) => (
+                  {reservations.map((r) => (
                     <tr key={r.id}
                       className={[
                         r.status === 'cancelled' && 'text-muted',
@@ -540,6 +554,19 @@ export default function FrontDesk() {
                 </tbody>
               </Table>
             </Card>
+            {resTotal > RESERVATIONS_PER_PAGE && (
+              <div className="mt-3 flex items-center justify-end gap-3">
+                <span className="text-sm text-muted">
+                  Page {resPage} of {resPages} · {resTotal} reservation(s)
+                </span>
+                <Pagination>
+                  <Pagination.Prev disabled={resPage <= 1}
+                    onClick={() => setResPage((p) => Math.max(1, p - 1))} />
+                  <Pagination.Next disabled={resPage >= resPages}
+                    onClick={() => setResPage((p) => Math.min(resPages, p + 1))} />
+                </Pagination>
+              </div>
+            )}
           </Tab>
 
           {/* ---- Rooms ---- */}

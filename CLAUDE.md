@@ -258,6 +258,10 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
 - Booking can create a guest inline or reuse one (`guest_id`); `completeGuest()` fills only the
   guest's empty fields, never overwrites.
 
+- **The Reservations tab is paginated server-side** (25/page; the Today/This week/All window is
+  the `since` param), so nothing on `FrontDesk.jsx` may be derived from that page: the summary
+  cards come from `/reservations/stats` and the Calendar from `?on_date=`, each fetched on its own.
+
 ### Food & Orders
 - **`FoodOrdersTable::place()` is the orchestrator**, one transaction: saves order + lines,
   decrements stock for the linked item, every recipe ingredient (per-serving qty × ordered qty) and

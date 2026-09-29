@@ -35,7 +35,17 @@ class ReservationsController extends AppController
     ];
 
     /**
-     * GET /api/reservations[?status=booked]
+     * GET /api/reservations[?status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]
+     *   → {reservations, total, page, limit}
+     *
+     * - `since`: the Front Desk table's "fresh start" window — stays still in
+     *   play (booked / checked in) always show, finished ones (checked out /
+     *   cancelled) only if that happened on or after the date. Omit for all.
+     * - `on_date`: the Calendar tab — non-cancelled stays touching the date,
+     *   arrival and departure days included.
+     * - `limit` pages the result (clamped 5–100) only when a caller passes it;
+     *   omitting it returns the same wide window (200) the endpoint always did,
+     *   which is what Food & Orders' checked-in picker relies on.
      */
     public function index(): void
     {
@@ -45,14 +55,39 @@ class ReservationsController extends AppController
                 // ReservationDiscounts rides along because quote() prices from
                 // it — without it every row would cost one extra query.
                 ->contain(['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts', 'ReservationExtraCharges'])
-                ->orderBy(['Reservations.check_in' => 'DESC'])
-                ->limit(200),
+                // id breaks ties so a page boundary never repeats or skips a row.
+                ->orderBy(['Reservations.check_in' => 'DESC', 'Reservations.id' => 'DESC']),
         );
 
         $status = $this->request->getQuery('status');
         if ($status !== null) {
             $query->where(['Reservations.status' => $status]);
         }
+
+        $since = $this->queryDate('since');
+        if ($since !== null) {
+            $from = $since . ' 00:00:00';
+            $query->where(['OR' => [
+                'Reservations.status IN' => ReservationsTable::HOLDS_ROOM,
+                ['Reservations.status' => 'checked_out', 'Reservations.checked_out_at >=' => $from],
+                ['Reservations.status' => 'cancelled', 'Reservations.cancelled_at >=' => $from],
+            ]]);
+        }
+
+        $onDate = $this->queryDate('on_date');
+        if ($onDate !== null) {
+            $query->where([
+                'Reservations.status !=' => 'cancelled',
+                'Reservations.check_in <=' => $onDate,
+                'Reservations.check_out >=' => $onDate,
+            ]);
+        }
+
+        $total = $query->count();
+        $requestedLimit = $this->request->getQuery('limit');
+        $limit = $requestedLimit !== null ? min(100, max(5, (int)$requestedLimit)) : 200;
+        $page = max(1, (int)($this->request->getQuery('page') ?? 1));
+        $query->limit($limit)->offset(($page - 1) * $limit);
 
         // Attach a price quote to each reservation.
         $rows = $query->all()->map(function (Reservation $r) use ($reservations) {
@@ -61,8 +96,65 @@ class ReservationsController extends AppController
             return $r;
         });
 
-        $this->set('reservations', $rows->toList());
-        $this->viewBuilder()->setOption('serialize', ['reservations']);
+        $this->set([
+            'reservations' => $rows->toList(),
+            'total' => $total,
+            'page' => $page,
+            'limit' => $limit,
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['reservations', 'total', 'page', 'limit']);
+    }
+
+    /**
+     * GET /api/reservations/stats → {booked, checked_out_today, cancelled_today, unpaid}
+     *
+     * The Front Desk summary cards, counted in the database rather than from
+     * whatever page of reservations the table happens to have loaded.
+     *
+     * `unpaid` is every reservation still marked unpaid that isn't cancelled —
+     * a stay already checked out without being paid is exactly the one to
+     * chase, so it counts too.
+     */
+    public function stats(): void
+    {
+        $reservations = $this->fetchTable('Reservations');
+        $today = Date::today()->format('Y-m-d');
+        $count = fn(array $where): int => $this->scopeToProperty($reservations->find()->where($where))->count();
+
+        $this->set([
+            'booked' => $count(['Reservations.status' => 'booked']),
+            'checked_out_today' => $count([
+                'Reservations.status' => 'checked_out',
+                'Reservations.checked_out_at >=' => $today . ' 00:00:00',
+            ]),
+            'cancelled_today' => $count([
+                'Reservations.status' => 'cancelled',
+                'Reservations.cancelled_at >=' => $today . ' 00:00:00',
+            ]),
+            'unpaid' => $count([
+                'Reservations.status !=' => 'cancelled',
+                'Reservations.payment_status' => 'unpaid',
+            ]),
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['booked', 'checked_out_today', 'cancelled_today', 'unpaid']);
+    }
+
+    /**
+     * A `Y-m-d` query parameter, or null when it's absent.
+     *
+     * @throws \Cake\Http\Exception\BadRequestException When it's present but malformed.
+     */
+    private function queryDate(string $name): ?string
+    {
+        $value = $this->request->getQuery($name);
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_string($value) || preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) !== 1) {
+            throw new BadRequestException("{$name} must be a YYYY-MM-DD date.");
+        }
+
+        return $value;
     }
 
     /**

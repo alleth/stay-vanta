@@ -155,6 +155,7 @@ return function (RouteBuilder $routes): void {
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         $builder->get('/reservations', ['controller' => 'Reservations', 'action' => 'index']);
+        $builder->get('/reservations/stats', ['controller' => 'Reservations', 'action' => 'stats']);
         $builder->post('/reservations', ['controller' => 'Reservations', 'action' => 'add']);
         $builder->patch('/reservations/{id}', ['controller' => 'Reservations', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);

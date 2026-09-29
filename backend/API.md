@@ -88,7 +88,15 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; amount/active — the built-in row's
   name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the
   built-in row).
-- `GET|POST /api/reservations[?status=]`
+- `GET /api/reservations[?status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]` →
+  `{reservations,total,page,limit}`, each row with a computed `quote`. `since` is the table's
+  window (booked/checked-in always; checked-out/cancelled only if that happened on/after it);
+  `on_date` = non-cancelled stays touching the date (Calendar tab). `limit` is clamped 5–100 only
+  when passed; omitted, it's the old wide window (200) — Food & Orders' checked-in picker relies on it.
+- `GET /api/reservations/stats` → `{booked, checked_out_today, cancelled_today, unpaid}` (Front
+  Desk summary cards, counted in the database; `unpaid` = non-cancelled reservations whose
+  `payment_status` is still `unpaid`, checked-out ones included).
+- `POST /api/reservations`
   - `walk_in` source → saved straight to `checked_in`, `check_in` forced to today, room flipped
     to `occupied`.
   - Any other source requires `booking_reference`; may carry `sold_rate` and a channel discount

@@ -332,6 +332,51 @@ class BackdatedReservationsApiTest extends TestCase
         $this->assertTrue($this->getTableLocator()->get('Reservations')->exists(['id' => $stay['id']]));
     }
 
+    public function testTheListPagesAndAppliesTheSinceWindow(): void
+    {
+        // Six finished stays, back to back, all well before today.
+        for ($i = 0; $i < 6; $i++) {
+            $this->recordPastStay(-40 + $i * 3, -38 + $i * 3);
+        }
+
+        $this->authedAs($this->receptionistToken);
+        $this->get('/api/reservations?page=2&limit=5');
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $body = json_decode((string)$this->_response->getBody(), true);
+        $this->assertSame(6, $body['total']);
+        $this->assertCount(1, $body['reservations']);
+
+        // "Today's activity" hides stays that finished before today.
+        $this->authedAs($this->receptionistToken);
+        $this->get('/api/reservations?limit=25&since=' . $this->day(0));
+        $body = json_decode((string)$this->_response->getBody(), true);
+        $this->assertSame(0, $body['total']);
+
+        // The Calendar sees the stay touching a date, and only that one.
+        $this->authedAs($this->receptionistToken);
+        $this->get('/api/reservations?on_date=' . $this->day(-39));
+        $body = json_decode((string)$this->_response->getBody(), true);
+        $this->assertSame(1, $body['total']);
+    }
+
+    public function testStatsCountInTheDatabaseNotFromAPage(): void
+    {
+        $this->recordPastStay(-5, -2);
+        $this->recordPastStay(-2, 0);
+
+        $this->authedAs($this->receptionistToken);
+        $this->get('/api/reservations/stats');
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $stats = json_decode((string)$this->_response->getBody(), true);
+
+        // Only the stay ending today was checked out today.
+        $this->assertSame(1, $stats['checked_out_today']);
+        $this->assertSame(0, $stats['booked']);
+        $this->assertSame(0, $stats['cancelled_today']);
+        // Neither was marked paid — a finished stay still owing counts.
+        $this->assertSame(2, $stats['unpaid']);
+    }
+
     public function testAFoodOrderDuringTheStayBlocksDelete(): void
     {
         $stay = $this->recordPastStay(-5, -2, ['guest_name' => 'Hungry Guest']);
