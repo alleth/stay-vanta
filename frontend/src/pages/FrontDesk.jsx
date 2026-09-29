@@ -90,6 +90,18 @@ const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : null)
 // (negative), then the total and any advance-booking downpayment. Shared by
 // the side rail (wider screens) and the Pricing section (phones) so the two
 // can't drift apart.
+// Why a reservation can't be edited by this user, or null when it can. The
+// row always opens; this decides whether the modal opens editable or as a
+// read-only view. Mirrors ReservationsController::edit()/delete().
+function editBlockReason(r, isAdmin) {
+  if (r.room_charge_invoice === 'settled') {
+    return 'Its invoice is settled, so it can no longer be edited or deleted.'
+  }
+  if (r.status === 'cancelled') return 'A cancelled reservation can’t be edited.'
+  if (r.status !== 'booked' && !isAdmin) return 'Only an admin can change a stay that’s checked in or out.'
+  return null
+}
+
 function EstimateBreakdown({ subtotalLabel, subtotal, discounts, extras = [], total, downpayment }) {
   if (subtotal <= 0) {
     return <div className="sv-serif mt-1 text-xl font-bold">—</div>
@@ -146,11 +158,9 @@ export default function FrontDesk() {
   // Anyone can fix a booking before check-in; an admin can also correct (or
   // delete) a stay that's under way or over — the backend decides the rest.
   const isAdmin = role === 'admin'
-  // Once its invoice is settled a reservation is part of the books: no edit,
-  // no delete, no "Mark unpaid" (the backend refuses all three too).
+  // Every row opens its reservation; whether it opens editable is
+  // editBlockReason()'s call (the backend enforces the same rules).
   const isSettled = (r) => r.room_charge_invoice === 'settled'
-  const canOpenReservation = (r) => !isSettled(r) && (r.status === 'booked'
-    || (isAdmin && (r.status === 'checked_in' || r.status === 'checked_out')))
   const [rooms, setRooms] = useState([])
   const [rates, setRates] = useState([])
   const [bookingSources, setBookingSources] = useState([])
@@ -443,12 +453,12 @@ export default function FrontDesk() {
                     <tr key={r.id}
                       className={[
                         r.status === 'cancelled' && 'text-muted',
-                        canOpenReservation(r) && 'cursor-pointer',
-                      ].filter(Boolean).join(' ') || undefined}
-                      title={canOpenReservation(r)
-                        ? (isAdmin ? 'Click to edit or delete' : 'Click to edit this booking')
-                        : undefined}
-                      onClick={() => canOpenReservation(r) && setModal({ type: 'reservation', reservation: r })}>
+                        'cursor-pointer',
+                      ].filter(Boolean).join(' ')}
+                      title={editBlockReason(r, isAdmin)
+                        ? 'Click to view the details'
+                        : isAdmin ? 'Click to view, edit or delete' : 'Click to view or edit this booking'}
+                      onClick={() => setModal({ type: 'reservation', reservation: r })}>
                       <td className="font-semibold">
                         {r.guest?.full_name ?? '—'}{' '}
                         {r.guest && (
@@ -1003,6 +1013,11 @@ function ReservationModal({
   // checked out if it's over, checked in if the guest is still here.
   const { role } = useAuth()
   const canBackdate = role === 'admin'
+  // Opened on a reservation this user can't change (settled, cancelled, or a
+  // stay only an admin may correct): same form, every field disabled, no
+  // Save/Delete — a view of all its details.
+  const readOnlyReason = editing ? editBlockReason(reservation, canBackdate) : null
+  const readOnly = readOnlyReason !== null
   const isPast = !editing && Boolean(form.check_in) && form.check_in < todayStr()
   const pastEnded = isPast && Boolean(form.check_out) && form.check_out <= todayStr()
   // A stay that's under way or over (admin-only to edit) keeps its status, so
@@ -1215,11 +1230,30 @@ function ReservationModal({
 
   return (
     <Modal show onHide={onClose} centered size="xl">
-      <Form onSubmit={(e) => { e.preventDefault(); book(false) }}>
+      <Form onSubmit={(e) => { e.preventDefault(); if (!readOnly) book(false) }}>
         <Modal.Header closeButton>
-          <Modal.Title>{editing ? 'Edit reservation' : 'New reservation'}</Modal.Title>
+          <Modal.Title>
+            {readOnly ? 'Reservation details' : editing ? 'Edit reservation' : 'New reservation'}
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body className="p-0">
+         {readOnly && (
+          <div className="border-b border-line bg-subtle px-4 py-3 text-sm">
+            <span className="font-medium">{reservation.status.replace('_', ' ')}</span>
+            {' · '}{reservation.payment_status === 'paid' ? 'paid' : 'unpaid'}
+            {reservation.room_charge_invoice && ` · invoice ${reservation.room_charge_invoice}`}
+            <span className="text-muted"> — view only. {readOnlyReason}</span>
+            {reservation.room_charge_invoice && (
+              <div className="mt-1 text-xs text-muted">
+                The billed amounts are on the guest’s invoice (Invoices tab); the estimate below is
+                re-quoted from today’s rates.
+              </div>
+            )}
+          </div>
+         )}
+         {/* A disabled fieldset makes every control inside inert at once, so a
+             read-only view can't drift from the editable form it mirrors. */}
+         <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
          <div className="flex flex-col md:flex-row">
           {/* The rail is the booking type. Unlike tabs over one required
               form, hiding the channel fields for a walk-in is correct: a
@@ -1633,7 +1667,7 @@ function ReservationModal({
                 <EstimateBreakdown {...estimate} />
               </div>
             )}
-            {downpayment > 0 && (
+            {downpayment > 0 && !readOnly && (
               <Alert variant="info" className="mb-0 px-4 py-2">
                 <strong>Advance booking</strong> — collect a downpayment of{' '}
                 <strong>{formatMoney(downpayment)}</strong> (50% of the {formatMoney(estTotal)} total,
@@ -1644,17 +1678,24 @@ function ReservationModal({
           </section>
           </div>
          </div>
+         </fieldset>
         </Modal.Body>
         <Modal.Footer>
-          {editing && canBackdate && (
-            <Button variant="outline-danger" className="mr-auto" disabled={busy || deleting} onClick={remove}>
-              {deleting ? <Spinner size="sm" /> : 'Delete'}
-            </Button>
+          {readOnly ? (
+            <Button variant="secondary" onClick={onClose}>Close</Button>
+          ) : (
+            <>
+              {editing && canBackdate && (
+                <Button variant="outline-danger" className="mr-auto" disabled={busy || deleting} onClick={remove}>
+                  {deleting ? <Spinner size="sm" /> : 'Delete'}
+                </Button>
+              )}
+              <Button variant="secondary" onClick={onClose}>Cancel</Button>
+              <Button type="submit" disabled={busy || deleting}>
+                {busy ? <Spinner size="sm" /> : editing ? 'Save changes' : 'Book'}
+              </Button>
+            </>
           )}
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy || deleting}>
-            {busy ? <Spinner size="sm" /> : editing ? 'Save changes' : 'Book'}
-          </Button>
         </Modal.Footer>
       </Form>
     </Modal>
