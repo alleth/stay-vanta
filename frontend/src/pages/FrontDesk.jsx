@@ -172,7 +172,7 @@ export default function FrontDesk() {
   const [resTotal, setResTotal] = useState(0)
   const [resPage, setResPage] = useState(1)
   const [calReservations, setCalReservations] = useState([])
-  const [resStats, setResStats] = useState({ booked: 0, checked_out_today: 0, cancelled_today: 0, unpaid: 0 })
+  const [resStats, setResStats] = useState({ booked: 0, checked_out_today: 0, cancelled_today: 0, unpaid: 0, open_invoices: 0 })
   const [extraCharges, setExtraCharges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -246,6 +246,7 @@ export default function FrontDesk() {
     checkedOutToday: resStats.checked_out_today,
     cancelledToday: resStats.cancelled_today,
     unpaid: resStats.unpaid ?? 0,
+    openInvoices: resStats.open_invoices ?? 0,
   }), [rooms, resStats])
 
   const resPages = Math.max(1, Math.ceil(resTotal / RESERVATIONS_PER_PAGE))
@@ -404,12 +405,12 @@ export default function FrontDesk() {
 
       {loading ? (
         <>
-          <SkeletonCards count={7} />
+          <SkeletonCards count={8} />
           <SkeletonTable rows={5} />
         </>
       ) : (
         <>
-        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
           <StatCard label="Available rooms" value={counts.available} variant="success" />
           <StatCard label="Occupied rooms" value={counts.occupied} variant="danger" />
           <StatCard label="Maintenance" value={counts.maintenance} variant="warning" />
@@ -417,6 +418,7 @@ export default function FrontDesk() {
           <StatCard label="Checked out today" value={counts.checkedOutToday} variant="secondary" />
           <StatCard label="Cancelled today" value={counts.cancelledToday} variant="dark" />
           <StatCard label="Unpaid" value={counts.unpaid} variant="info" />
+          <StatCard label="Unsettled invoices" value={counts.openInvoices} variant="warning" />
         </div>
 
         <Tabs defaultActiveKey="reservations" className="mb-4">

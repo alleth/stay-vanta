@@ -99,9 +99,10 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   window (booked/checked-in always; checked-out/cancelled only if that happened on/after it);
   `on_date` = non-cancelled stays touching the date (Calendar tab). `limit` is clamped 5–100 only
   when passed; omitted, it's the old wide window (200) — Food & Orders' checked-in picker relies on it.
-- `GET /api/reservations/stats` → `{booked, checked_out_today, cancelled_today, unpaid}` (Front
-  Desk summary cards, counted in the database; `unpaid` = non-cancelled reservations whose
-  `payment_status` is still `unpaid`, checked-out ones included).
+- `GET /api/reservations/stats` → `{booked, checked_out_today, cancelled_today, unpaid,
+  open_invoices}` (Front Desk summary cards, counted in the database; `unpaid` = non-cancelled
+  reservations whose `payment_status` is still `unpaid`, checked-out ones included;
+  `open_invoices` = the property's invoices not yet settled, of any kind).
 - `POST /api/reservations`
   - `walk_in` source → saved straight to `checked_in`, `check_in` forced to today, room flipped
     to `occupied`.

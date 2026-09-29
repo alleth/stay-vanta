@@ -387,6 +387,8 @@ class BackdatedReservationsApiTest extends TestCase
         $this->assertSame(0, $stats['cancelled_today']);
         // Neither was marked paid — a finished stay still owing counts.
         $this->assertSame(2, $stats['unpaid']);
+        // Nothing has been charged to an invoice yet.
+        $this->assertSame(0, $stats['open_invoices']);
     }
 
     public function testOnceSettledAReservationCantBeMarkedUnpaidEditedOrDeleted(): void

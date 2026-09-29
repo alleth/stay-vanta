@@ -111,7 +111,7 @@ class ReservationsController extends AppController
     }
 
     /**
-     * GET /api/reservations/stats → {booked, checked_out_today, cancelled_today, unpaid}
+     * GET /api/reservations/stats → {booked, checked_out_today, cancelled_today, unpaid, open_invoices}
      *
      * The Front Desk summary cards, counted in the database rather than from
      * whatever page of reservations the table happens to have loaded.
@@ -140,8 +140,16 @@ class ReservationsController extends AppController
                 'Reservations.status !=' => 'cancelled',
                 'Reservations.payment_status' => 'unpaid',
             ]),
+            // Every open invoice (room charges, food charged to the room…):
+            // money charged but not yet collected until someone settles it.
+            'open_invoices' => $this->scopeToProperty(
+                $this->fetchTable('Invoices')->find()->where(['Invoices.status' => 'open']),
+            )->count(),
         ]);
-        $this->viewBuilder()->setOption('serialize', ['booked', 'checked_out_today', 'cancelled_today', 'unpaid']);
+        $this->viewBuilder()->setOption(
+            'serialize',
+            ['booked', 'checked_out_today', 'cancelled_today', 'unpaid', 'open_invoices'],
+        );
     }
 
     /**
