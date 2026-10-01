@@ -3,12 +3,12 @@
 // active-page context. Owner = platform operator; admin = hotel/resort
 // head; receptionist = front-line tabs they act on (see CLAUDE.md).
 import {
-  DashboardIcon, BuildingIcon, BoxIcon, DoorIcon, UserIcon, ReceiptIcon, UsersIcon,
+  DashboardIcon, BuildingIcon, BoxIcon, DoorIcon, UserIcon, ReceiptIcon, UsersIcon, WalletIcon,
 } from './components/icons'
 
 export const NAV = [
   {
-    to: '/dashboard', label: 'Dashboard', blurb: 'Reports & revenue',
+    to: '/dashboard', label: 'Dashboard', blurb: 'Today at a glance',
     roles: ['owner', 'admin', 'receptionist'], Icon: DashboardIcon,
   },
   {
@@ -30,6 +30,10 @@ export const NAV = [
   {
     to: '/food', label: 'Food & Orders', blurb: 'Menu, orders & invoices',
     roles: ['admin', 'receptionist'], Icon: ReceiptIcon,
+  },
+  {
+    to: '/revenue', label: 'Revenue', blurb: 'Collections & invoices',
+    roles: ['admin', 'receptionist'], Icon: WalletIcon,
   },
   {
     to: '/staff', label: 'Staff', blurb: 'Manage receptionists',

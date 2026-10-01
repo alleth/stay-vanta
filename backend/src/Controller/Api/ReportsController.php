@@ -184,23 +184,34 @@ class ReportsController extends AppController
         [$pos, $todaysOrders] = $this->posSummary($propertyId, $dayStart, $dayEnd, $trendFrom);
         $inventory = $this->inventorySummary($propertyId, $trendFrom);
 
-        $unpaid = $this->fetchTable('Reservations')->find()->where([
+        // The one revenue figure the operations Dashboard keeps: collected
+        // today, the collection report's definition (settled invoices by
+        // settled_at + paid food orders). Everything else about money lives
+        // on the Revenue page.
+        $inv = $this->fetchTable('Invoices')->find()->where([
             'property_id' => $propertyId,
-            'status !=' => 'cancelled',
-            'payment_status' => 'unpaid',
-        ])->count();
+            'status' => 'settled',
+            'settled_at >=' => $dayStart,
+            'settled_at <' => $dayEnd,
+        ]);
+        $invoicesToday = round((float)$inv->select(['s' => $inv->func()->sum('total')])->first()->s, 2);
 
         $this->set('operations', [
             'date' => $today,
             'rooms' => $rooms,
             'guests' => $guests,
             'pos' => $pos,
+            'revenue_today' => [
+                'collected' => round($invoicesToday + $pos['today']['paid'], 2),
+                'invoices' => $invoicesToday,
+                'pos' => $pos['today']['paid'],
+            ],
             'inventory' => $inventory,
             'staff' => $isAdmin ? $this->staffSummary($propertyId, $dayStart, $dayEnd) : null,
             'activity' => $isAdmin ? $this->recentActivity($propertyId) : null,
+            // Operational only — unpaid stays and open invoices are the
+            // Revenue page's "To collect".
             'attention' => $reservationAttention + [
-                'unpaid_reservations' => $unpaid,
-                'open_invoices' => $this->outstanding($propertyId),
                 'open_food_orders' => count(array_filter(
                     $todaysOrders,
                     fn($o) => $o->status === 'open',

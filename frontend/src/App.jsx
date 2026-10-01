@@ -10,6 +10,7 @@ import Inventory from './pages/Inventory'
 import FrontDesk from './pages/FrontDesk'
 import Guests from './pages/Guests'
 import Food from './pages/Food'
+import Revenue from './pages/Revenue'
 import Subscribers from './pages/Subscribers'
 import Staff from './pages/Staff'
 import PrivacyPolicy from './pages/PrivacyPolicy'
@@ -83,6 +84,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={OPS}>
               <Food />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="revenue"
+          element={
+            <ProtectedRoute roles={OPS}>
+              <Revenue />
             </ProtectedRoute>
           }
         />

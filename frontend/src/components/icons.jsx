@@ -70,6 +70,18 @@ export function ReceiptIcon({ className }) {
   )
 }
 
+// A wallet — the Revenue module.
+export function WalletIcon({ className }) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="4" y="6" width="16" height="13" rx="2" />
+      <path d="M16 12.5h4" />
+      <circle cx="16" cy="12.5" r="0.6" />
+      <path d="M7 6V5a1 1 0 0 1 1.2-1l8 1.6" />
+    </svg>
+  )
+}
+
 // The header's theme toggle shows the theme you'd switch *to*: sun while
 // dark, moon while light.
 export function SunIcon({ className }) {

@@ -12,7 +12,7 @@ independently-deployed apps that talk over a JSON API:
   `border-line`, `bg-ink`, `text-accent`… are utilities), and the in-house kit
   `src/components/ui.jsx` provides Button/Badge/Card/Table/Modal/Form/Alert/Tabs/etc. with
   react-bootstrap-style APIs (`variant`, `size`, `show`/`onHide`). The one external UI library is
-  `apexcharts`/`react-apexcharts` for the Dashboard's seasonality chart, loaded via `React.lazy()`
+  `apexcharts`/`react-apexcharts` for the Revenue page's seasonality chart, loaded via `React.lazy()`
   (~200KB gzipped) so only an admin who opens that chart pays for it.
 - `backend/` — **CakePHP 5** JSON REST API. **MySQL** (XAMPP locally, Railway in prod).
   Full per-endpoint contract: **`backend/API.md`** — update it when you add or change an endpoint.
@@ -83,16 +83,20 @@ Stamp the acting user from `AppController::$currentUser` on any endpoint that ch
 Three roles on `users.role` (`UsersTable::ROLES`):
 - **owner** — the platform operator, `property_id = null`. Sees Dashboard (subscription revenue
   + counts) and Subscribers only.
-- **admin** — a subscribing hotel's head. Dashboard (today's operations + staff/activity, then
-  collected revenue, collections by day or month, seasonality), Inventory, Front Desk, Guests,
-  Food & Orders, Staff. Creates receptionists.
-- **receptionist** — same modules minus Staff. Same operations Dashboard minus Staff/activity,
-  and only the single-day collection report (the backend rejects month/range queries from them).
+- **admin** — a subscribing hotel's head. Dashboard (today's operations + staff/activity),
+  Inventory, Front Desk, Guests, Food & Orders, Revenue (collections by day/month/range, to
+  collect, invoices, analytics), Staff. Creates receptionists.
+- **receptionist** — same modules minus Staff. Dashboard minus Staff/activity; on Revenue, no
+  Analytics tab and only the single-day collection report (the backend rejects month/range queries
+  from them).
 
-The admin/receptionist Dashboard is one call, `GET /reports/operations`, rendered by
-`src/components/Operations.jsx`. Its "Needs attention" panel is **computed** from live counts —
-there is no stored notification/read state. "Reserved" rooms are derived (an available room held
-by a `booked` stay covering today), not a room status.
+**Dashboard = operations, Revenue = money.** The admin/receptionist Dashboard is one call,
+`GET /reports/operations`, rendered by `src/components/Operations.jsx`; its only money figure is
+"Revenue today" (collected today). Collections, what's owed (open invoices, unpaid reservations),
+invoices and revenue analytics live on `src/pages/Revenue.jsx` — keep them off the Dashboard. The
+"Needs attention" panel is **computed** from live counts (no stored notification/read state) and
+operational only. "Reserved" rooms are derived (an available room held by a `booked` stay
+covering today), not a room status.
 
 Nav visibility lives in `src/nav.js` (`roles` per item) and `ProtectedRoute roles=` in `App.jsx`,
 but those are UX only — **every role check must also exist on the backend**. `UsersController`
@@ -163,7 +167,7 @@ would make the key attacker-controlled.
   the OS), and `dark:` is bound to that attribute via `@custom-variant`. Use `text-on-ink` (not
   `text-white`) on `bg-ink`/`bg-accent`, and give hand-written status colors an explicit `dark:`
   pair. Three places duplicate values and must be kept in sync: `index.html`'s pre-paint script
-  (storage key + splash colors), `BrandSplash.jsx`, and `Dashboard.jsx`'s `CHART_COLORS`
+  (storage key + splash colors), `BrandSplash.jsx`, and `Revenue.jsx`'s `CHART_COLORS`
   (ApexCharts can't read CSS variables). Use the `frontend-design` skill for UI work.
 - Initial loads use skeletons from `src/components/Skeleton.jsx`, not spinners (inline action
   buttons keep their small spinner). Stat tiles go through `src/components/StatCard.jsx` — extend
@@ -172,7 +176,7 @@ would make the key attacker-controlled.
   (Front Desk: Rooms / Today / To collect); a `SummaryRow` with `onClick` jumps to the list
   behind the number — `Tabs` takes react-bootstrap-style `activeKey`/`onSelect` for that.
 - The **Invoices** tab (list, folio view, Settle with SI/OR booklet numbers) is one component,
-  `src/components/Invoices.jsx` (`InvoicesPanel`), rendered by both Food & Orders and Front Desk —
+  `src/components/Invoices.jsx` (`InvoicesPanel`), rendered by Food & Orders, Front Desk and Revenue —
   change it there, not in a page. It loads itself when its tab opens (`Tabs` mounts only the
   active tab); `onSettled` lets the host refresh what depends on settlement.
 
@@ -196,7 +200,7 @@ would make the key attacker-controlled.
   already lives inside invoices, so only `paid` orders are added. **Marking a reservation paid is
   not collecting it**: it posts the room charge to the guest's *open* invoice, which counts only
   once settled (Settle is where SI/OR booklet numbers are assigned — deliberately kept). So reports
-  also return `outstanding` (Σ open invoices), shown as "Not yet settled" on the Dashboard, and
+  also return `outstanding` (Σ open invoices), shown as "Not yet settled" on Revenue → Collections, and
   the Reservations table flags "invoice not settled" (`room_charge_invoice`).
 - **Days are the hotel's, not UTC's.** Timestamps are stored UTC, but "today", daily/weekly/monthly
   windows and every day filter go through `App\Model\BusinessTime` (`App.businessTimezone`, env

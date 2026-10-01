@@ -80,41 +80,38 @@ function TodayKpi({ guests, onPick }) {
   )
 }
 
-function PosKpi({ pos }) {
-  const { today, yesterday_paid: yesterday } = pos
-  const delta = yesterday > 0 ? Math.round(((today.paid - yesterday) / yesterday) * 100) : null
+// The Dashboard's one money card: collected today (the collection report's
+// definition), split into POS and settled room invoices. Anything further —
+// what's owed, invoices, periods — is on the Revenue page.
+function RevenueTodayKpi({ revenue, pos }) {
+  const yesterday = pos.yesterday_paid
+  const delta = yesterday > 0 ? Math.round(((pos.today.paid - yesterday) / yesterday) * 100) : null
   return (
-    <SummaryGroup label="POS sales today">
-      <div className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">{formatMoney(today.paid)}</div>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
-        <span>{plural(today.orders, 'order')}</span>
-        {delta !== null && (
-          <Badge bg={delta >= 0 ? 'success' : 'danger'}>
-            {delta >= 0 ? '↑' : '↓'} {Math.abs(delta)}% vs yesterday
-          </Badge>
-        )}
-      </div>
-      {(today.charged_to_room > 0 || today.unpaid > 0) && (
-        <div className="mt-3 space-y-0.5 border-t border-line pt-2 text-xs text-muted">
-          {today.charged_to_room > 0 && (
-            <div className="flex justify-between gap-2">
-              <span>Charged to rooms</span>
-              <span className="tabular-nums">{formatMoney(today.charged_to_room)}</span>
-            </div>
-          )}
-          {today.unpaid > 0 && (
-            <div className="flex justify-between gap-2">
-              <span>Unpaid</span>
-              <span className="tabular-nums text-amber-700 dark:text-amber-400">{formatMoney(today.unpaid)}</span>
-            </div>
-          )}
+    <SummaryGroup label="Revenue today">
+      <div className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">{formatMoney(revenue.collected)}</div>
+      <div className="mt-1 text-xs text-muted">collected</div>
+      <div className="mt-3 space-y-1 border-t border-line pt-2 text-sm">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-muted">
+            POS sales · {plural(pos.today.orders, 'order')}
+            {delta !== null && (
+              <Badge bg={delta >= 0 ? 'success' : 'danger'} className="ml-1.5">
+                {delta >= 0 ? '↑' : '↓'} {Math.abs(delta)}%
+              </Badge>
+            )}
+          </span>
+          <span className="tabular-nums">{formatMoney(revenue.pos)}</span>
         </div>
-      )}
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-muted">Invoices settled</span>
+          <span className="tabular-nums">{formatMoney(revenue.invoices)}</span>
+        </div>
+      </div>
     </SummaryGroup>
   )
 }
 
-// The top of the page: Rooms overview (two thirds) beside Today and POS sales
+// The top of the page: Rooms overview (two thirds) beside Today and Revenue today
 // stacked — what's visible on login without scrolling. With a dozen-odd rooms
 // the two sides come out about the same height.
 export function TopRow({ data, onPickGuests }) {
@@ -123,7 +120,7 @@ export function TopRow({ data, onPickGuests }) {
       <RoomsOverview rooms={data.rooms} className="lg:col-span-2" />
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-1">
         <TodayKpi guests={data.guests} onPick={onPickGuests} />
-        <PosKpi pos={data.pos} />
+        <RevenueTodayKpi revenue={data.revenue_today} pos={data.pos} />
       </div>
     </div>
   )
@@ -147,9 +144,6 @@ function attentionItems(a) {
     { n: a.arrivals_pending - a.late_arrivals, sev: 'info', text: (n) => `${plural(n, 'arrival')} due today`, guests: 'arrivals' },
     { n: a.departures_pending - a.overdue_departures, sev: 'info', text: (n) => `${plural(n, 'check-out')} due today`, guests: 'departures' },
     { n: a.low_stock, sev: 'warning', text: (n) => `${plural(n, 'item')} at or below reorder level` },
-    { n: a.unpaid_reservations, sev: 'warning', text: (n) => `${plural(n, 'reservation')} not yet paid` },
-    { n: a.open_invoices.count, sev: 'warning',
-      text: (n) => `${plural(n, 'open invoice')} · ${formatMoney(a.open_invoices.total)} to settle` },
     { n: a.open_food_orders, sev: 'info', text: (n) => `${plural(n, 'food order')} still open` },
     { n: a.maintenance_rooms, sev: 'info', text: (n) => `${plural(n, 'room')} under maintenance` },
     { n: a.new_bookings, sev: 'info', text: (n) => `${plural(n, 'new booking')} today` },

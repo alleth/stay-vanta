@@ -22,7 +22,7 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
 - `GET /api/reports/daily-collection[?date=YYYY-MM-DD | ?month=&year= | ?from=&to=]` — money
   collected in the window (settled invoices by `settled_at` + paid food orders); defaults to
   today. **The month+year and from/to forms are owner/admin-only** — a receptionist may only view
-  one day (their entire Dashboard is this report). Also returns `outstanding` `{total, count}`:
+  one day (Revenue → Collections). Also returns `outstanding` `{total, count}`:
   what's on the property's **open** invoices right now (Mark-paid room charges, charged food…) —
   not collected until settled, and not tied to the window.
 - All report dates/weeks/months are the **hotel's** (`App.businessTimezone`, default
@@ -31,7 +31,7 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   calendar month of the year (default current): count of non-cancelled reservations (bucketed by
   `check_in`) and collected revenue (same definition as `admin-dashboard`). One pair of queries
   per month rather than `GROUP BY MONTH(...)` (`ONLY_FULL_GROUP_BY` avoidance). Powers the
-  Dashboard's "Seasonality" chart.
+  Revenue page's Analytics → "Seasonality" chart.
 - `GET /api/reports/operations` (**admin + receptionist**, own property; owner → 403) — the
   operational Dashboard in one call, as `operations`:
   - `rooms` `{total, occupied, available, reserved, maintenance, occupancy_rate}` — `reserved` is
@@ -58,8 +58,11 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   - `attention` — the counts behind the computed "Needs attention" panel (no stored
     notifications): `arrivals_pending`, `late_arrivals`, `departures_pending`,
     `overdue_departures`, `new_bookings` (non-walk-in reservations created today),
-    `unpaid_reservations`, `open_invoices {total, count}`, `open_food_orders` (today's),
-    `out_of_stock`, `low_stock`, `maintenance_rooms`.
+    `open_food_orders` (today's), `out_of_stock`, `low_stock`, `maintenance_rooms`. Operational
+    only: unpaid stays and open invoices belong to the Revenue page (`/reservations?payment_status=unpaid`,
+    `daily-collection`'s `outstanding`).
+  - `revenue_today` `{collected, invoices, pos}` — the Dashboard's one money figure: collected
+    today by the `daily-collection` definition (settled invoices by `settled_at` + paid food).
   - Every aggregate is summed in PHP from plain row fetches (no `GROUP BY`).
 - `GET /api/reports/activity[?page=N]` (**admin-only**, own property) — the full feed behind the
   Dashboard's Staff card ("View all activity"): the same merged stock-movement + food-order

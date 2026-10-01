@@ -1,4 +1,5 @@
 import { Card } from './ui'
+import { formatMoney } from '../utils/format'
 
 // The app's one stat/summary tile — the compact card that sits in a row above
 // a module's table (Front Desk, Guests) or under a Dashboard section heading.
@@ -31,6 +32,27 @@ export function StatCard({ label, value, variant, size }) {
         </div>
       </Card.Body>
     </Card>
+  )
+}
+
+// A row of StatCards (Dashboard's owner figures, the Revenue page). Counts
+// are short enough to sit two-up even on a phone; a peso figure (up to
+// "₱1,234,567.00") needs the full width there, so `money` tiles only split
+// into columns from `sm` up, and are formatted here.
+export function StatTiles({ tiles, money = false, className = 'mb-8' }) {
+  const cols = money ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-4'
+  return (
+    <div className={`grid gap-3 ${cols} ${className}`}>
+      {tiles.map((t) => (
+        <StatCard
+          key={t.label}
+          label={t.label}
+          value={money ? formatMoney(t.value) : t.value}
+          variant={t.variant}
+          size={money ? 'sm' : undefined}
+        />
+      ))}
+    </div>
   )
 }
 
