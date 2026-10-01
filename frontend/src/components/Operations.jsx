@@ -64,24 +64,32 @@ function Empty({ children }) {
 
 /* ------------------------------------------------------------ KPI row */
 
+// The management summary: how the property is doing right now. This is the
+// one place the status *counts* live — Hotel Status below shows the rooms
+// themselves, not the numbers again.
 function RoomsKpi({ rooms }) {
+  const pct = (n) => (rooms.total > 0 ? `${(n / rooms.total) * 100}%` : '0%')
   return (
     <SummaryGroup label="Rooms">
-      <div className="flex items-baseline gap-2">
-        <span className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">
-          {Math.round(rooms.occupancy_rate)}%
-        </span>
-        <span className="text-sm text-muted">occupancy</span>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="flex items-baseline gap-2">
+          <span className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">
+            {Math.round(rooms.occupancy_rate)}%
+          </span>
+          <span className="text-sm text-muted">occupancy</span>
+        </div>
+        <span className="text-sm text-muted tabular-nums">{plural(rooms.total, 'room')}</span>
       </div>
       <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-subtle" role="img"
-        aria-label={`${rooms.occupied} occupied of ${rooms.total} rooms`}>
-        <div className="bg-red-500" style={{ width: `${rooms.occupancy_rate}%` }} />
+        aria-label={ROOM_STATUS.map((s) => `${rooms[s.key]} ${s.label.toLowerCase()}`).join(', ')}>
+        {ROOM_STATUS.map((s) => <div key={s.key} className={s.dot} style={{ width: pct(rooms[s.key]) }} />)}
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        {[['available', 'Vacant'], ['occupied', 'Occupied'], ['reserved', 'Reserved']].map(([key, label]) => (
-          <div key={key} className="rounded-lg bg-subtle px-1 py-1.5">
-            <div className="sv-serif text-lg font-bold tabular-nums">{rooms[key]}</div>
-            <div className="text-[0.7rem] text-muted">{label}</div>
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1">
+        {ROOM_STATUS.map((s) => (
+          <div key={s.key} className="flex items-center gap-2">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
+            <span className="min-w-0 flex-1 text-sm text-muted">{s.label}</span>
+            <span className="sv-serif font-bold tabular-nums">{rooms[s.key]}</span>
           </div>
         ))}
       </div>
@@ -217,48 +225,75 @@ export function AttentionPanel({ attention, onPickGuests }) {
 
 /* ---------------------------------------------------------- Hotel status */
 
+// What a room needs today (from the API's `flag`). Urgent ones ring the tile
+// in red; the rest only change its caption.
+const ROOM_FLAG = {
+  overdue_checkout: { label: 'Overdue out', urgent: true },
+  late_arrival: { label: 'Late arrival', urgent: true },
+  departing: { label: 'Leaving today', urgent: false },
+  arriving: { label: 'Arriving today', urgent: false },
+}
+
+// Operational monitoring: every room as a colour-coded tile, so the question
+// is "which room?", not "how many?" (the counts are the Rooms card's job).
+// The legend filters the grid; "Needs action" narrows it to flagged rooms.
 export function HotelStatus({ rooms }) {
-  const [filter, setFilter] = useState(null)
-  const pct = (n) => (rooms.total > 0 ? `${(n / rooms.total) * 100}%` : '0%')
-  const shown = filter ? rooms.map.filter((r) => r.status === filter) : rooms.map
-  const chip = Object.fromEntries(ROOM_STATUS.map((s) => [s.key, s.chip]))
+  const [filter, setFilter] = useState(null) // null | status key | 'flagged'
+  const status = Object.fromEntries(ROOM_STATUS.map((s) => [s.key, s]))
+  const flagged = rooms.map.filter((r) => r.flag)
+  const shown = filter === 'flagged'
+    ? flagged
+    : filter ? rooms.map.filter((r) => r.status === filter) : rooms.map
+  const toggle = (key) => setFilter((f) => (f === key ? null : key))
+  const pill = (active) => `inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+    active ? 'border-ink bg-subtle text-body' : 'border-line text-muted hover:bg-subtle hover:text-body'}`
+
   return (
     <Card>
+      <Card.Header className="flex flex-wrap items-center gap-1.5 py-2.5 font-normal">
+        {ROOM_STATUS.map((s) => (
+          <button key={s.key} type="button" aria-pressed={filter === s.key}
+            onClick={() => toggle(s.key)} className={pill(filter === s.key)}>
+            <span className={`h-2 w-2 rounded-full ${s.dot}`} />{s.label}
+          </button>
+        ))}
+        {flagged.length > 0 && (
+          <button type="button" aria-pressed={filter === 'flagged'}
+            onClick={() => toggle('flagged')} className={`${pill(filter === 'flagged')} sm:ml-auto`}>
+            <span className="h-2 w-2 rounded-full ring-2 ring-red-500" />Needs action ({flagged.length})
+          </button>
+        )}
+      </Card.Header>
       <Card.Body>
-        <div className="flex h-3 overflow-hidden rounded-full bg-subtle" role="img"
-          aria-label={ROOM_STATUS.map((s) => `${rooms[s.key]} ${s.label.toLowerCase()}`).join(', ')}>
-          {ROOM_STATUS.map((s) => <div key={s.key} className={s.dot} style={{ width: pct(rooms[s.key]) }} />)}
-        </div>
-        {/* The legend doubles as a filter for the room map below. */}
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {ROOM_STATUS.map((s) => (
-            <button key={s.key} type="button" aria-pressed={filter === s.key}
-              onClick={() => setFilter((f) => (f === s.key ? null : s.key))}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
-                filter === s.key ? 'border-ink bg-subtle' : 'border-line hover:bg-subtle'}`}>
-              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.dot}`} />
-              <span className="min-w-0 flex-1 text-sm text-muted">{s.label}</span>
-              <span className="sv-serif text-lg font-bold tabular-nums">{rooms[s.key]}</span>
-            </button>
-          ))}
-        </div>
-      </Card.Body>
-      <Card.Footer>
         {rooms.total === 0 ? (
-          <p className="text-sm text-muted">No rooms set up yet — add them on Front Desk.</p>
+          <p className="mb-0 text-sm text-muted">No rooms set up yet — add them on Front Desk.</p>
         ) : shown.length === 0 ? (
-          <p className="text-sm text-muted">No rooms are {ROOM_STATUS.find((s) => s.key === filter)?.label.toLowerCase()}.</p>
+          <p className="mb-0 text-sm text-muted">
+            No rooms are {filter === 'flagged' ? 'flagged' : status[filter]?.label.toLowerCase()}.
+          </p>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {shown.map((r) => (
-              <span key={r.id} title={`Room ${r.number} · ${r.status}`}
-                className={`min-w-[3rem] rounded-md px-2 py-1 text-center text-xs font-semibold tabular-nums ${chip[r.status]}`}>
-                {r.number}
-              </span>
-            ))}
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-2">
+            {shown.map((r) => {
+              const s = status[r.status]
+              const f = ROOM_FLAG[r.flag]
+              return (
+                <div key={r.id}
+                  title={[`Room ${r.number}`, r.type, s?.label, f?.label].filter(Boolean).join(' · ')}
+                  className={`rounded-lg px-2.5 py-2 ${s?.chip ?? 'bg-subtle'} ${
+                    f?.urgent ? 'ring-2 ring-red-500 ring-offset-1 ring-offset-surface' : ''}`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${s?.dot ?? 'bg-line'}`} />
+                    <span className="truncate text-sm font-bold tabular-nums">{r.number}</span>
+                  </div>
+                  <div className={`mt-0.5 truncate text-[0.7rem] ${f ? 'font-semibold' : 'opacity-80'}`}>
+                    {f ? f.label : s?.label}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
-      </Card.Footer>
+      </Card.Body>
     </Card>
   )
 }

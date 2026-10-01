@@ -144,6 +144,17 @@ class ReportsController extends AppController
     private const TREND_DAYS = 7;
 
     /**
+     * What a room needs today, for the Hotel Status map; when a room has
+     * several (a guest leaving, the next arriving), the higher rank wins.
+     */
+    private const ROOM_FLAG_RANK = [
+        'arriving' => 1,
+        'departing' => 2,
+        'late_arrival' => 3,
+        'overdue_checkout' => 4,
+    ];
+
+    /**
      * GET /api/reports/operations  (admin + receptionist, own property)
      *
      * The operational Dashboard in one call: room status, today's arrivals and
@@ -214,7 +225,7 @@ class ReportsController extends AppController
     private function roomsAndGuests(int $propertyId, string $today, string $dayStart, string $dayEnd): array
     {
         $roomRows = $this->fetchTable('Rooms')->find()
-            ->select(['id', 'room_number', 'status'])
+            ->select(['id', 'room_number', 'room_type', 'status'])
             ->where(['property_id' => $propertyId])
             ->disableHydration()
             ->all();
@@ -257,6 +268,17 @@ class ReportsController extends AppController
             && BusinessTime::stored($moment) >= $dayStart && BusinessTime::stored($moment) < $dayEnd;
 
         $reservedRoomIds = [];
+        // room id → what needs doing there today, most urgent kept.
+        $roomFlags = [];
+        $flag = function (?int $roomId, string $what) use (&$roomFlags): void {
+            $current = $roomFlags[(int)$roomId] ?? null;
+            if (
+                $roomId !== null
+                && ($current === null || self::ROOM_FLAG_RANK[$what] > self::ROOM_FLAG_RANK[$current])
+            ) {
+                $roomFlags[$roomId] = $what;
+            }
+        };
         $arrivals = [];
         $departures = [];
         $inHouse = [];
@@ -272,6 +294,7 @@ class ReportsController extends AppController
                 $late = $checkIn < $today;
                 $lateArrivals += $late ? 1 : 0;
                 $arrivals[] = $this->guestRow($r, $late ? 'late' : 'due');
+                $flag($r->room_id, $late ? 'late_arrival' : 'arriving');
                 continue;
             }
             // checked_in
@@ -283,6 +306,7 @@ class ReportsController extends AppController
                 $overdue = $checkOut < $today;
                 $overdueDepartures += $overdue ? 1 : 0;
                 $departures[] = $this->guestRow($r, $overdue ? 'overdue' : 'due');
+                $flag($r->room_id, $overdue ? 'overdue_checkout' : 'departing');
             }
         }
         foreach ($departedToday as $r) {
@@ -301,7 +325,13 @@ class ReportsController extends AppController
             }
             $count['total']++;
             $count[$status]++;
-            $map[] = ['id' => (int)$room['id'], 'number' => (string)$room['room_number'], 'status' => $status];
+            $map[] = [
+                'id' => (int)$room['id'],
+                'number' => (string)$room['room_number'],
+                'type' => $room['room_type'],
+                'status' => $status,
+                'flag' => $roomFlags[(int)$room['id']] ?? null,
+            ];
         }
         usort($map, fn($a, $b) => strnatcasecmp($a['number'], $b['number']));
         $count['map'] = $map;

@@ -656,7 +656,7 @@ function OperationsDashboard({ user, isAdmin }) {
             </div>
             <div className="space-y-8 lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1">
               <section>
-                <SectionTitle aside={`${data.rooms.total} rooms`}>Hotel status</SectionTitle>
+                <SectionTitle>Hotel status</SectionTitle>
                 <HotelStatus rooms={data.rooms} />
               </section>
               <section ref={guestsRef} className="scroll-mt-4">

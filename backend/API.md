@@ -37,8 +37,9 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   - `rooms` `{total, occupied, available, reserved, maintenance, occupancy_rate}` — `reserved` is
     derived, not a room status: an `available` room held by a `booked` reservation covering today
     (due today or a late arrival); `available` excludes those. `occupancy_rate` = occupied ÷ all
-    rooms (Front Desk's definition). `map` lists every room `{id, number, status}` (natural
-    order) with the same derived status.
+    rooms (Front Desk's definition). `map` lists every room `{id, number, type, status, flag}`
+    (natural order) with the same derived status; `flag` is what the room needs today —
+    `overdue_checkout` > `late_arrival` > `departing` > `arriving` (the most urgent wins) — or null.
   - `guests.arrivals` / `guests.departures` `{total, done, rows}` and `guests.in_house`
     `{total, guests, rows}` — rows (max 8) `{id, room, guest, guests, source, check_in, check_out,
     state}`; `state` is `due|late|arrived` for arrivals, `due|overdue|departed` for departures.
