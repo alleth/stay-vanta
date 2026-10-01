@@ -8,6 +8,12 @@ export const ownerDashboard = () =>
 export const adminDashboard = () =>
   client.get('/reports/admin-dashboard').then((r) => r.data.dashboard)
 
+// Operations dashboard (admin + receptionist): rooms, today's arrivals and
+// departures, POS, stock alerts and the "Needs attention" counts. `staff` and
+// `activity` come back null for a receptionist.
+export const operationsDashboard = () =>
+  client.get('/reports/operations').then((r) => r.data.operations)
+
 // Collection report: settled invoices + paid food orders in the window.
 // Pass { date } for a single day (any staff role), or { month, year } for a
 // whole month (owner/admin only).

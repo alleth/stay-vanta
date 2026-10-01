@@ -32,6 +32,34 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   `check_in`) and collected revenue (same definition as `admin-dashboard`). One pair of queries
   per month rather than `GROUP BY MONTH(...)` (`ONLY_FULL_GROUP_BY` avoidance). Powers the
   Dashboard's "Seasonality" chart.
+- `GET /api/reports/operations` (**admin + receptionist**, own property; owner → 403) — the
+  operational Dashboard in one call, as `operations`:
+  - `rooms` `{total, occupied, available, reserved, maintenance, occupancy_rate}` — `reserved` is
+    derived, not a room status: an `available` room held by a `booked` reservation covering today
+    (due today or a late arrival); `available` excludes those. `occupancy_rate` = occupied ÷ all
+    rooms (Front Desk's definition). `map` lists every room `{id, number, status}` (natural
+    order) with the same derived status.
+  - `guests.arrivals` / `guests.departures` `{total, done, rows}` and `guests.in_house`
+    `{total, guests, rows}` — rows (max 8) `{id, room, guest, guests, source, check_in, check_out,
+    state}`; `state` is `due|late|arrived` for arrivals, `due|overdue|departed` for departures.
+  - `pos` — `today {orders, paid, charged_to_room, unpaid}` (`orders`, `charged_to_room`,
+    `unpaid`: non-cancelled orders created today; `paid` = "sales", exactly the collection
+    report's food figure for today), `yesterday_paid`, `trend` (7 days of
+    paid totals, oldest first), `top_sellers` (7 days, menu items only, by quantity, max 5),
+    `recent` (latest 6 orders).
+  - `inventory` — `items`, `out_of_stock_count` (quantity ≤ 0), `low_stock_count` (≤
+    `reorder_level`), first 5 of each, and `most_used` (Σ `out` stock movements over 7 days, max
+    5). A parent item with live sub-items is a container and is left out of the alerts.
+  - `staff` / `activity` — **admin only, `null` for a receptionist**. `staff.members` = active
+    admin/receptionist accounts with `actions_today`; `activity` = the latest 8 stock movements and
+    food orders merged, each with its `actor`. Only those two ledgers count — a reservation's
+    `receptionist_id` is re-stamped on every edit/transition, so it can't attribute an action.
+  - `attention` — the counts behind the computed "Needs attention" panel (no stored
+    notifications): `arrivals_pending`, `late_arrivals`, `departures_pending`,
+    `overdue_departures`, `new_bookings` (non-walk-in reservations created today),
+    `unpaid_reservations`, `open_invoices {total, count}`, `open_food_orders` (today's),
+    `out_of_stock`, `low_stock`, `maintenance_rooms`.
+  - Every aggregate is summed in PHP from plain row fetches (no `GROUP BY`).
 
 ## Staff
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate

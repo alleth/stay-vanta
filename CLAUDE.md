@@ -38,11 +38,12 @@ origin in dev (Vite proxy).
 
 **Test coverage is deliberately narrow**: only where a wrong number reaches a real folio or a
 real lock-out — `ReservationsTableTest` (`quote()` pricing, incl. extras), `FoodOrdersTableTest`
-(discount/cooking-charge arithmetic), `Auth/LoginThrottleTest` (all fixture-free, entities built
-in memory), plus two HTTP-level suites: `Controller/Api/ReservationDiscountsApiTest` and
-`BackdatedReservationsApiTest` (admin-only past stays, stay edits and delete). **There are no fixtures**: each
-builds its own property/room/rate/user in `setUp()`, removes them in
-`tearDown()`, and re-applies its auth header before *every* request (request config doesn't
+(discount/cooking-charge arithmetic), `Auth/LoginThrottleTest`, `Model/BusinessTimeTest`
+(hotel-day boundaries vs UTC) — all fixture-free, entities built in memory — plus two HTTP-level
+suites: `Controller/Api/ReservationDiscountsApiTest` and `BackdatedReservationsApiTest`
+(admin-only past stays, stay edits and delete). **There are no fixtures**: the HTTP suites each
+build their own property/room/rate/user in `setUp()`, remove them in
+`tearDown()`, and re-apply the auth header before *every* request (request config doesn't
 survive a request — the second call otherwise 401s). Other role enforcement, stock movements and
 invoice settlement are untested, so a green run doesn't validate the API.
 
@@ -82,10 +83,16 @@ Stamp the acting user from `AppController::$currentUser` on any endpoint that ch
 Three roles on `users.role` (`UsersTable::ROLES`):
 - **owner** — the platform operator, `property_id = null`. Sees Dashboard (subscription revenue
   + counts) and Subscribers only.
-- **admin** — a subscribing hotel's head. Dashboard (ops cards + collected revenue + collections
-  by day or month), Inventory, Front Desk, Guests, Food & Orders, Staff. Creates receptionists.
-- **receptionist** — same modules minus Staff. Their Dashboard is **only** the single-day
-  collection report (the backend rejects month/range queries from them).
+- **admin** — a subscribing hotel's head. Dashboard (today's operations + staff/activity, then
+  collected revenue, collections by day or month, seasonality), Inventory, Front Desk, Guests,
+  Food & Orders, Staff. Creates receptionists.
+- **receptionist** — same modules minus Staff. Same operations Dashboard minus Staff/activity,
+  and only the single-day collection report (the backend rejects month/range queries from them).
+
+The admin/receptionist Dashboard is one call, `GET /reports/operations`, rendered by
+`src/components/Operations.jsx`. Its "Needs attention" panel is **computed** from live counts —
+there is no stored notification/read state. "Reserved" rooms are derived (an available room held
+by a `booked` stay covering today), not a room status.
 
 Nav visibility lives in `src/nav.js` (`roles` per item) and `ProtectedRoute roles=` in `App.jsx`,
 but those are UX only — **every role check must also exist on the backend**. `UsersController`

@@ -1,11 +1,16 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Card, Alert, Form, Table, Button, ButtonGroup, Badge } from '../components/ui'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Card, Alert, Form, Table, Button, ButtonGroup, Badge, Spinner } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
-import { ownerDashboard, adminDashboard, dailyCollection, monthlySummary } from '../api/reports'
+import {
+  ownerDashboard, adminDashboard, dailyCollection, monthlySummary, operationsDashboard,
+} from '../api/reports'
 import { formatMoney } from '../utils/format'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
 import { StatCard } from '../components/StatCard'
+import {
+  SectionTitle, KpiRow, AttentionPanel, HotelStatus, GuestMonitor, PosOverview, InventoryMonitor, StaffMonitor,
+} from '../components/Operations'
 
 // ApexCharts is a large dependency (~200KB gzipped) used only by the admin
 // Dashboard's seasonality chart — code-split it so every other role/page
@@ -54,14 +59,6 @@ function dashboardError(err) {
   const res = err?.response
   if (res) return res.data?.message || `Request failed (${res.status}).`
   return 'Could not reach the server. Please try again.'
-}
-
-function SectionTitle({ children }) {
-  return (
-    <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted">
-      {children}
-    </h2>
-  )
 }
 
 // Money collected in a day (settled invoices + paid food orders), with a date
@@ -491,20 +488,6 @@ function SeasonalityChart() {
   )
 }
 
-// Receptionist: the daily collection is the only report they can view.
-function ReceptionistDashboard({ user }) {
-  return (
-    <div>
-      <h1 className="sv-serif mb-1 text-[2rem] font-bold">Dashboard</h1>
-      <p className="mb-6 text-muted">
-        Welcome back, {user?.name}. Money collected on the selected day.
-      </p>
-      <SectionTitle>Daily collection</SectionTitle>
-      <CollectionReport allowMonthly={false} />
-    </div>
-  )
-}
-
 // Platform owner: subscription revenue + active users.
 function OwnerDashboard({ user }) {
   const [data, setData] = useState(null)
@@ -546,54 +529,169 @@ function OwnerDashboard({ user }) {
   )
 }
 
-// Hotel/resort admin: operational figures + collected revenue.
-function AdminDashboard({ user }) {
+// Admin only, below the day's operations: collected revenue by period, the
+// collection report, and the seasonality chart — planning figures, so the
+// chart stays folded until asked for.
+function RevenueAndReports() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
+  const [showSeasonality, setShowSeasonality] = useState(false)
 
   useEffect(() => {
     adminDashboard().then(setData).catch((err) => setError(dashboardError(err)))
   }, [])
 
-  if (error) return <Alert variant="danger">{error}</Alert>
-  if (!data) return <Loading />
-
   return (
-    <div>
-      <h1 className="sv-serif mb-1 text-[2rem] font-bold">Dashboard</h1>
-      <p className="mb-6 text-muted">
-        Welcome back, {user?.name}. Today at your property.
-      </p>
-
-      <SectionTitle>Seasonality</SectionTitle>
-      <p className="mb-3 text-sm text-muted">
-        Guests (non-cancelled reservations by check-in date) or revenue by month — spot your busiest
-        season, or your highest and lowest-earning months.
-      </p>
-      <SeasonalityChart />
-
-      <SectionTitle>Operations</SectionTitle>
-      <Tiles
-        tiles={[
-          { label: 'Inventory items', value: data.cards.inventory_items },
-          { label: 'Occupied rooms', value: data.cards.occupied_rooms },
-          { label: 'Guests today', value: data.cards.guests_today },
-          { label: 'Open food orders', value: data.cards.open_food_orders },
-        ]}
-      />
-
+    <>
       <SectionTitle>Revenue collected</SectionTitle>
-      <Tiles
-        money
-        tiles={[
-          { label: 'This week', value: data.revenue.week },
-          { label: 'This month', value: data.revenue.month },
-          { label: 'Year to date', value: data.revenue.ytd },
-        ]}
-      />
+      {error && <Alert variant="danger">{error}</Alert>}
+      {!error && !data && <SkeletonCards count={3} />}
+      {data && (
+        <Tiles
+          money
+          tiles={[
+            { label: 'This week', value: data.revenue.week },
+            { label: 'This month', value: data.revenue.month },
+            { label: 'Year to date', value: data.revenue.ytd },
+          ]}
+        />
+      )}
 
       <SectionTitle>Collection report</SectionTitle>
       <CollectionReport allowMonthly />
+
+      <SectionTitle
+        aside={(
+          <Button size="sm" variant="link" onClick={() => setShowSeasonality((s) => !s)}>
+            {showSeasonality ? 'Hide chart' : 'Show chart'}
+          </Button>
+        )}
+      >
+        Seasonality
+      </SectionTitle>
+      {showSeasonality ? (
+        <SeasonalityChart />
+      ) : (
+        <p className="mb-8 text-sm text-muted">
+          Guests or revenue by month — your busiest season and your highest and lowest-earning months.
+        </p>
+      )}
+    </>
+  )
+}
+
+// How often the operations figures refresh on their own; Refresh does it now.
+const REFRESH_MS = 5 * 60 * 1000
+
+// Hotel/resort staff (admin + receptionist): today at the property first —
+// rooms, arrivals/departures, sales, what needs attention — then the module
+// summaries, then (admin) revenue and reports. A receptionist gets the same
+// layout minus Staff and with the single-day collection report, as the
+// backend allows.
+function OperationsDashboard({ user, isAdmin }) {
+  const [state, setState] = useState({ data: null, error: null, at: null })
+  const [loadingNow, setLoadingNow] = useState(false)
+  const [guestTab, setGuestTab] = useState('arrivals')
+  const guestsRef = useRef(null)
+  const alive = useRef(true)
+
+  const load = useCallback(() => {
+    setLoadingNow(true)
+    return operationsDashboard()
+      .then((data) => { if (alive.current) setState({ data, error: null, at: new Date() }) })
+      .catch((err) => { if (alive.current) setState((s) => ({ ...s, error: dashboardError(err) })) })
+      .finally(() => { if (alive.current) setLoadingNow(false) })
+  }, [])
+
+  useEffect(() => {
+    alive.current = true
+    // Deferred a tick so the first fetch isn't a synchronous setState in
+    // the effect body.
+    const first = setTimeout(load, 0)
+    const timer = setInterval(load, REFRESH_MS)
+    return () => { alive.current = false; clearTimeout(first); clearInterval(timer) }
+  }, [load])
+
+  // A KPI figure or attention line jumps to the guest list behind it.
+  const pickGuests = (key) => {
+    setGuestTab(key)
+    guestsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const { data, error, at } = state
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="sv-serif mb-1 text-[2rem] font-bold">Dashboard</h1>
+          <p className="mb-0 text-muted">Welcome back, {user?.name}. Here’s your property today — {today}.</p>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted">
+          {at && <span>Updated {at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>}
+          <Button size="sm" variant="outline-secondary" onClick={load} disabled={loadingNow}>
+            {loadingNow ? <Spinner size="sm" /> : 'Refresh'}
+          </Button>
+        </div>
+      </div>
+
+      {error && !data && <Alert variant="danger">{error}</Alert>}
+      {!error && !data && <Loading />}
+
+      {data && (
+        <>
+          {error && (
+            <Alert variant="warning">Couldn’t refresh — showing figures from {at?.toLocaleTimeString()}. {error}</Alert>
+          )}
+
+          <KpiRow data={data} onPickGuests={pickGuests} />
+
+          {/* Main column (rooms, guests) beside the side column (attention,
+              staff). On a phone "Needs attention" comes straight after the
+              KPIs: it's the action list. */}
+          <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3 lg:grid-rows-[auto_1fr]">
+            <div className="lg:col-start-3 lg:row-start-1">
+              <AttentionPanel attention={data.attention} onPickGuests={pickGuests} />
+            </div>
+            <div className="space-y-8 lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1">
+              <section>
+                <SectionTitle aside={`${data.rooms.total} rooms`}>Hotel status</SectionTitle>
+                <HotelStatus rooms={data.rooms} />
+              </section>
+              <section ref={guestsRef} className="scroll-mt-4">
+                <SectionTitle>Guests</SectionTitle>
+                <GuestMonitor guests={data.guests} tab={guestTab} onTab={setGuestTab} />
+              </section>
+            </div>
+            {isAdmin && data.staff && (
+              <div className="self-start lg:col-start-3 lg:row-start-2">
+                <StaffMonitor staff={data.staff} activity={data.activity ?? []} />
+              </div>
+            )}
+          </div>
+
+          <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <section>
+              <SectionTitle aside="Food & Orders">POS overview</SectionTitle>
+              <PosOverview pos={data.pos} />
+            </section>
+            <section>
+              <SectionTitle>Inventory</SectionTitle>
+              <InventoryMonitor inventory={data.inventory} />
+            </section>
+          </div>
+        </>
+      )}
+
+      {isAdmin ? (
+        <RevenueAndReports />
+      ) : (
+        <>
+          <SectionTitle>Daily collection</SectionTitle>
+          <CollectionReport allowMonthly={false} />
+        </>
+      )}
     </div>
   )
 }
@@ -601,7 +699,5 @@ function AdminDashboard({ user }) {
 export default function Dashboard() {
   const { user, role } = useAuth()
   if (role === 'owner') return <OwnerDashboard user={user} />
-  if (role === 'admin') return <AdminDashboard user={user} />
-  // Receptionists see only the daily collection.
-  return <ReceptionistDashboard user={user} />
+  return <OperationsDashboard user={user} isAdmin={role === 'admin'} />
 }
