@@ -74,6 +74,7 @@ return function (RouteBuilder $routes): void {
         $builder->get('/reports/daily-collection', ['controller' => 'Reports', 'action' => 'dailyCollection']);
         $builder->get('/reports/monthly-summary', ['controller' => 'Reports', 'action' => 'monthlySummary']);
         $builder->get('/reports/operations', ['controller' => 'Reports', 'action' => 'operations']);
+        $builder->get('/reports/activity', ['controller' => 'Reports', 'action' => 'activity']);
 
         // Staff (users).
         $builder->get('/users', ['controller' => 'Users', 'action' => 'index']);

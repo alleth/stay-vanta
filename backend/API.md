@@ -60,6 +60,10 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
     `unpaid_reservations`, `open_invoices {total, count}`, `open_food_orders` (today's),
     `out_of_stock`, `low_stock`, `maintenance_rooms`.
   - Every aggregate is summed in PHP from plain row fetches (no `GROUP BY`).
+- `GET /api/reports/activity[?page=N]` (**admin-only**, own property) — the full feed behind the
+  Dashboard's Staff card ("View all activity"): the same merged stock-movement + food-order
+  events as `operations.activity`, newest first, 25 per page → `{activity, page, has_more}`.
+  `page` is 1–40 (each ledger is read to the end of the page before merging, so depth costs).
 
 ## Staff
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate

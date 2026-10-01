@@ -664,9 +664,16 @@ function OperationsDashboard({ user, isAdmin }) {
                 <GuestMonitor guests={data.guests} tab={guestTab} onTab={setGuestTab} />
               </section>
             </div>
+            {/* The Staff card never sizes its row. On desktop it's taken out
+                of flow (absolute) inside a slot that stretches to whatever
+                the Rooms/Guests column leaves below "Needs attention", so the
+                side column ends level with the main one — no gap, no push. On
+                smaller screens it gets a fixed height. Either way the card
+                scrolls inside. */}
             {isAdmin && data.staff && (
-              <div className="self-start lg:col-start-3 lg:row-start-2">
-                <StaffMonitor staff={data.staff} activity={data.activity ?? []} />
+              <div className="relative h-[28rem] lg:col-start-3 lg:row-start-2 lg:h-auto lg:min-h-[20rem]">
+                <StaffMonitor staff={data.staff} activity={data.activity ?? []}
+                  className="h-full lg:absolute lg:inset-0" />
               </div>
             )}
           </div>

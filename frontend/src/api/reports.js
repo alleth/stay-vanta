@@ -14,6 +14,11 @@ export const adminDashboard = () =>
 export const operationsDashboard = () =>
   client.get('/reports/operations').then((r) => r.data.operations)
 
+// The Staff card's full activity feed (admin only), 25 per page →
+// { activity, page, has_more }.
+export const staffActivity = (page = 1) =>
+  client.get('/reports/activity', { params: { page } }).then((r) => r.data)
+
 // Collection report: settled invoices + paid food orders in the window.
 // Pass { date } for a single day (any staff role), or { month, year } for a
 // whole month (owner/admin only).

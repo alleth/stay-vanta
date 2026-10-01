@@ -610,11 +610,47 @@ class ReportsController extends AppController
         ];
     }
 
+    /** Page size and deepest page for GET /reports/activity. */
+    private const ACTIVITY_PAGE_SIZE = 25;
+    private const ACTIVITY_MAX_PAGE = 40;
+
     /**
-     * The latest ledgered actions, newest first: stock movements and food
-     * orders, each with the person who took it.
+     * GET /api/reports/activity[?page=N]  (admin only, own property)
+     *
+     * The whole activity feed behind the Dashboard's Staff card ("View all
+     * activity"), newest first, 25 per page → {activity, page, has_more}.
+     *
+     * Two ledgers merged by time can't be paged with one OFFSET, so each is
+     * read up to the end of the requested page and the merge is sliced — the
+     * cost grows with depth, hence the page cap.
      */
-    private function recentActivity(int $propertyId): array
+    public function activity(): void
+    {
+        if (!$this->userHasRole('admin')) {
+            throw new ForbiddenException('Only a hotel/resort admin can view staff activity.');
+        }
+        $page = (int)($this->request->getQuery('page') ?? 1);
+        if ($page < 1 || $page > self::ACTIVITY_MAX_PAGE) {
+            throw new BadRequestException(sprintf('page must be 1-%d.', self::ACTIVITY_MAX_PAGE));
+        }
+        $end = $page * self::ACTIVITY_PAGE_SIZE;
+        // One past the page's end, so we know whether another page exists.
+        $events = $this->recentActivity((int)$this->currentUser->property_id, $end + 1);
+
+        $this->set([
+            'activity' => array_slice($events, $end - self::ACTIVITY_PAGE_SIZE, self::ACTIVITY_PAGE_SIZE),
+            'page' => $page,
+            'has_more' => count($events) > $end,
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['activity', 'page', 'has_more']);
+    }
+
+    /**
+     * The latest `$limit` ledgered actions, newest first: stock movements and
+     * food orders, each with the person who took it. Reading `$limit` from
+     * each ledger guarantees the merged top `$limit` is exact.
+     */
+    private function recentActivity(int $propertyId, int $limit = self::LIST_LIMIT): array
     {
         $events = [];
         $movements = $this->fetchTable('StockMovements')->find()
@@ -624,7 +660,7 @@ class ReportsController extends AppController
             ])
             ->where(['StockMovements.property_id' => $propertyId])
             ->orderBy(['StockMovements.created' => 'DESC', 'StockMovements.id' => 'DESC'])
-            ->limit(self::LIST_LIMIT)
+            ->limit($limit)
             ->all();
         foreach ($movements as $m) {
             $events[] = [
@@ -644,7 +680,7 @@ class ReportsController extends AppController
             ->contain(['Rooms' => ['fields' => ['id', 'room_number']], 'Receptionist' => ['fields' => ['id', 'name']]])
             ->where(['FoodOrders.property_id' => $propertyId])
             ->orderBy(['FoodOrders.created' => 'DESC', 'FoodOrders.id' => 'DESC'])
-            ->limit(self::LIST_LIMIT)
+            ->limit($limit)
             ->all();
         foreach ($orders as $o) {
             $events[] = [
@@ -662,7 +698,7 @@ class ReportsController extends AppController
 
         usort($events, fn($a, $b) => (string)$b['at']?->format('c') <=> (string)$a['at']?->format('c'));
 
-        return array_slice($events, 0, self::LIST_LIMIT);
+        return array_slice($events, 0, $limit);
     }
 
     /**

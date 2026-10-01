@@ -1,7 +1,11 @@
-import { useState } from 'react'
-import { Badge, Card, Table, Tabs, Tab, ListGroup } from './ui'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Alert, Badge, Button, ButtonGroup, Card, ListGroup, Modal, Spinner, Table, Tabs, Tab,
+} from './ui'
 import { SummaryGroup, SummaryRow } from './StatCard'
 import { formatMoney } from '../utils/format'
+import { staffActivity } from '../api/reports'
+import { SkeletonTable } from './Skeleton'
 
 // The operational half of the Dashboard (admin + receptionist), drawn from one
 // GET /reports/operations payload. Every figure is today's, on the hotel's
@@ -503,55 +507,174 @@ function activityText(e) {
   return `Order #${e.order_id}${where} · ${formatMoney(e.total)} · ${state}`
 }
 
+// One feed entry: who, what, when. Shared by the card and the full list.
+function ActivityItem({ e }) {
+  return (
+    <ListGroup.Item className="px-4 py-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="min-w-0 truncate font-medium">{e.actor ?? 'Unknown'}</span>
+        <span className="shrink-0 text-xs tabular-nums text-muted">{when(e.at)}</span>
+      </div>
+      <div className="truncate text-muted" title={activityText(e)}>{activityText(e)}</div>
+    </ListGroup.Item>
+  )
+}
+
+const dayLabel = (iso) => {
+  const d = new Date(iso)
+  const y = new Date()
+  y.setDate(y.getDate() - 1)
+  if (d.toDateString() === new Date().toDateString()) return 'Today'
+  if (d.toDateString() === y.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// "View all activity": the whole feed, 25 at a time, grouped by day. The list
+// scrolls inside the dialog, so the dialog stays one screen tall however far
+// back someone reads.
+function ActivityModal({ onHide }) {
+  const [pages, setPages] = useState([])
+  const [hasMore, setHasMore] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  const fetchPage = useCallback((page) => {
+    setBusy(true)
+    return staffActivity(page)
+      .then((r) => {
+        setPages((p) => [...p.slice(0, page - 1), r.activity])
+        setHasMore(r.has_more)
+        setError(null)
+      })
+      .catch((err) => setError(err?.response?.data?.message ?? 'Could not load the activity.'))
+      .finally(() => setBusy(false))
+  }, [])
+
+  useEffect(() => {
+    const t = setTimeout(() => fetchPage(1), 0)
+    return () => clearTimeout(t)
+  }, [fetchPage])
+
+  const events = pages.flat()
+  const days = []
+  for (const e of events) {
+    const label = dayLabel(e.at)
+    if (days.length === 0 || days[days.length - 1].label !== label) days.push({ label, items: [] })
+    days[days.length - 1].items.push(e)
+  }
+
+  return (
+    <Modal show onHide={onHide} size="lg">
+      <Modal.Header closeButton>
+        <Modal.Title>Staff activity</Modal.Title>
+        <p className="mb-0 text-xs text-muted">Stock movements and food orders, with who recorded each.</p>
+      </Modal.Header>
+      <div className="max-h-[65vh] overflow-y-auto">
+        {error && <div className="p-4"><Alert variant="danger" className="mb-0">{error}</Alert></div>}
+        {!error && events.length === 0 && (busy ? <SkeletonTable rows={6} /> : <Empty>No activity recorded yet.</Empty>)}
+        {days.map((d) => (
+          <section key={d.label}>
+            <h3 className="sticky top-0 z-10 border-y border-line bg-subtle px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.04em] text-muted">
+              {d.label}
+            </h3>
+            <ListGroup>
+              {d.items.map((e) => (
+                <ListGroup.Item key={e.id} className="flex items-baseline gap-3 px-4 py-2">
+                  <span className="w-16 shrink-0 text-xs tabular-nums text-muted">
+                    {new Date(e.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                  <span className="w-32 shrink-0 truncate font-medium">{e.actor ?? 'Unknown'}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted" title={activityText(e)}>{activityText(e)}</span>
+                </ListGroup.Item>
+              ))}
+            </ListGroup>
+          </section>
+        ))}
+      </div>
+      <Modal.Footer className="justify-between">
+        <span className="text-xs text-muted">{events.length > 0 && `Showing ${events.length}`}</span>
+        <div className="flex gap-2">
+          {hasMore && (
+            <Button size="sm" variant="outline-secondary" disabled={busy} onClick={() => fetchPage(pages.length + 1)}>
+              {busy ? <Spinner size="sm" /> : 'Load older'}
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={onHide}>Close</Button>
+        </div>
+      </Modal.Footer>
+    </Modal>
+  )
+}
+
 // Admin only. Activity comes from the two ledgers that record who did each
 // thing (stock movements, food orders) — see API.md for why reservations
 // aren't in it.
-export function StaffMonitor({ staff, activity }) {
+//
+// Fixed-height by design: the card fills whatever height its grid slot gives
+// it (`h-full`, from the Dashboard's side column) and scrolls inside, so a busy
+// day's feed or a long staff list never stretches the row or pushes the
+// sections below down. Activity and the staff list share one scroll area
+// behind a toggle rather than stacking.
+export function StaffMonitor({ staff, activity, className = '' }) {
+  const [view, setView] = useState('activity')
+  const [showAll, setShowAll] = useState(false)
   return (
-    <Card>
-      <Card.Header className="flex items-center justify-between">
-        <span>Staff</span>
-        <span className="text-xs font-normal text-muted">
-          {staff.active} active · {staff.active_today} busy today
-        </span>
+    <Card className={`flex flex-col overflow-hidden ${className}`}>
+      <Card.Header className="flex shrink-0 items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div>Staff</div>
+          <div className="text-xs font-normal text-muted">
+            {staff.active} active · {staff.active_today} busy today
+          </div>
+        </div>
+        <ButtonGroup>
+          <Button size="sm" variant={view === 'activity' ? 'secondary' : 'outline-secondary'}
+            onClick={() => setView('activity')}>
+            Activity
+          </Button>
+          <Button size="sm" variant={view === 'staff' ? 'secondary' : 'outline-secondary'}
+            onClick={() => setView('staff')}>
+            Team ({staff.members.length})
+          </Button>
+        </ButtonGroup>
       </Card.Header>
-      {staff.members.length === 0 ? (
-        <Empty>No active staff accounts.</Empty>
-      ) : (
-        <ListGroup>
-          {staff.members.map((m) => (
-            <ListGroup.Item key={m.id} className="flex items-center gap-3 px-4 py-2">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-subtle text-xs font-semibold">
-                {m.name.trim().charAt(0).toUpperCase()}
-              </span>
-              <span className="min-w-0 flex-1 truncate">{m.name}</span>
-              <Badge bg={m.role === 'admin' ? 'primary' : 'secondary'}>{m.role}</Badge>
-              <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted"
-                title="Stock movements and food orders recorded today">
-                {plural(m.actions_today, 'action')}
-              </span>
-            </ListGroup.Item>
-          ))}
-        </ListGroup>
-      )}
-      <div className="border-t border-line px-4 pt-3 text-xs font-medium uppercase tracking-[0.04em] text-muted">
-        Recent activity
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {view === 'activity' ? (
+          activity.length === 0 ? (
+            <Empty>No stock movements or orders recorded yet.</Empty>
+          ) : (
+            <ListGroup>
+              {activity.map((e) => <ActivityItem key={e.id} e={e} />)}
+            </ListGroup>
+          )
+        ) : staff.members.length === 0 ? (
+          <Empty>No active staff accounts.</Empty>
+        ) : (
+          <ListGroup>
+            {staff.members.map((m) => (
+              <ListGroup.Item key={m.id} className="flex items-center gap-3 px-4 py-2">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-subtle text-xs font-semibold">
+                  {m.name.trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                <Badge bg={m.role === 'admin' ? 'primary' : 'secondary'}>{m.role}</Badge>
+                <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted"
+                  title="Stock movements and food orders recorded today">
+                  {plural(m.actions_today, 'action')}
+                </span>
+              </ListGroup.Item>
+            ))}
+          </ListGroup>
+        )}
       </div>
-      {activity.length === 0 ? (
-        <Empty>No stock movements or orders recorded yet.</Empty>
-      ) : (
-        <ListGroup>
-          {activity.map((e) => (
-            <ListGroup.Item key={e.id} className="px-4 py-2">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="font-medium">{e.actor ?? 'Unknown'}</span>
-                <span className="shrink-0 text-xs tabular-nums text-muted">{when(e.at)}</span>
-              </div>
-              <div className="truncate text-muted">{activityText(e)}</div>
-            </ListGroup.Item>
-          ))}
-        </ListGroup>
+
+      {view === 'activity' && activity.length > 0 && (
+        <Card.Footer className="shrink-0 py-2 text-center">
+          <Button size="sm" variant="link" onClick={() => setShowAll(true)}>View all activity →</Button>
+        </Card.Footer>
       )}
+      {showAll && <ActivityModal onHide={() => setShowAll(false)} />}
     </Card>
   )
 }
