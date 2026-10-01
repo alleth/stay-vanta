@@ -9,7 +9,7 @@ import { formatMoney } from '../utils/format'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
 import { StatCard } from '../components/StatCard'
 import {
-  SectionTitle, KpiRow, AttentionPanel, HotelStatus, GuestMonitor, PosOverview, InventoryMonitor, StaffMonitor,
+  SectionTitle, TopRow, AttentionPanel, GuestMonitor, PosOverview, InventoryMonitor, StaffMonitor,
 } from '../components/Operations'
 
 // ApexCharts is a large dependency (~200KB gzipped) used only by the admin
@@ -645,48 +645,44 @@ function OperationsDashboard({ user, isAdmin }) {
             <Alert variant="warning">Couldn’t refresh — showing figures from {at?.toLocaleTimeString()}. {error}</Alert>
           )}
 
-          <KpiRow data={data} onPickGuests={pickGuests} />
+          {/* Rooms overview beside Today + POS sales. */}
+          <TopRow data={data} onPickGuests={pickGuests} />
 
-          {/* Main column (rooms, guests) beside the side column (attention,
-              staff). On a phone "Needs attention" comes straight after the
-              KPIs: it's the action list. */}
-          <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3 lg:grid-rows-[auto_1fr]">
+          {/* Guests beside "Needs attention", stretched to one height so the
+              shorter card doesn't leave a hole. On a phone the alerts come
+              first: they're the action list. */}
+          <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
             <div className="lg:col-start-3 lg:row-start-1">
-              <AttentionPanel attention={data.attention} onPickGuests={pickGuests} />
+              <AttentionPanel attention={data.attention} onPickGuests={pickGuests} className="h-full" />
             </div>
-            <div className="space-y-8 lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1">
-              <section>
-                <SectionTitle>Hotel status</SectionTitle>
-                <HotelStatus rooms={data.rooms} />
-              </section>
-              <section ref={guestsRef} className="scroll-mt-4">
-                <SectionTitle>Guests</SectionTitle>
-                <GuestMonitor guests={data.guests} tab={guestTab} onTab={setGuestTab} />
-              </section>
-            </div>
-            {/* The Staff card never sizes its row. On desktop it's taken out
-                of flow (absolute) inside a slot that stretches to whatever
-                the Rooms/Guests column leaves below "Needs attention", so the
-                side column ends level with the main one — no gap, no push. On
-                smaller screens it gets a fixed height. Either way the card
-                scrolls inside. */}
-            {isAdmin && data.staff && (
-              <div className="relative h-[28rem] lg:col-start-3 lg:row-start-2 lg:h-auto lg:min-h-[20rem]">
-                <StaffMonitor staff={data.staff} activity={data.activity ?? []}
-                  className="h-full lg:absolute lg:inset-0" />
-              </div>
-            )}
+            <section ref={guestsRef} className="scroll-mt-4 lg:col-span-2 lg:col-start-1 lg:row-start-1">
+              <GuestMonitor guests={data.guests} tab={guestTab} onTab={setGuestTab} className="h-full" />
+            </section>
           </div>
 
-          <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <section>
+          {/* POS, Inventory and (admin) Staff side by side. Each section is
+              title + card, the card filling the row — so all three end level.
+              The Staff card never sizes the row: on desktop it's taken out of
+              flow (absolute) and fills what POS/Inventory set, elsewhere it
+              gets a fixed height; either way its feed scrolls inside. */}
+          <div className={`mb-8 grid grid-cols-1 gap-6 ${isAdmin && data.staff ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+            <section className="grid grid-rows-[auto_1fr]">
               <SectionTitle aside="Food & Orders">POS overview</SectionTitle>
               <PosOverview pos={data.pos} />
             </section>
-            <section>
+            <section className="grid grid-rows-[auto_1fr]">
               <SectionTitle>Inventory</SectionTitle>
               <InventoryMonitor inventory={data.inventory} />
             </section>
+            {isAdmin && data.staff && (
+              <section className="grid grid-rows-[auto_1fr]">
+                <SectionTitle>Staff</SectionTitle>
+                <div className="relative h-[28rem] lg:h-auto lg:min-h-[20rem]">
+                  <StaffMonitor staff={data.staff} activity={data.activity ?? []}
+                    className="h-full lg:absolute lg:inset-0" />
+                </div>
+              </section>
+            )}
           </div>
         </>
       )}

@@ -64,39 +64,6 @@ function Empty({ children }) {
 
 /* ------------------------------------------------------------ KPI row */
 
-// The management summary: how the property is doing right now. This is the
-// one place the status *counts* live — Hotel Status below shows the rooms
-// themselves, not the numbers again.
-function RoomsKpi({ rooms }) {
-  const pct = (n) => (rooms.total > 0 ? `${(n / rooms.total) * 100}%` : '0%')
-  return (
-    <SummaryGroup label="Rooms">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="flex items-baseline gap-2">
-          <span className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">
-            {Math.round(rooms.occupancy_rate)}%
-          </span>
-          <span className="text-sm text-muted">occupancy</span>
-        </div>
-        <span className="text-sm text-muted tabular-nums">{plural(rooms.total, 'room')}</span>
-      </div>
-      <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-subtle" role="img"
-        aria-label={ROOM_STATUS.map((s) => `${rooms[s.key]} ${s.label.toLowerCase()}`).join(', ')}>
-        {ROOM_STATUS.map((s) => <div key={s.key} className={s.dot} style={{ width: pct(rooms[s.key]) }} />)}
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1">
-        {ROOM_STATUS.map((s) => (
-          <div key={s.key} className="flex items-center gap-2">
-            <span className={`h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
-            <span className="min-w-0 flex-1 text-sm text-muted">{s.label}</span>
-            <span className="sv-serif font-bold tabular-nums">{rooms[s.key]}</span>
-          </div>
-        ))}
-      </div>
-    </SummaryGroup>
-  )
-}
-
 function TodayKpi({ guests, onPick }) {
   const { arrivals, departures } = guests
   const left = (g) => g.total - g.done
@@ -147,12 +114,17 @@ function PosKpi({ pos }) {
   )
 }
 
-export function KpiRow({ data, onPickGuests }) {
+// The top of the page: Rooms overview (two thirds) beside Today and POS sales
+// stacked — what's visible on login without scrolling. With a dozen-odd rooms
+// the two sides come out about the same height.
+export function TopRow({ data, onPickGuests }) {
   return (
-    <div className="mb-8 grid grid-cols-1 gap-3 md:grid-cols-3">
-      <RoomsKpi rooms={data.rooms} />
-      <TodayKpi guests={data.guests} onPick={onPickGuests} />
-      <PosKpi pos={data.pos} />
+    <div className="mb-8 grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <RoomsOverview rooms={data.rooms} className="lg:col-span-2" />
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-1">
+        <TodayKpi guests={data.guests} onPick={onPickGuests} />
+        <PosKpi pos={data.pos} />
+      </div>
     </div>
   )
 }
@@ -185,11 +157,11 @@ function attentionItems(a) {
   return items.filter((i) => i.n > 0)
 }
 
-export function AttentionPanel({ attention, onPickGuests }) {
+export function AttentionPanel({ attention, onPickGuests, className = '' }) {
   const items = attentionItems(attention)
   const urgent = items.some((i) => i.sev === 'danger')
   return (
-    <Card className={urgent ? 'ring-1 ring-accent' : ''}>
+    <Card className={`${urgent ? 'ring-1 ring-accent' : ''} ${className}`}>
       <Card.Header className="flex items-center justify-between">
         <span>Needs attention</span>
         {items.length > 0 && <Badge bg={urgent ? 'danger' : 'secondary'}>{items.length}</Badge>}
@@ -223,7 +195,7 @@ export function AttentionPanel({ attention, onPickGuests }) {
   )
 }
 
-/* ---------------------------------------------------------- Hotel status */
+/* -------------------------------------------------------- Rooms overview */
 
 // What a room needs today (from the API's `flag`). Urgent ones ring the tile
 // in red; the rest only change its caption.
@@ -234,10 +206,11 @@ const ROOM_FLAG = {
   arriving: { label: 'Arriving today', urgent: false },
 }
 
-// Operational monitoring: every room as a colour-coded tile, so the question
-// is "which room?", not "how many?" (the counts are the Rooms card's job).
-// The legend filters the grid; "Needs action" narrows it to flagged rooms.
-export function HotelStatus({ rooms }) {
+// All room monitoring in one card: the summary (occupancy, total, the four
+// status counts) on top, every room as a colour-coded tile below. The status
+// counts double as the grid's legend and filter, so nothing is shown twice;
+// "Needs action" narrows the grid to flagged rooms.
+function RoomsOverview({ rooms, className = '' }) {
   const [filter, setFilter] = useState(null) // null | status key | 'flagged'
   const status = Object.fromEntries(ROOM_STATUS.map((s) => [s.key, s]))
   const flagged = rooms.map.filter((r) => r.flag)
@@ -245,25 +218,50 @@ export function HotelStatus({ rooms }) {
     ? flagged
     : filter ? rooms.map.filter((r) => r.status === filter) : rooms.map
   const toggle = (key) => setFilter((f) => (f === key ? null : key))
-  const pill = (active) => `inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
-    active ? 'border-ink bg-subtle text-body' : 'border-line text-muted hover:bg-subtle hover:text-body'}`
+  const pct = (n) => (rooms.total > 0 ? `${(n / rooms.total) * 100}%` : '0%')
+  const chip = (active) => `flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
+    active ? 'border-ink bg-subtle' : 'border-line hover:bg-subtle'}`
 
   return (
-    <Card>
-      <Card.Header className="flex flex-wrap items-center gap-1.5 py-2.5 font-normal">
-        {ROOM_STATUS.map((s) => (
-          <button key={s.key} type="button" aria-pressed={filter === s.key}
-            onClick={() => toggle(s.key)} className={pill(filter === s.key)}>
-            <span className={`h-2 w-2 rounded-full ${s.dot}`} />{s.label}
-          </button>
-        ))}
-        {flagged.length > 0 && (
-          <button type="button" aria-pressed={filter === 'flagged'}
-            onClick={() => toggle('flagged')} className={`${pill(filter === 'flagged')} sm:ml-auto`}>
-            <span className="h-2 w-2 rounded-full ring-2 ring-red-500" />Needs action ({flagged.length})
-          </button>
-        )}
-      </Card.Header>
+    <Card className={`h-full ${className}`}>
+      <Card.Body className="border-b border-line">
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <span className="text-xs font-medium uppercase tracking-[0.04em] text-muted">Rooms overview</span>
+          {flagged.length > 0 && (
+            <button type="button" aria-pressed={filter === 'flagged'} onClick={() => toggle('flagged')}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                filter === 'flagged' ? 'border-ink bg-subtle text-body' : 'border-line text-muted hover:bg-subtle hover:text-body'}`}>
+              <span className="h-2 w-2 rounded-full ring-2 ring-red-500" />Needs action ({flagged.length})
+            </button>
+          )}
+        </div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="sm:w-44 sm:shrink-0">
+            <div className="flex items-baseline gap-2">
+              <span className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">
+                {Math.round(rooms.occupancy_rate)}%
+              </span>
+              <span className="text-sm text-muted">occupancy</span>
+            </div>
+            <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-subtle" role="img"
+              aria-label={ROOM_STATUS.map((s) => `${rooms[s.key]} ${s.label.toLowerCase()}`).join(', ')}>
+              {ROOM_STATUS.map((s) => <div key={s.key} className={s.dot} style={{ width: pct(rooms[s.key]) }} />)}
+            </div>
+            <div className="mt-1.5 text-xs text-muted tabular-nums">{plural(rooms.total, 'room')} in total</div>
+          </div>
+          <div className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-4">
+            {ROOM_STATUS.map((s) => (
+              <button key={s.key} type="button" aria-pressed={filter === s.key}
+                title={`Show only ${s.label.toLowerCase()} rooms`}
+                onClick={() => toggle(s.key)} className={chip(filter === s.key)}>
+                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.dot}`} />
+                <span className="min-w-0 flex-1 truncate text-xs text-muted">{s.label}</span>
+                <span className="sv-serif text-lg font-bold leading-none tabular-nums">{rooms[s.key]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </Card.Body>
       <Card.Body>
         {rooms.total === 0 ? (
           <p className="mb-0 text-sm text-muted">No rooms set up yet — add them on Front Desk.</p>
@@ -349,10 +347,10 @@ function GuestRows({ list, empty, dateCol }) {
   )
 }
 
-export function GuestMonitor({ guests, tab, onTab }) {
+export function GuestMonitor({ guests, tab, onTab, className = '' }) {
   const title = (label, list) => `${label} (${list.total})`
   return (
-    <Card>
+    <Card className={className}>
       <Tabs activeKey={tab} onSelect={onTab} className="px-2 pt-1">
         <Tab eventKey="arrivals" title={title('Arrivals', guests.arrivals)}>
           <GuestRows list={guests.arrivals} dateCol="in" empty="No arrivals due today." />
@@ -488,7 +486,7 @@ function StockList({ title, rows, total, tone, emptyText }) {
 export function InventoryMonitor({ inventory }) {
   const topUsed = Math.max(...inventory.most_used.map((u) => u.quantity), 1)
   return (
-    <Card className="h-full">
+    <Card className="@container h-full">
       <Card.Body className="flex flex-wrap items-end justify-between gap-3 border-b border-line">
         <div>
           <div className="text-xs font-medium uppercase tracking-[0.04em] text-muted">Items tracked</div>
@@ -500,7 +498,7 @@ export function InventoryMonitor({ inventory }) {
           {inventory.out_of_stock_count + inventory.low_stock_count === 0 && <Badge bg="success">All stocked</Badge>}
         </div>
       </Card.Body>
-      <Card.Body className="grid gap-5 border-b border-line sm:grid-cols-2">
+      <Card.Body className="grid gap-5 border-b border-line @md:grid-cols-2">
         <StockList title="Out of stock" rows={inventory.out_of_stock} total={inventory.out_of_stock_count}
           tone="text-red-600 dark:text-red-400" emptyText="Nothing is out of stock." />
         <StockList title="Low stock" rows={inventory.low_stock} total={inventory.low_stock_count}
@@ -656,11 +654,8 @@ export function StaffMonitor({ staff, activity, className = '' }) {
   return (
     <Card className={`flex flex-col overflow-hidden ${className}`}>
       <Card.Header className="flex shrink-0 items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div>Staff</div>
-          <div className="text-xs font-normal text-muted">
-            {staff.active} active · {staff.active_today} busy today
-          </div>
+        <div className="min-w-0 text-xs font-normal text-muted">
+          {staff.active} active · {staff.active_today} busy today
         </div>
         <ButtonGroup>
           <Button size="sm" variant={view === 'activity' ? 'secondary' : 'outline-secondary'}
