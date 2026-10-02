@@ -39,7 +39,7 @@ class RoomsController extends AppController
 
         // Only owners/admins may add rooms; receptionists manage existing ones.
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may add rooms.');
+            throw new ForbiddenException('Only Managers may add rooms.');
         }
 
         $propertyId = $this->effectivePropertyId();
@@ -83,7 +83,7 @@ class RoomsController extends AppController
         $changingDetails = ($newNumber !== null && $newNumber !== $room->room_number)
             || ($newType !== null && $newType !== $room->room_type);
         if ($changingDetails && !$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may rename or retype a room.');
+            throw new ForbiddenException('Only Managers may rename or retype a room.');
         }
 
         $rooms->patchEntity($room, [
@@ -112,7 +112,7 @@ class RoomsController extends AppController
         $this->request->allowMethod(['delete', 'post']);
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may delete rooms.');
+            throw new ForbiddenException('Only Managers may delete rooms.');
         }
 
         $rooms = $this->fetchTable('Rooms');

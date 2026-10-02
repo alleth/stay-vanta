@@ -40,7 +40,7 @@ class RoomRatesController extends AppController
         $this->request->allowMethod('post');
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may add rates.');
+            throw new ForbiddenException('Only Managers may add rates.');
         }
 
         $propertyId = $this->effectivePropertyId();
@@ -77,7 +77,7 @@ class RoomRatesController extends AppController
         $this->request->allowMethod(['patch', 'put', 'post']);
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may edit rates.');
+            throw new ForbiddenException('Only Managers may edit rates.');
         }
 
         $rates = $this->fetchTable('RoomRates');

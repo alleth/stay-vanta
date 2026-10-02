@@ -9,10 +9,12 @@ use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
 use App\Model\Table\ReservationExtraChargesTable;
 use App\Model\Table\ReservationsTable;
+use Cake\Database\Expression\QueryExpression;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\I18n\Date;
 use Cake\I18n\DateTime;
+use Cake\ORM\Query\SelectQuery;
 
 /**
  * Reservations — bookings plus the check-in/out/cancel lifecycle.
@@ -78,6 +80,16 @@ class ReservationsController extends AppController
             }
         }
 
+        // `billing=not_billed`: the Front Desk "not billed" figure and Finance →
+        // Receivables — the same set stats() counts (see notBilled()).
+        $billing = $this->request->getQuery('billing');
+        if ($billing !== null && $billing !== '') {
+            if ($billing !== 'not_billed') {
+                throw new BadRequestException('billing must be not_billed.');
+            }
+            $this->notBilled($query);
+        }
+
         $since = $this->queryDate('since');
         if ($since !== null) {
             $from = BusinessTime::startOf($since);
@@ -112,6 +124,7 @@ class ReservationsController extends AppController
         foreach ($rows as $r) {
             $r->set('quote', $reservations->quote($r, $this->resolveBaseRate((int)$r->property_id, $r->room_id)));
             $r->set('room_charge_invoice', $chargeStatus[(int)$r->id] ?? null);
+            $r->set('billing_state', self::billingState($chargeStatus[(int)$r->id] ?? null));
         }
 
         $this->set([
@@ -149,10 +162,13 @@ class ReservationsController extends AppController
                 'Reservations.status' => 'cancelled',
                 'Reservations.cancelled_at >=' => BusinessTime::startOf($today),
             ]),
+            // Old figure, kept for older screens until step 3 settles; new
+            // screens show not_billed.
             'unpaid' => $count([
                 'Reservations.status !=' => 'cancelled',
                 'Reservations.payment_status' => 'unpaid',
             ]),
+            'not_billed' => $this->notBilled($this->scopeToProperty($reservations->find()))->count(),
             // Every open invoice (room charges, food charged to the room…):
             // money charged but not yet collected until someone settles it.
             'open_invoices' => $this->scopeToProperty(
@@ -161,16 +177,50 @@ class ReservationsController extends AppController
         ]);
         $this->viewBuilder()->setOption(
             'serialize',
-            ['booked', 'checked_out_today', 'cancelled_today', 'unpaid', 'open_invoices'],
+            ['booked', 'checked_out_today', 'cancelled_today', 'unpaid', 'not_billed', 'open_invoices'],
         );
     }
 
     /**
+     * A reservation's billing state, read from the invoice its room charge
+     * sits on (the source of truth, not `payment_status`):
+     * not_billed (no room charge posted) · billed (on an open invoice) ·
+     * settled (that invoice is settled — collected).
+     */
+    private static function billingState(?string $chargeInvoiceStatus): string
+    {
+        return match ($chargeInvoiceStatus) {
+            'settled' => 'settled',
+            'open' => 'billed',
+            default => 'not_billed',
+        };
+    }
+
+    /**
+     * Narrow a reservations query to stays that should be billed but aren't:
+     * the stay has started (checked in or out) and no room charge is posted.
+     * Future bookings aren't receivables yet, so they're not in it. A
+     * correlated NOT EXISTS, not a GROUP BY (ONLY_FULL_GROUP_BY on MySQL 9).
+     */
+    private function notBilled(SelectQuery $query): SelectQuery
+    {
+        $chargeLines = $this->fetchTable('InvoiceLines')->find()
+            ->select(['InvoiceLines.id'])
+            ->where([
+                'InvoiceLines.source_type' => 'reservation',
+                'InvoiceLines.source_id = Reservations.id',
+            ]);
+
+        return $query
+            ->where(['Reservations.status IN' => ['checked_in', 'checked_out']])
+            ->where(fn(QueryExpression $exp) => $exp->notExists($chargeLines));
+    }
+
+    /**
      * The status of the invoice each reservation's room charge sits on, keyed
-     * by reservation id — one query for the whole page. "Marked paid" is only
-     * a Front Desk flag; the money counts as collected once that invoice is
-     * settled, so the table needs this to show which paid stays are still
-     * sitting on an open tab.
+     * by reservation id — one query for the whole page. The money counts as
+     * collected once that invoice is settled, so the table needs this to show
+     * which billed stays are still sitting on an open invoice.
      *
      * @param list<int> $ids
      * @return array<int, string> reservation id → 'open' | 'settled'
@@ -496,7 +546,7 @@ class ReservationsController extends AppController
             && $this->isBeforeToday($newCheckIn)
             && !$this->userHasRole('admin')
         ) {
-            throw new ForbiddenException('Only an admin can move a booking to a date before today.');
+            throw new ForbiddenException('Only a Manager can move a booking to a date before today.');
         }
 
         $roomId = $this->request->getData('room_id') ?? $reservation->room_id;
@@ -669,7 +719,7 @@ class ReservationsController extends AppController
         $this->request->allowMethod('delete');
 
         if (!$this->userHasRole('admin')) {
-            throw new ForbiddenException('Only an admin can delete a reservation.');
+            throw new ForbiddenException('Only a Manager can delete a reservation.');
         }
 
         $reservations = $this->fetchTable('Reservations');
@@ -901,29 +951,73 @@ class ReservationsController extends AppController
         if (!in_array($status, ReservationsTable::PAYMENT_STATUSES, true)) {
             throw new BadRequestException('payment_status must be unpaid or paid.');
         }
-        // Once the invoice is settled the money has been collected (and its
-        // SI/OR numbers issued), so "unpaid" would contradict the books.
-        if ($status === 'unpaid' && $this->isSettled($reservation)) {
+        // "Mark unpaid" only flipped the flag and left the posted charge on the
+        // invoice. It's gone; the audited Reverse room charge (reason required)
+        // arrives with the invoice event records (build step 6).
+        if ($status === 'unpaid') {
             throw new BadRequestException(
-                "This reservation's invoice is already settled, so it can't be marked unpaid.",
+                "Reversing a room charge isn't available yet. Cancel the reservation to reverse its charges.",
             );
         }
 
-        $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $status) {
-            $reservation->set('payment_status', $status);
+        $this->postChargeOrFail($reservation);
+        $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * POST /api/reservations/{id}/post-room-charge  (Manager + Front Desk Staff)
+     *
+     * Bills the stay: posts its itemized room charge (and any downpayment
+     * credit) to the guest's open invoice. The reservation then reads as
+     * Billed, and as Settled once that invoice is settled — billing state comes
+     * from the invoice, not from `payment_status`. Posting twice posts once.
+     */
+    public function postCharge(int $id): void
+    {
+        $this->request->allowMethod('post');
+
+        $reservation = $this->scopeToProperty(
+            $this->fetchTable('Reservations')->find()->where(['Reservations.id' => $id]),
+        )->firstOrFail();
+
+        $this->postChargeOrFail($reservation);
+        $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * Post the room charge, or say why it can't be. Unlike the old "Mark
+     * paid", which marked a guestless or unpriced stay paid and posted
+     * nothing, this refuses: a stay is only billed once a charge line exists.
+     */
+    private function postChargeOrFail(Reservation $reservation): void
+    {
+        if ($reservation->status === 'cancelled') {
+            throw new BadRequestException("A cancelled reservation can't be billed.");
+        }
+        if (!$reservation->guest_id) {
+            throw new BadRequestException('Add a guest first to post the room charge.');
+        }
+
+        $reservations = $this->fetchTable('Reservations');
+        $invoices = $this->fetchTable('Invoices');
+        $reservations->getConnection()->transactional(function () use ($reservations, $invoices, $reservation): void {
+            // Still set for any older screen that reads it; billing no longer does.
+            $reservation->set('payment_status', 'paid');
             $reservations->saveOrFail($reservation);
 
-            if ($status === 'paid' && $reservation->guest_id) {
-                $this->fetchTable('Invoices')->openInvoiceFor(
-                    (int)$reservation->property_id,
-                    (int)$reservation->guest_id,
-                    (int)$reservation->id,
+            $invoices->openInvoiceFor(
+                (int)$reservation->property_id,
+                (int)$reservation->guest_id,
+                (int)$reservation->id,
+            );
+            $this->postRoomCharge($reservation);
+
+            if ($invoices->invoiceForLine('reservation', (int)$reservation->id) === null) {
+                throw new BadRequestException(
+                    "There's no room rate for this stay, so there's nothing to post. Set the room's rate first.",
                 );
-                $this->postRoomCharge($reservation);
             }
         });
-
-        $this->respondWithReservation($reservation, 200);
     }
 
     /**
@@ -1465,7 +1559,7 @@ class ReservationsController extends AppController
             return false;
         }
         if (!$isAdmin) {
-            throw new ForbiddenException('Only an admin can add a booking with a check-in before today.');
+            throw new ForbiddenException('Only a Manager can add a booking with a check-in before today.');
         }
 
         return true;
@@ -1528,6 +1622,9 @@ class ReservationsController extends AppController
             contain: ['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts', 'ReservationExtraCharges'],
         );
         $full->set('quote', $reservations->quote($full, $this->resolveBaseRate((int)$full->property_id, $full->room_id)));
+        $chargeInvoice = $this->roomChargeStatuses([(int)$full->id])[(int)$full->id] ?? null;
+        $full->set('room_charge_invoice', $chargeInvoice);
+        $full->set('billing_state', self::billingState($chargeInvoice));
 
         $this->response = $this->response->withStatus($status);
         $this->set('reservation', $full);

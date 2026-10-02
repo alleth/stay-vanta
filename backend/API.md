@@ -11,15 +11,24 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
 ## Auth
 - `POST /api/auth/login` (public) · `GET /api/auth/me` · `POST /api/auth/logout`
 
-## Properties & reports
+## Properties, Platform, Finance, Operations
+
+> **Paths (build step 3).** New paths are `/api/platform/*`, `/api/finance/*` and
+> `/api/operations/*`. The old `/api/reports/*` paths still answer, served by the same actions,
+> until the frontend has been off them for a release; then they're removed. Don't use them in new
+> code.
+
 - `GET|POST /api/properties` — owner-only create; the owner's index contains each property's admin.
 - `PATCH|PUT /api/properties/{id}` — owner-only edit, incl. `subscription_status` & `subscription_fee`.
-- `GET /api/reports/owner-dashboard` (owner-only) — subscription revenue (week/month/YTD from
+- `GET /api/platform/dashboard` (Platform Owner only; old `/api/reports/owner-dashboard`) — subscription revenue (week/month/YTD from
   each subscriber's monthly fee) + counts (hotels, active subscriptions, admins).
-- `GET /api/reports/admin-dashboard` (admin-only, own property) — cards (inventory items,
+- `GET /api/finance/summary` (**Manager only**, own property) → `{summary: {collected: {week, month,
+  ytd, all_time}, outstanding: {total, count}}}`: collected per period on the hotel's calendar.
+- Old `GET /api/reports/admin-dashboard` (Manager only) keeps its old shape: cards (inventory items,
   occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time) +
   `outstanding` `{total, count}` (see below).
-- `GET /api/reports/daily-collection[?date=YYYY-MM-DD | ?month=&year= | ?from=&to=]` — money
+- `GET /api/finance/collections[?date=YYYY-MM-DD | ?month=&year= | ?from=&to=]` (old
+  `/api/reports/daily-collection`) — money
   collected in the window (settled invoices by `settled_at` + paid food orders); defaults to
   today. **The month+year and from/to forms are owner/admin-only** — a receptionist may only view
   one day (Revenue → Collections). Also returns `outstanding` `{total, count}`:
@@ -27,12 +36,14 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   not collected until settled, and not tied to the window.
 - All report dates/weeks/months are the **hotel's** (`App.businessTimezone`, default
   Asia/Manila), not UTC — see `App\Model\BusinessTime`.
-- `GET /api/reports/monthly-summary[?year=YYYY]` (**admin-only**, own property) — seasonality per
+- `GET /api/finance/seasonality[?year=YYYY]` (**Manager only**, own property; old
+  `/api/reports/monthly-summary`) — seasonality per
   calendar month of the year (default current): count of non-cancelled reservations (bucketed by
   `check_in`) and collected revenue (same definition as `admin-dashboard`). One pair of queries
   per month rather than `GROUP BY MONTH(...)` (`ONLY_FULL_GROUP_BY` avoidance). Powers the
   Revenue page's Analytics → "Seasonality" chart.
-- `GET /api/reports/operations` (**admin + receptionist**, own property; owner → 403) — the
+- `GET /api/operations/today` (**Manager + Front Desk Staff**, own property; Platform Owner → 403;
+  old `/api/reports/operations`) — the
   operational Dashboard in one call, as `operations`:
   - `rooms` `{total, occupied, available, reserved, maintenance, occupancy_rate}` — `reserved` is
     derived, not a room status: an `available` room held by a `booked` reservation covering today
@@ -59,12 +70,12 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
     notifications): `arrivals_pending`, `late_arrivals`, `departures_pending`,
     `overdue_departures`, `new_bookings` (non-walk-in reservations created today),
     `open_food_orders` (today's), `out_of_stock`, `low_stock`, `maintenance_rooms`. Operational
-    only: unpaid stays and open invoices belong to the Revenue page (`/reservations?payment_status=unpaid`,
-    `daily-collection`'s `outstanding`).
+    only: not-billed stays and open invoices belong to Finance (`/reservations?billing=not_billed`,
+    `finance/collections`' `outstanding`).
   - `revenue_today` `{collected, invoices, pos}` — the Dashboard's one money figure: collected
     today by the `daily-collection` definition (settled invoices by `settled_at` + paid food).
   - Every aggregate is summed in PHP from plain row fetches (no `GROUP BY`).
-- `GET /api/reports/activity[?page=N]` (**admin-only**, own property) — the full feed behind the
+- `GET /api/operations/activity[?page=N]` (**Manager only**, own property; old `/api/reports/activity`) — the full feed behind the
   Dashboard's Staff card ("View all activity"): the same merged stock-movement + food-order
   events as `operations.activity`, newest first, 25 per page → `{activity, page, has_more}`.
   `page` is 1–40 (each ledger is read to the end of the page before merging, so depth costs).
@@ -129,18 +140,24 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
   `PATCH|PUT /api/extra-charges/{id}` (**owner/admin only**; amount/active — the built-in row's
   name & code are fixed) · `DELETE /api/extra-charges/{id}` (**owner/admin only**; refuses the
   built-in row).
-- `GET /api/reservations[?status=][?payment_status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]`
-  → `{reservations,total,page,limit}`, each row with a computed `quote` and `room_charge_invoice`
-  (`null` = room charge not posted yet, `open` = on the guest's tab but not collected, `settled`).
-  `payment_status=unpaid` also excludes cancelled — the same set the stats' `unpaid` counts.
+- `GET /api/reservations[?status=][?billing=not_billed][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]`
+  → `{reservations,total,page,limit}`, each row with a computed `quote`, `room_charge_invoice`
+  (`null` = room charge not posted yet, `open` = on the guest's invoice but not collected,
+  `settled`) and **`billing_state`** derived from it: `not_billed` · `billed` · `settled`. **The
+  invoice is the source of truth for billing, not `payment_status`.**
+  `billing=not_billed` = a stay that has started (`checked_in`/`checked_out`) with no room charge
+  posted (correlated `NOT EXISTS` on `reservation` invoice lines); future bookings aren't in it. The
+  same set as the stats' `not_billed`. Any other `billing` value → 400. (Old filter
+  `payment_status=unpaid` still works until removed; it also excludes cancelled.)
   `since` is the table's
   window (booked/checked-in always; checked-out/cancelled only if that happened on/after it);
   `on_date` = non-cancelled stays touching the date (Calendar tab). `limit` is clamped 5–100 only
   when passed; omitted, it's the old wide window (200) — Food & Orders' checked-in picker relies on it.
-- `GET /api/reservations/stats` → `{booked, checked_out_today, cancelled_today, unpaid,
-  open_invoices}` (Front Desk summary cards, counted in the database; `unpaid` = non-cancelled
-  reservations whose `payment_status` is still `unpaid`, checked-out ones included;
-  `open_invoices` = the property's invoices not yet settled, of any kind).
+- `GET /api/reservations/stats` → `{booked, checked_out_today, cancelled_today, not_billed, unpaid,
+  open_invoices}` (Front Desk summary cards, counted in the database; `not_billed` = the
+  `billing=not_billed` set above; `unpaid` = the old figure (non-cancelled, `payment_status`
+  unpaid), kept until the old screens are gone; `open_invoices` = the property's invoices not yet
+  settled, of any kind).
 - `POST /api/reservations`
   - `walk_in` source → saved straight to `checked_in`, `check_in` forced to today, room flipped
     to `occupied`.
@@ -183,13 +200,21 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
 - `POST /api/reservations/{id}/{check-in|check-out|cancel}` — stamp
   `checked_in_at`/`checked_out_at`/`cancelled_at` and `receptionist_id`; flip room status.
   - check-in accepts `early_check_in:true` → posts the configured fee to the guest's invoice.
-  - check-out posts the room charge (+ downpayment credit) if Mark paid hasn't already.
+  - check-out posts the room charge (+ downpayment credit) if it hasn't been posted already.
   - cancel from `booked` refunds 90% of the downpayment, retains 10%
     (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`), and reverses room charge, credit and early
     check-in fee.
-- `POST /api/reservations/{id}/payment` (any authed) — `{payment_status: unpaid|paid}`; marking
-  `paid` posts the room charge onto the guest's invoice immediately. Marking `unpaid` is **400**
-  once that invoice is settled (the money's collected and its SI/OR numbers issued).
+- `POST /api/reservations/{id}/post-room-charge` (Manager + Front Desk Staff) — **Post room
+  charge**: posts the itemized room charge (+ any downpayment credit) to the guest's open
+  invoice, so the stay reads Billed (Settled once that invoice is settled). Idempotent. **400**
+  with a reason when nothing can be posted: cancelled ("A cancelled reservation can't be
+  billed."), no guest ("Add a guest first to post the room charge."), no resolvable room rate
+  (rolled back, no empty invoice left). Also sets `payment_status = paid` for older screens.
+- `POST /api/reservations/{id}/payment` (old "Mark paid / Mark unpaid", removed in a later
+  release) — `{payment_status: paid}` does exactly what `post-room-charge` does;
+  `{payment_status: unpaid}` is **always 400** since build step 3 (it left the posted charge on the
+  invoice). The audited **Reverse room charge** (Manager-only, reason required) arrives with the
+  invoice event records (build step 6); until then, cancel the reservation to reverse its charges.
 
 ## Guests
 - `GET /api/guests[?guest_type=&q=&page=&limit=]` → `{guests,total,page,limit}`. `limit` is only

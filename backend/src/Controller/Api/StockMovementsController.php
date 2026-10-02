@@ -55,7 +55,7 @@ class StockMovementsController extends AppController
         $this->request->allowMethod('post');
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may move stock manually.');
+            throw new ForbiddenException('Only Managers may move stock manually.');
         }
 
         $itemId = (int)$this->request->getData('inventory_item_id');

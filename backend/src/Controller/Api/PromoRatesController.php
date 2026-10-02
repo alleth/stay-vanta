@@ -48,7 +48,7 @@ class PromoRatesController extends AppController
         $this->request->allowMethod('post');
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may add promo rates.');
+            throw new ForbiddenException('Only Managers may add promo rates.');
         }
 
         $propertyId = $this->effectivePropertyId();
@@ -87,7 +87,7 @@ class PromoRatesController extends AppController
         $this->request->allowMethod(['patch', 'put', 'post']);
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may edit promo rates.');
+            throw new ForbiddenException('Only Managers may edit promo rates.');
         }
 
         $promoRates = $this->fetchTable('PromoRates');
@@ -122,7 +122,7 @@ class PromoRatesController extends AppController
         $this->request->allowMethod('delete');
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may delete promo rates.');
+            throw new ForbiddenException('Only Managers may delete promo rates.');
         }
 
         $promoRates = $this->fetchTable('PromoRates');

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\Entity\User;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -25,7 +26,7 @@ class UsersController extends AppController
 
         // Auth has run in the parent; now gate the whole controller by role.
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Staff management is restricted to owners and admins.');
+            throw new ForbiddenException('Only Managers can manage staff.');
         }
     }
 
@@ -39,7 +40,7 @@ class UsersController extends AppController
             $users->find()
                 ->where(['Users.role IN' => ['admin', 'receptionist']])
                 ->contain(['Properties'])
-                ->orderBy(['Users.role' => 'ASC', 'Users.name' => 'ASC'])
+                ->orderBy(['Users.role' => 'ASC', 'Users.name' => 'ASC']),
         );
 
         $this->set('users', $query->all());
@@ -129,7 +130,9 @@ class UsersController extends AppController
             && $user->id !== (int)$this->currentUser->id
             && $user->role !== 'receptionist'
         ) {
-            throw new ForbiddenException('Admins may only change their own password or reset receptionists.');
+            throw new ForbiddenException(
+                'Managers can only change their own password or reset Front Desk Staff passwords.',
+            );
         }
 
         $password = (string)$this->request->getData('password');
@@ -154,15 +157,15 @@ class UsersController extends AppController
         if ($this->userHasRole('admin')) {
             // Admins can only create receptionists, in their own property.
             if ($role !== 'receptionist') {
-                throw new ForbiddenException('Admins may only create receptionist accounts.');
+                throw new ForbiddenException('Managers can only create Front Desk Staff accounts.');
             }
 
-            return (int)$this->currentUser->property_id;
+            return (int)$this->boundPropertyId();
         }
 
         // Owner.
         if (!in_array($role, ['admin', 'receptionist'], true)) {
-            throw new ForbiddenException('Owners may create admin or receptionist accounts.');
+            throw new ForbiddenException('The Platform Owner can create Manager or Front Desk Staff accounts.');
         }
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -175,15 +178,15 @@ class UsersController extends AppController
     /**
      * Load a staff user the current actor is allowed to manage, or 404.
      */
-    private function findManageable(int $id): \App\Model\Entity\User
+    private function findManageable(int $id): User
     {
         $users = $this->fetchTable('Users');
         $query = $users->find()
             ->where(['Users.id' => $id, 'Users.role IN' => ['admin', 'receptionist']]);
 
         // Admins are confined to their own property.
-        if ($this->currentUser->property_id !== null) {
-            $query->where(['Users.property_id' => $this->currentUser->property_id]);
+        if ($this->boundPropertyId() !== null) {
+            $query->where(['Users.property_id' => $this->boundPropertyId()]);
         }
 
         return $query->firstOrFail();

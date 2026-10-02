@@ -406,7 +406,7 @@ class FoodMenuItemsController extends AppController
     private function requireManager(): void
     {
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins can manage the menu.');
+            throw new ForbiddenException('Only Managers can manage the menu.');
         }
     }
 

@@ -20,8 +20,8 @@ class PropertiesController extends AppController
         $query = $properties->find()->orderBy(['Properties.name' => 'ASC']);
 
         // Non-owners only ever see their own property.
-        if ($this->currentUser->property_id !== null) {
-            $query->where(['Properties.id' => $this->currentUser->property_id]);
+        if ($this->boundPropertyId() !== null) {
+            $query->where(['Properties.id' => $this->boundPropertyId()]);
         } else {
             // Owner: include each subscriber's admin(s) for the Subscribers page.
             $query->contain(['Users' => function ($q) {
@@ -41,7 +41,7 @@ class PropertiesController extends AppController
     {
         $this->request->allowMethod('post');
         if (!$this->userHasRole('owner')) {
-            throw new ForbiddenException('Only the platform owner can add properties.');
+            throw new ForbiddenException('Only the Platform Owner can add properties.');
         }
 
         $properties = $this->fetchTable('Properties');
@@ -74,7 +74,7 @@ class PropertiesController extends AppController
     {
         $this->request->allowMethod(['patch', 'put']);
         if (!$this->userHasRole('owner')) {
-            throw new ForbiddenException('Only the platform owner can edit properties.');
+            throw new ForbiddenException('Only the Platform Owner can edit properties.');
         }
 
         $properties = $this->fetchTable('Properties');

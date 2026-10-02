@@ -60,7 +60,7 @@ class ReceiptSeriesController extends AppController
         $this->request->allowMethod('post');
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may register receipt series.');
+            throw new ForbiddenException('Only Managers may register receipt series.');
         }
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -104,7 +104,7 @@ class ReceiptSeriesController extends AppController
         $this->request->allowMethod(['patch', 'put', 'post']);
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may edit receipt series.');
+            throw new ForbiddenException('Only Managers may edit receipt series.');
         }
 
         $table = $this->fetchTable('ReceiptSeries');
@@ -131,7 +131,7 @@ class ReceiptSeriesController extends AppController
         $this->request->allowMethod(['delete', 'post']);
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may delete receipt series.');
+            throw new ForbiddenException('Only Managers may delete receipt series.');
         }
 
         $table = $this->fetchTable('ReceiptSeries');

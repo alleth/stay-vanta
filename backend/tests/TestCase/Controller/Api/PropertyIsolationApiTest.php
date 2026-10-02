@@ -159,14 +159,22 @@ class PropertyIsolationApiTest extends TestCase
 
     public function testReportsOnlyCoverOurProperty(): void
     {
-        $this->callAs($this->adminToken, 'GET', '/api/reports/operations');
-        $this->assertResponseOk();
-        $this->assertNothingOfTheirs('/api/reports/operations');
-        $this->assertSame(0, $this->responseJson()['operations']['rooms']['total']);
+        foreach (['/api/operations/today', '/api/reports/operations'] as $url) {
+            $this->callAs($this->adminToken, 'GET', $url . '?property_id=' . $this->theirs);
+            $this->assertResponseOk();
+            $this->assertNothingOfTheirs($url);
+            $this->assertSame(0, $this->responseJson()['operations']['rooms']['total']);
+        }
 
-        $this->callAs($this->adminToken, 'GET', '/api/reports/daily-collection?property_id=' . $this->theirs);
+        foreach (['/api/finance/collections', '/api/reports/daily-collection'] as $url) {
+            $this->callAs($this->adminToken, 'GET', $url . '?property_id=' . $this->theirs);
+            $this->assertResponseOk();
+            $this->assertEquals(0, $this->responseJson()['collection']['outstanding']['total'], $url);
+        }
+
+        $this->callAs($this->adminToken, 'GET', '/api/finance/summary?property_id=' . $this->theirs);
         $this->assertResponseOk();
-        $this->assertEquals(0, $this->responseJson()['collection']['outstanding']['total']);
+        $this->assertEquals(0, $this->responseJson()['summary']['outstanding']['total']);
     }
 
     public function testCannotOpenAnotherPropertysRecords(): void
@@ -196,6 +204,7 @@ class PropertyIsolationApiTest extends TestCase
             ['PATCH', '/api/reservations/' . $b['reservation'], ['total_guests' => 2]],
             ['POST', '/api/reservations/' . $b['reservation'] . '/cancel', []],
             ['POST', '/api/reservations/' . $b['reservation'] . '/payment', ['payment_status' => 'paid']],
+            ['POST', '/api/reservations/' . $b['reservation'] . '/post-room-charge', []],
             ['DELETE', '/api/reservations/' . $b['reservation'], []],
             ['PATCH', '/api/inventory-items/' . $b['item'], ['name' => 'Renamed']],
             ['DELETE', '/api/inventory-items/' . $b['item'], []],

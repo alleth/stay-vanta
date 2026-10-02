@@ -84,84 +84,103 @@ class CollectionFiguresApiTest extends TestCase
         return $this->responseJson();
     }
 
+    /** The collection report: new path first, old path kept until it's removed. */
+    private const COLLECTIONS = ['/api/finance/collections', '/api/reports/daily-collection'];
+
     public function testTodaysCollection(): void
     {
-        foreach ([$this->adminToken, $this->receptionistToken] as $token) {
-            $c = $this->getJson($token, '/api/reports/daily-collection')['collection'];
+        foreach (self::COLLECTIONS as $path) {
+            foreach ([$this->adminToken, $this->receptionistToken] as $token) {
+                $c = $this->getJson($token, $path)['collection'];
 
-            $this->assertSame('day', $c['scope']);
-            $this->assertEquals(1250, $c['total']);
-            $this->assertEquals(1000, $c['invoices']['total']);
-            $this->assertSame(1, $c['invoices']['count']);
-            $this->assertEquals(250, $c['food_orders']['total']);
-            $this->assertSame(1, $c['food_orders']['count']);
-            $this->assertEquals(450, $c['outstanding']['total']);
-            $this->assertSame(2, $c['outstanding']['count']);
+                $this->assertSame('day', $c['scope']);
+                $this->assertEquals(1250, $c['total'], $path);
+                $this->assertEquals(1000, $c['invoices']['total']);
+                $this->assertSame(1, $c['invoices']['count']);
+                $this->assertEquals(250, $c['food_orders']['total']);
+                $this->assertSame(1, $c['food_orders']['count']);
+                $this->assertEquals(450, $c['outstanding']['total']);
+                $this->assertSame(2, $c['outstanding']['count']);
+            }
         }
     }
 
     public function testAPastDaysCollection(): void
     {
         $day = $this->past->setTimezone(BusinessTime::timezone())->format('Y-m-d');
-        $c = $this->getJson($this->receptionistToken, '/api/reports/daily-collection?date=' . $day)['collection'];
+        foreach (self::COLLECTIONS as $path) {
+            $c = $this->getJson($this->receptionistToken, $path . '?date=' . $day)['collection'];
 
-        $this->assertEquals(470, $c['total']);
-        $this->assertEquals(400, $c['invoices']['total']);
-        $this->assertEquals(70, $c['food_orders']['total']);
-        // Outstanding is "right now", not part of the chosen day.
-        $this->assertEquals(450, $c['outstanding']['total']);
+            $this->assertEquals(470, $c['total'], $path);
+            $this->assertEquals(400, $c['invoices']['total']);
+            $this->assertEquals(70, $c['food_orders']['total']);
+            // Outstanding is "right now", not part of the chosen day.
+            $this->assertEquals(450, $c['outstanding']['total']);
+        }
     }
 
     public function testMonthAndRangeCollection(): void
     {
         $today = BusinessTime::now();
-        $c = $this->getJson(
-            $this->adminToken,
-            sprintf('/api/reports/daily-collection?month=%d&year=%d', $today->format('n'), $today->format('Y')),
-        )['collection'];
-        $this->assertEquals(1250, $c['total']);
-
         $from = $this->past->setTimezone(BusinessTime::timezone())->format('Y-m-d');
-        $c = $this->getJson(
-            $this->adminToken,
-            '/api/reports/daily-collection?from=' . $from . '&to=' . BusinessTime::todayString(),
-        )['collection'];
-        $this->assertEquals(1720, $c['total']);
+        foreach (self::COLLECTIONS as $path) {
+            $c = $this->getJson(
+                $this->adminToken,
+                sprintf('%s?month=%d&year=%d', $path, $today->format('n'), $today->format('Y')),
+            )['collection'];
+            $this->assertEquals(1250, $c['total'], $path);
+
+            $c = $this->getJson(
+                $this->adminToken,
+                $path . '?from=' . $from . '&to=' . BusinessTime::todayString(),
+            )['collection'];
+            $this->assertEquals(1720, $c['total'], $path);
+        }
     }
 
-    public function testManagerRevenueByPeriod(): void
+    public function testManagerCollectedByPeriod(): void
     {
-        $revenue = $this->getJson($this->adminToken, '/api/reports/admin-dashboard')['dashboard']['revenue'];
-
-        $this->assertEquals(1250, $revenue['week']);
-        $this->assertEquals(1250, $revenue['month']);
         $pastIsThisYear = $this->past->setTimezone(BusinessTime::timezone())->format('Y')
             === BusinessTime::now()->format('Y');
-        $this->assertEquals($pastIsThisYear ? 1720 : 1250, $revenue['ytd']);
-        $this->assertEquals(1720, $revenue['all_time']);
+        $new = $this->getJson($this->adminToken, '/api/finance/summary')['summary'];
+        $old = $this->getJson($this->adminToken, '/api/reports/admin-dashboard')['dashboard'];
+
+        foreach (['/api/finance/summary' => $new['collected'], 'admin-dashboard' => $old['revenue']] as $path => $by) {
+            $this->assertEquals(1250, $by['week'], $path);
+            $this->assertEquals(1250, $by['month'], $path);
+            $this->assertEquals($pastIsThisYear ? 1720 : 1250, $by['ytd'], $path);
+            $this->assertEquals(1720, $by['all_time'], $path);
+        }
+        $this->assertEquals(450, $new['outstanding']['total']);
+        $this->assertSame(2, $new['outstanding']['count']);
+        $this->assertEquals(450, $old['outstanding']['total']);
     }
 
     public function testSeasonalityRevenueForThisMonth(): void
     {
         $now = BusinessTime::now();
-        $report = $this->getJson($this->adminToken, '/api/reports/monthly-summary?year=' . $now->format('Y'))['report'];
-        $month = $report['months'][(int)$now->format('n') - 1];
+        foreach (['/api/finance/seasonality', '/api/reports/monthly-summary'] as $path) {
+            $report = $this->getJson($this->adminToken, $path . '?year=' . $now->format('Y'))['report'];
+            $month = $report['months'][(int)$now->format('n') - 1];
 
-        $this->assertEquals(1250, $month['revenue']);
+            $this->assertEquals(1250, $month['revenue'], $path);
+        }
     }
 
     public function testOperationsCollectedToday(): void
     {
-        $ops = $this->getJson($this->receptionistToken, '/api/reports/operations')['operations'];
+        foreach (['/api/operations/today', '/api/reports/operations'] as $path) {
+            $ops = $this->getJson($this->receptionistToken, $path)['operations'];
 
-        $this->assertEquals(1250, $ops['revenue_today']['collected']);
-        $this->assertEquals(1000, $ops['revenue_today']['invoices']);
-        $this->assertEquals(250, $ops['revenue_today']['pos']);
+            $this->assertEquals(1250, $ops['revenue_today']['collected'], $path);
+            $this->assertEquals(1000, $ops['revenue_today']['invoices']);
+            $this->assertEquals(250, $ops['revenue_today']['pos']);
 
-        $this->assertSame(3, $ops['pos']['today']['orders']);
-        $this->assertEquals(250, $ops['pos']['today']['paid']);
-        $this->assertEquals(80, $ops['pos']['today']['charged_to_room']);
-        $this->assertEquals(60, $ops['pos']['today']['unpaid']);
+            $this->assertSame(3, $ops['pos']['today']['orders']);
+            $this->assertEquals(250, $ops['pos']['today']['paid']);
+            $this->assertEquals(80, $ops['pos']['today']['charged_to_room']);
+            $this->assertEquals(60, $ops['pos']['today']['unpaid']);
+        }
     }
 
     public function testFrontDeskOpenInvoiceCount(): void

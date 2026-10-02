@@ -136,7 +136,7 @@ class InventoryItemsController extends AppController
 
         // Receptionists operate the catalogue; only owners/admins define it.
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may add inventory items.');
+            throw new ForbiddenException('Only Managers may add inventory items.');
         }
 
         $propertyId = $this->effectivePropertyId();
@@ -204,7 +204,7 @@ class InventoryItemsController extends AppController
         $this->request->allowMethod(['patch', 'put', 'post']);
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may edit inventory items.');
+            throw new ForbiddenException('Only Managers may edit inventory items.');
         }
 
         $items = $this->fetchTable('InventoryItems');
@@ -272,7 +272,7 @@ class InventoryItemsController extends AppController
         $this->request->allowMethod(['delete', 'post']);
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may delete inventory items.');
+            throw new ForbiddenException('Only Managers may delete inventory items.');
         }
 
         $items = $this->fetchTable('InventoryItems');

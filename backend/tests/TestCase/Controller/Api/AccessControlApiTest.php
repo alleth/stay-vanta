@@ -119,17 +119,25 @@ class AccessControlApiTest extends TestCase
         return [
             // Platform-owner only.
             'create a property' => [['admin', 'receptionist'], 'POST', '/api/properties', ['name' => 'X']],
-            'platform dashboard' => [['admin', 'receptionist'], 'GET', '/api/reports/owner-dashboard'],
-            // Manager only (property operations and money detail).
-            'manager revenue figures' => [['owner', 'receptionist'], 'GET', '/api/reports/admin-dashboard'],
-            'seasonality' => [['owner', 'receptionist'], 'GET', '/api/reports/monthly-summary'],
-            'staff activity feed' => [['owner', 'receptionist'], 'GET', '/api/reports/activity'],
+            'platform dashboard' => [['admin', 'receptionist'], 'GET', '/api/platform/dashboard'],
+            'platform dashboard (old path)' => [['admin', 'receptionist'], 'GET', '/api/reports/owner-dashboard'],
+            // Manager only (money detail and staff activity).
+            'finance summary' => [['owner', 'receptionist'], 'GET', '/api/finance/summary'],
+            'manager revenue figures (old path)' => [['owner', 'receptionist'], 'GET', '/api/reports/admin-dashboard'],
+            'seasonality' => [['owner', 'receptionist'], 'GET', '/api/finance/seasonality'],
+            'seasonality (old path)' => [['owner', 'receptionist'], 'GET', '/api/reports/monthly-summary'],
+            'staff activity feed' => [['owner', 'receptionist'], 'GET', '/api/operations/activity'],
+            'staff activity feed (old path)' => [['owner', 'receptionist'], 'GET', '/api/reports/activity'],
             // Staff on a property only; the platform owner has no property operations view.
-            'operations' => [['owner'], 'GET', '/api/reports/operations'],
+            'operations' => [['owner'], 'GET', '/api/operations/today'],
+            'operations (old path)' => [['owner'], 'GET', '/api/reports/operations'],
             // Front Desk Staff may see one day only.
-            'monthly collection' => [['receptionist'], 'GET', '/api/reports/daily-collection?month=1&year=2026'],
+            'monthly collection' => [['receptionist'], 'GET', '/api/finance/collections?month=1&year=2026'],
+            'monthly collection (old path)' => [
+                ['receptionist'], 'GET', '/api/reports/daily-collection?month=1&year=2026',
+            ],
             'date-range collection' => [
-                ['receptionist'], 'GET', '/api/reports/daily-collection?from=2026-01-01&to=2026-01-31',
+                ['receptionist'], 'GET', '/api/finance/collections?from=2026-01-01&to=2026-01-31',
             ],
             // Configuration and stock control are for managers.
             'add a room' => [['receptionist'], 'POST', '/api/rooms', ['room_number' => 'R-1']],
@@ -166,7 +174,11 @@ class AccessControlApiTest extends TestCase
 
     public function testManagerCanUseManagerOnlyReports(): void
     {
-        foreach (['/api/reports/admin-dashboard', '/api/reports/monthly-summary', '/api/reports/activity'] as $url) {
+        $urls = [
+            '/api/finance/summary', '/api/finance/seasonality', '/api/operations/activity',
+            '/api/reports/admin-dashboard', '/api/reports/monthly-summary', '/api/reports/activity',
+        ];
+        foreach ($urls as $url) {
             $this->callAs($this->adminToken, 'GET', $url);
             $this->assertResponseOk("GET $url for admin");
         }
@@ -174,29 +186,45 @@ class AccessControlApiTest extends TestCase
 
     public function testPlatformOwnerCanUsePlatformDashboard(): void
     {
-        $this->callAs($this->ownerToken, 'GET', '/api/reports/owner-dashboard');
-        $this->assertResponseOk();
+        foreach (['/api/platform/dashboard', '/api/reports/owner-dashboard'] as $url) {
+            $this->callAs($this->ownerToken, 'GET', $url);
+            $this->assertResponseOk("GET $url for owner");
+        }
     }
 
     public function testFrontDeskStaffGetOperationsWithoutStaffData(): void
     {
-        $this->callAs($this->receptionistToken, 'GET', '/api/reports/operations');
-        $this->assertResponseOk();
-        $operations = $this->responseJson()['operations'];
-        $this->assertNull($operations['staff'], 'Front Desk Staff must not receive the staff list');
-        $this->assertNull($operations['activity'], 'Front Desk Staff must not receive the activity feed');
+        foreach (['/api/operations/today', '/api/reports/operations'] as $url) {
+            $this->callAs($this->receptionistToken, 'GET', $url);
+            $this->assertResponseOk();
+            $operations = $this->responseJson()['operations'];
+            $this->assertNull($operations['staff'], "$url: Front Desk Staff must not receive the staff list");
+            $this->assertNull($operations['activity'], "$url: Front Desk Staff must not receive the activity feed");
 
-        $this->callAs($this->adminToken, 'GET', '/api/reports/operations');
-        $this->assertResponseOk();
-        $this->assertIsArray($this->responseJson()['operations']['staff']);
+            $this->callAs($this->adminToken, 'GET', $url);
+            $this->assertResponseOk();
+            $this->assertIsArray($this->responseJson()['operations']['staff']);
+        }
     }
 
     public function testFrontDeskStaffCanSeeOneDaysCollection(): void
     {
-        $this->callAs($this->receptionistToken, 'GET', '/api/reports/daily-collection');
-        $this->assertResponseOk();
-        $this->callAs($this->adminToken, 'GET', '/api/reports/daily-collection?month=1&year=2026');
-        $this->assertResponseOk();
+        foreach (['/api/finance/collections', '/api/reports/daily-collection'] as $url) {
+            $this->callAs($this->receptionistToken, 'GET', $url);
+            $this->assertResponseOk("GET $url for receptionist");
+            $this->callAs($this->adminToken, 'GET', $url . '?month=1&year=2026');
+            $this->assertResponseOk("GET $url?month for admin");
+        }
+    }
+
+    public function testRefusalMessagesUseTheRoleDisplayNames(): void
+    {
+        $this->callAs($this->receptionistToken, 'POST', '/api/rooms', ['room_number' => 'R-1']);
+        $this->assertResponseCode(403);
+        $message = (string)$this->responseJson()['message'];
+        $this->assertStringContainsString('Manager', $message);
+        $this->assertStringNotContainsString('admin', $message);
+        $this->assertStringNotContainsString('owner', $message);
     }
 
     public function testFrontDeskStaffCanDoFrontDeskWork(): void

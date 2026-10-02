@@ -34,7 +34,7 @@ class InventoryCategoriesController extends AppController
 
         // Receptionists operate the catalogue; only owners/admins define it.
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may add categories.');
+            throw new ForbiddenException('Only Managers may add categories.');
         }
 
         $propertyId = $this->effectivePropertyId();
@@ -89,7 +89,7 @@ class InventoryCategoriesController extends AppController
         $this->request->allowMethod(['delete', 'post']);
 
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may delete categories.');
+            throw new ForbiddenException('Only Managers may delete categories.');
         }
 
         $categories = $this->fetchTable('InventoryCategories');

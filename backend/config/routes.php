@@ -68,13 +68,22 @@ return function (RouteBuilder $routes): void {
         $builder->put('/properties/{id}', ['controller' => 'Properties', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
-        // Role dashboards.
-        $builder->get('/reports/owner-dashboard', ['controller' => 'Reports', 'action' => 'ownerDashboard']);
-        $builder->get('/reports/admin-dashboard', ['controller' => 'Reports', 'action' => 'adminDashboard']);
-        $builder->get('/reports/daily-collection', ['controller' => 'Reports', 'action' => 'dailyCollection']);
-        $builder->get('/reports/monthly-summary', ['controller' => 'Reports', 'action' => 'monthlySummary']);
-        $builder->get('/reports/operations', ['controller' => 'Reports', 'action' => 'operations']);
-        $builder->get('/reports/activity', ['controller' => 'Reports', 'action' => 'activity']);
+        // Operations (display only), Finance (money), Platform (owner).
+        $builder->get('/operations/today', ['controller' => 'Operations', 'action' => 'today']);
+        $builder->get('/operations/activity', ['controller' => 'Operations', 'action' => 'activity']);
+        $builder->get('/finance/collections', ['controller' => 'Finance', 'action' => 'collections']);
+        $builder->get('/finance/summary', ['controller' => 'Finance', 'action' => 'summary']);
+        $builder->get('/finance/seasonality', ['controller' => 'Finance', 'action' => 'seasonality']);
+        $builder->get('/platform/dashboard', ['controller' => 'Platform', 'action' => 'dashboard']);
+
+        // Old /reports/* paths, served by the same actions until the frontend has
+        // moved off them for a release (build step 3); then remove these lines.
+        $builder->get('/reports/owner-dashboard', ['controller' => 'Platform', 'action' => 'dashboard']);
+        $builder->get('/reports/admin-dashboard', ['controller' => 'Finance', 'action' => 'adminDashboard']);
+        $builder->get('/reports/daily-collection', ['controller' => 'Finance', 'action' => 'collections']);
+        $builder->get('/reports/monthly-summary', ['controller' => 'Finance', 'action' => 'seasonality']);
+        $builder->get('/reports/operations', ['controller' => 'Operations', 'action' => 'today']);
+        $builder->get('/reports/activity', ['controller' => 'Operations', 'action' => 'activity']);
 
         // Staff (users).
         $builder->get('/users', ['controller' => 'Users', 'action' => 'index']);
@@ -168,6 +177,12 @@ return function (RouteBuilder $routes): void {
         $builder->post('/reservations/{id}/{transition}', ['controller' => 'Reservations', 'action' => 'transition'])
             ->setPatterns(['id' => '\d+', 'transition' => 'check-in|check-out|cancel'])
             ->setPass(['id', 'transition']);
+        $builder->post(
+            '/reservations/{id}/post-room-charge',
+            ['controller' => 'Reservations', 'action' => 'postCharge'],
+        )->setPatterns(['id' => '\d+'])->setPass(['id']);
+        // Old "Mark paid / Mark unpaid" path: `paid` posts the room charge, `unpaid`
+        // is refused. Remove once the frontend has moved off it (build step 3).
         $builder->post('/reservations/{id}/payment', ['controller' => 'Reservations', 'action' => 'payment'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 

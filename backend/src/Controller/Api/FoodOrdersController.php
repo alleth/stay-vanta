@@ -154,7 +154,7 @@ class FoodOrdersController extends AppController
             && $order->status === 'served'
             && $order->payment_status === 'paid'
         ) {
-            throw new ForbiddenException('A paid, served order can only be cancelled by an admin.');
+            throw new ForbiddenException('A paid, served order can only be cancelled by a Manager.');
         }
 
         try {

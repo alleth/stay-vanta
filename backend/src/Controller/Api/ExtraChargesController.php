@@ -128,7 +128,7 @@ class ExtraChargesController extends AppController
     private function assertManager(): void
     {
         if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only owners and admins may manage extra charges.');
+            throw new ForbiddenException('Only Managers may manage extra charges.');
         }
     }
 

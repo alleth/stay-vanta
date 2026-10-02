@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Model\Entity\User;
 use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\UnauthorizedException;
+use Cake\ORM\Query\SelectQuery;
 
 /**
  * Base controller for all JSON API endpoints.
@@ -22,9 +24,11 @@ use Cake\Http\Exception\UnauthorizedException;
  */
 class AppController extends Controller
 {
-    protected ?\App\Model\Entity\User $currentUser = null;
+    protected ?User $currentUser = null;
 
-    /** Actions that do not require a valid token. */
+    /**
+     * Actions that do not require a valid token.
+     */
     protected array $publicActions = [];
 
     public function initialize(): void
@@ -52,6 +56,18 @@ class AppController extends Controller
     }
 
     /**
+     * The property the signed-in user belongs to, or null for the Platform
+     * Owner. This answers "is this user tied to one property?" (e.g. may they
+     * see other properties' staff), which is a different question from "which
+     * property is this request for?" — that's effectivePropertyId(). Permissions
+     * Phase 2 replaces the users.property_id read here with the membership.
+     */
+    protected function boundPropertyId(): ?int
+    {
+        return $this->currentUser?->property_id !== null ? (int)$this->currentUser->property_id : null;
+    }
+
+    /**
      * The property the current user is scoped to.
      *
      * Admins/receptionists are bound to their own property; owners aren't
@@ -71,7 +87,7 @@ class AppController extends Controller
      * Apply the current user's property scope to a query when they are bound
      * to a property. Owners see everything (optionally filtered by query param).
      */
-    protected function scopeToProperty(\Cake\ORM\Query\SelectQuery $query): \Cake\ORM\Query\SelectQuery
+    protected function scopeToProperty(SelectQuery $query): SelectQuery
     {
         $propertyId = $this->effectivePropertyId();
         if ($propertyId !== null) {
@@ -91,7 +107,7 @@ class AppController extends Controller
      * `COUNT(DISTINCT col)` instead. `$column` must be a trusted identifier
      * (never user input — it goes into the SQL verbatim).
      */
-    protected function countDistinct(\Cake\ORM\Query\SelectQuery $query, string $column): int
+    protected function countDistinct(SelectQuery $query, string $column): int
     {
         $query->select(['c' => $query->func()->count($query->expr('DISTINCT ' . $column))]);
         $row = $query->disableHydration()->first();
@@ -110,7 +126,7 @@ class AppController extends Controller
     /**
      * Pull the bearer token from the Authorization header and load the user.
      */
-    protected function resolveUserFromToken(): ?\App\Model\Entity\User
+    protected function resolveUserFromToken(): ?User
     {
         $header = $this->request->getHeaderLine('Authorization');
         if (!preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
