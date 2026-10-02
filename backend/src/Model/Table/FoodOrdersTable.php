@@ -89,6 +89,37 @@ class FoodOrdersTable extends Table
     }
 
     /**
+     * The guest, room and reservation an order names must belong to the
+     * ordering property. Without this an order could point at another
+     * hotel's guest, and the order response (which includes the guest and
+     * room) would hand that hotel's records back.
+     *
+     * @param array<string, mixed> $payload
+     * @throws \InvalidArgumentException When a referenced record isn't this property's.
+     */
+    private function assertOwnReferences(array $payload, int $propertyId): void
+    {
+        $references = ['guest_id' => 'Guests', 'room_id' => 'Rooms', 'reservation_id' => 'Reservations'];
+        foreach ($references as $field => $table) {
+            $id = $payload[$field] ?? null;
+            if ($id === null || $id === '') {
+                continue;
+            }
+            $belongs = TableRegistry::getTableLocator()->get($table)->exists([
+                'id' => (int)$id,
+                'property_id' => $propertyId,
+            ]);
+            if (!$belongs) {
+                throw new InvalidArgumentException(sprintf('No such %s at this property.', match ($field) {
+                    'guest_id' => 'guest',
+                    'room_id' => 'room',
+                    'reservation_id' => 'reservation',
+                }));
+            }
+        }
+    }
+
+    /**
      * Place an order. $payload:
      *   items[]: {food_menu_item_id, quantity, selected_options?} for menu lines,
      *            where selected_options[] is {option_id, quantity} — exactly one
@@ -116,6 +147,8 @@ class FoodOrdersTable extends Table
         if (empty($items)) {
             throw new InvalidArgumentException('An order needs at least one item.');
         }
+
+        $this->assertOwnReferences($payload, $propertyId);
 
         $paymentStatus = $payload['payment_status'] ?? 'unpaid';
         $guestId = $payload['guest_id'] ?? null;
