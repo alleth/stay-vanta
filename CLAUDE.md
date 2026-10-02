@@ -212,16 +212,29 @@ Deployment workflow (main → staging, `production` branch → production): `DEP
 - Style: `composer cs-check` / `composer cs-fix` (CakePHP standard). `phpstan.neon` and
   `psalm.xml` exist but neither tool is installed — add it to `require-dev` before running it.
 
-**Test coverage is deliberately narrow**: only where a wrong number reaches a real folio or a
-real lock-out — `ReservationsTableTest` (`quote()` pricing, incl. extras), `FoodOrdersTableTest`
-(discount/cooking-charge arithmetic), `Auth/LoginThrottleTest`, `Model/BusinessTimeTest`
-(hotel-day boundaries vs UTC) — all fixture-free, entities built in memory — plus two HTTP-level
-suites: `Controller/Api/ReservationDiscountsApiTest` and `BackdatedReservationsApiTest`
-(admin-only past stays, stay edits and delete). **There are no fixtures**: the HTTP suites each
-build their own property/room/rate/user in `setUp()`, remove them in
-`tearDown()`, and re-apply the auth header before *every* request (request config doesn't
-survive a request — the second call otherwise 401s). Other role enforcement, stock movements and
-invoice settlement are untested, so a green run doesn't validate the API.
+**CI runs every test on every push** to `main`/`production` and on PRs (`.github/workflows/ci.yml`):
+backend PHPUnit against a throwaway **MySQL 9** service (the test connection reads
+`DATABASE_TEST_URL`, since CI has no `app_local.php`), plus frontend lint + build. Check results
+with `gh run list` / `gh run view <id> --log-failed`. A red run blocks promotion to production.
+phpcs is **not** in CI yet: the codebase has ~97 pre-existing violations; keep new and changed
+files clean.
+
+**What the tests cover** — where a wrong answer reaches a real folio, a real lock-out or another
+hotel's data:
+- Fixture-free unit tests (entities in memory): `ReservationsTableTest` (`quote()` pricing, incl.
+  extras), `FoodOrdersTableTest` (discount/cooking-charge arithmetic), `Auth/LoginThrottleTest`,
+  `Model/BusinessTimeTest` (hotel-day boundaries vs UTC).
+- HTTP suites in `tests/TestCase/Controller/Api/`: `AccessControlApiTest` (sign-in failures, the
+  per-role refusal matrix, staff-management limits), `PropertyIsolationApiTest` (one hotel's staff
+  can't list, open, change, book against or reference another hotel's data),
+  `CollectionFiguresApiTest` (pins collected/outstanding across every report — must stay green
+  through the shared finance calculation), `ReservationDiscountsApiTest`,
+  `BackdatedReservationsApiTest`.
+- **Every new endpoint gets a row in the access matrix and an isolation check.** New HTTP suites
+  use `ApiScenarioTrait` (`createProperty()`, `makeUser()`, `callAs()`, `insertRow()`,
+  `cleanupScenario()` in `tearDown()`). There are no fixtures, and the auth header must be
+  re-applied before *every* request (`callAs()` does it; request config doesn't survive a request).
+- Still untested: stock-movement arithmetic and invoice settlement flows (receipt numbering).
 
 ### Frontend (`cd frontend`)
 - `npm run dev` (http://localhost:5173, proxies `/api` → backend) · `npm run build` ·
