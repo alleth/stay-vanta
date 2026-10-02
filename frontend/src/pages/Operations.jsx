@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Spinner } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
-import { ownerDashboard, operationsDashboard } from '../api/reports'
+import { operationsToday } from '../api/operations'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
-import { StatTiles } from '../components/StatCard'
 import {
   SectionTitle, TopRow, AttentionPanel, GuestMonitor, PosOverview, InventoryMonitor, StaffMonitor,
-} from '../components/Operations'
+} from '../components/operations/Operations'
+import { apiErrorMessage } from '../utils/apiError'
 
-// The Dashboard is operational monitoring: today at the property. Money
-// beyond today's one collected figure — collections, what's still owed,
-// invoices, revenue by period and season — is the Revenue page's
-// (src/pages/Revenue.jsx).
+// Operations: what's happening at the property right now (display only; it
+// owns no process). Money beyond "Collected today" — collections, what's
+// owed, invoices, analytics — is Finance (pages/Finance.jsx).
 
 function Loading() {
   return (
@@ -22,62 +21,15 @@ function Loading() {
   )
 }
 
-// Surface the real failure instead of a blanket message: prefer the API's JSON
-// error, fall back to the HTTP status, then to a network-level hint.
-function dashboardError(err) {
-  const res = err?.response
-  if (res) return res.data?.message || `Request failed (${res.status}).`
-  return 'Could not reach the server. Please try again.'
-}
-
-// Platform owner: subscription revenue + active users.
-function OwnerDashboard({ user }) {
-  const [data, setData] = useState(null)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    ownerDashboard().then(setData).catch((err) => setError(dashboardError(err)))
-  }, [])
-
-  if (error) return <Alert variant="danger">{error}</Alert>
-  if (!data) return <Loading />
-
-  return (
-    <div>
-      <h1 className="sv-serif mb-1 text-[2rem] font-bold">Dashboard</h1>
-      <p className="mb-6 text-muted">
-        Welcome back, {user?.name}. Platform revenue and active subscribers.
-      </p>
-
-      <SectionTitle>Subscription revenue</SectionTitle>
-      <StatTiles
-        money
-        tiles={[
-          { label: 'This week', value: data.revenue.week },
-          { label: 'This month', value: data.revenue.month },
-          { label: 'Year to date', value: data.revenue.ytd },
-        ]}
-      />
-
-      <SectionTitle>Active users</SectionTitle>
-      <StatTiles
-        tiles={[
-          { label: 'Hotels & Resorts', value: data.counts.hotels },
-          { label: 'Active subscriptions', value: data.counts.active_subscriptions },
-          { label: 'Registered admins', value: data.counts.admins },
-        ]}
-      />
-    </div>
-  )
-}
-
 // How often the operations figures refresh on their own; Refresh does it now.
 const REFRESH_MS = 5 * 60 * 1000
 
-// Hotel/resort staff (admin + receptionist): today at the property —
-// rooms, arrivals/departures, revenue today, what needs attention — then the
-// module summaries. A receptionist gets the same page minus Staff.
-function OperationsDashboard({ user, isAdmin }) {
+// Manager + Front Desk Staff: today at the property —
+// rooms, arrivals/departures, collected today, what needs attention — then the
+// module summaries. Front Desk Staff get the same page minus Staff.
+export default function Operations() {
+  const { user, role } = useAuth()
+  const isAdmin = role === 'admin'
   const [state, setState] = useState({ data: null, error: null, at: null })
   const [loadingNow, setLoadingNow] = useState(false)
   const [guestTab, setGuestTab] = useState('arrivals')
@@ -86,9 +38,9 @@ function OperationsDashboard({ user, isAdmin }) {
 
   const load = useCallback(() => {
     setLoadingNow(true)
-    return operationsDashboard()
+    return operationsToday()
       .then((data) => { if (alive.current) setState({ data, error: null, at: new Date() }) })
-      .catch((err) => { if (alive.current) setState((s) => ({ ...s, error: dashboardError(err) })) })
+      .catch((err) => { if (alive.current) setState((s) => ({ ...s, error: apiErrorMessage(err) })) })
       .finally(() => { if (alive.current) setLoadingNow(false) })
   }, [])
 
@@ -114,7 +66,7 @@ function OperationsDashboard({ user, isAdmin }) {
     <div>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="sv-serif mb-1 text-[2rem] font-bold">Dashboard</h1>
+          <h1 className="sv-serif mb-1 text-[2rem] font-bold">Operations</h1>
           <p className="mb-0 text-muted">Welcome back, {user?.name}. Here’s your property today — {today}.</p>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted">
@@ -156,7 +108,7 @@ function OperationsDashboard({ user, isAdmin }) {
               gets a fixed height; either way its feed scrolls inside. */}
           <div className={`mb-8 grid grid-cols-1 gap-6 ${isAdmin && data.staff ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
             <section className="grid grid-rows-[auto_1fr]">
-              <SectionTitle aside="Food & Orders">POS overview</SectionTitle>
+              <SectionTitle>POS overview</SectionTitle>
               <PosOverview pos={data.pos} />
             </section>
             <section className="grid grid-rows-[auto_1fr]">
@@ -177,10 +129,4 @@ function OperationsDashboard({ user, isAdmin }) {
       )}
     </div>
   )
-}
-
-export default function Dashboard() {
-  const { user, role } = useAuth()
-  if (role === 'owner') return <OwnerDashboard user={user} />
-  return <OperationsDashboard user={user} isAdmin={role === 'admin'} />
 }

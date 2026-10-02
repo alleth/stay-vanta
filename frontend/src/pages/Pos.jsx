@@ -14,10 +14,10 @@ import {
 import { listItems } from '../api/inventory'
 import { listGuests } from '../api/guests'
 import { listReservations } from '../api/frontdesk'
-import { InvoicesPanel } from '../components/Invoices'
 import { SkeletonTable, SkeletonTableRows } from '../components/Skeleton'
 
 const PAY_VARIANT = { paid: 'success', charge_to_room: 'warning', unpaid: 'secondary' }
+const PAY_LABEL = { paid: 'Paid', charge_to_room: 'Charged to room', unpaid: 'Unpaid' }
 const ORDER_VARIANT = { open: 'primary', served: 'success', cancelled: 'dark' }
 const ORDERS_PER_PAGE = 20
 
@@ -27,7 +27,7 @@ const PAYMENT_METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', maya: 'Maya', gotym
 const todayStr = () => new Date().toLocaleDateString('en-CA')
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : '—')
 
-export default function Food() {
+export default function Pos() {
   const { role } = useAuth()
   const { propertyId } = useProperty()
   const canManageMenu = role === 'owner' || role === 'admin'
@@ -94,7 +94,6 @@ export default function Food() {
   useEffect(() => { loadBase() }, [loadBase])
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadOrders() }, [loadOrders])
-  // Invoices load themselves in <InvoicesPanel/> whenever that tab is opened.
 
   // `key` identifies the in-flight button (spinner + disable the rest).
   async function act(key, fn, ...args) {
@@ -110,7 +109,7 @@ export default function Food() {
     }
   }
 
-  // The Food & Orders menu catalogue splits into two management tabs by
+  // The POS menu catalogue splits into two management tabs by
   // type — Food items (linked to Food Stock) and Linens (linked to the
   // Linens category) — while New Order keeps browsing both combined.
   const foodMenu = useMemo(() => menu.filter((m) => m.type !== 'linen'), [menu])
@@ -119,11 +118,11 @@ export default function Food() {
   const totalPages = Math.max(1, Math.ceil(ordersTotal / ORDERS_PER_PAGE))
 
   if (!propertyId)
-    return <Alert variant="info">Select or create a property to use Food &amp; Orders.</Alert>
+    return <Alert variant="info">Select or create a property to use POS.</Alert>
 
   return (
     <div>
-      <h1 className="mb-4 text-2xl font-bold">Food &amp; Orders</h1>
+      <h1 className="mb-4 text-2xl font-bold">POS</h1>
       {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
 
       {loading ? (
@@ -161,7 +160,7 @@ export default function Food() {
                 <thead>
                   <tr>
                     <th>#</th><th>Date</th><th>Items</th><th>Guest</th><th className="text-right">Total</th>
-                    <th>Payment</th><th>Status</th><th>Receptionist</th><th className="text-right">Actions</th>
+                    <th>Payment</th><th>Status</th><th>Taken by</th><th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -195,7 +194,7 @@ export default function Food() {
                         )}
                       </td>
                       <td>
-                        <Badge bg={PAY_VARIANT[o.payment_status]}>{o.payment_status.replace('_', ' ')}</Badge>
+                        <Badge bg={PAY_VARIANT[o.payment_status]}>{PAY_LABEL[o.payment_status] ?? o.payment_status}</Badge>
                         {o.payment_method && (
                           <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted">
                             {PAYMENT_METHOD_LABEL[o.payment_method] ?? o.payment_method}
@@ -261,10 +260,6 @@ export default function Food() {
             />
           </Tab>
 
-          {/* ---- Invoices ---- */}
-          <Tab eventKey="invoices" title="Invoices">
-            <InvoicesPanel propertyId={propertyId} />
-          </Tab>
         </Tabs>
       )}
 
@@ -281,7 +276,7 @@ export default function Food() {
   )
 }
 
-// The Food & Orders catalogue for one menu type (food | linen): search +
+// The POS catalogue for one menu type (food | linen): search +
 // linked-stock filter, grouped by the linked stock's category. Rendered once
 // per tab with a different `items` slice so Food and Linens stay separate
 // management lists (both still show up together, grouped by category, in

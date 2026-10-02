@@ -9,6 +9,7 @@ import {
   listStaff, createStaff, updateStaff, resetStaffPassword,
 } from '../api/staff'
 import { SkeletonTable } from '../components/Skeleton'
+import { roleLabel } from '../utils/roles'
 
 const ROLE_VARIANT = { admin: 'primary', receptionist: 'info' }
 
@@ -66,8 +67,8 @@ export default function Staff() {
           <h1 className="mb-0 text-2xl font-bold">Staff</h1>
           <small className="text-muted">
             {role === 'owner'
-              ? 'Add admins and receptionists for the selected property.'
-              : 'Add receptionists for your property.'}
+              ? 'Add Managers and Front Desk Staff for the selected property.'
+              : 'Add Front Desk Staff for your property.'}
           </small>
         </div>
         <Button onClick={() => setModal('add')}>Add staff</Button>
@@ -94,7 +95,7 @@ export default function Staff() {
                 <tr key={u.id} className={u.is_active ? '' : 'text-muted'}>
                   <td className="font-semibold">{u.name}</td>
                   <td>{u.email}</td>
-                  <td><Badge bg={ROLE_VARIANT[u.role] ?? 'secondary'}>{u.role}</Badge></td>
+                  <td><Badge bg={ROLE_VARIANT[u.role] ?? 'secondary'}>{roleLabel(u.role)}</Badge></td>
                   <td>
                     {u.is_active
                       ? <Badge bg="success">active</Badge>
@@ -145,7 +146,7 @@ export default function Staff() {
 }
 
 function AddStaffModal({ role, propertyId, onClose, onSaved }) {
-  // Owners choose the role; admins can only add receptionists.
+  // The Platform Owner chooses the role; Managers can only add Front Desk Staff.
   const allowedRoles = role === 'owner' ? ['admin', 'receptionist'] : ['receptionist']
   const [form, setForm] = useState({
     name: '', email: '', password: '', role: allowedRoles[0],
@@ -165,7 +166,7 @@ function AddStaffModal({ role, propertyId, onClose, onSaved }) {
           <Form.Group className="mb-4">
             <Form.Label>Role</Form.Label>
             <Form.Select value={form.role} onChange={set('role')} disabled={allowedRoles.length === 1}>
-              {allowedRoles.map((r) => <option key={r} value={r}>{r}</option>)}
+              {allowedRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
             </Form.Select>
           </Form.Group>
           <Form.Group className="mb-4">

@@ -9,7 +9,8 @@ import { formatMoney } from '../utils/format'
 import { matchGuests, listGuests } from '../api/guests'
 import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
 import { SummaryGroup, SummaryRow } from '../components/StatCard'
-import { InvoicesPanel } from '../components/Invoices'
+import { InvoicesPanel } from '../components/finance/InvoicesPanel'
+import { BILLING_STATE, roomStatusLabel } from '../utils/roles'
 import {
   listRooms, createRoom, updateRoom, deleteRoom,
   listRoomRates, createRoomRate, updateRoomRate,
@@ -17,7 +18,7 @@ import {
   listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
   listReservations, pageReservations, reservationStats,
   createReservation, updateReservation, deleteReservation, transitionReservation,
-  setReservationPayment,
+  postRoomCharge,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
 
@@ -98,7 +99,7 @@ function editBlockReason(r, isAdmin) {
     return 'Its invoice is settled, so it can no longer be edited or deleted.'
   }
   if (r.status === 'cancelled') return 'A cancelled reservation can’t be edited.'
-  if (r.status !== 'booked' && !isAdmin) return 'Only an admin can change a stay that’s checked in or out.'
+  if (r.status !== 'booked' && !isAdmin) return 'Only a Manager can change a stay that’s checked in or out.'
   return null
 }
 
@@ -116,7 +117,7 @@ function RoomsOccupancy({ counts }) {
       </div>
       <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-subtle"
         role="img"
-        aria-label={`${counts.occupied} occupied, ${counts.available} available, ${counts.maintenance} in maintenance`}>
+        aria-label={`${counts.occupied} occupied, ${counts.available} vacant, ${counts.maintenance} in maintenance`}>
         <div className="bg-red-500" style={{ width: pct(counts.occupied) }} />
         <div className="bg-emerald-500" style={{ width: pct(counts.available) }} />
         <div className="bg-amber-500" style={{ width: pct(counts.maintenance) }} />
@@ -126,7 +127,7 @@ function RoomsOccupancy({ counts }) {
           <span className="h-2 w-2 rounded-full bg-red-500" />{counts.occupied} occupied
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />{counts.available} available
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />{counts.available} vacant
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-amber-500" />{counts.maintenance} maintenance
@@ -194,7 +195,6 @@ export default function FrontDesk() {
   const isAdmin = role === 'admin'
   // Every row opens its reservation; whether it opens editable is
   // editBlockReason()'s call (the backend enforces the same rules).
-  const isSettled = (r) => r.room_charge_invoice === 'settled'
   const [rooms, setRooms] = useState([])
   const [rates, setRates] = useState([])
   const [bookingSources, setBookingSources] = useState([])
@@ -206,7 +206,7 @@ export default function FrontDesk() {
   const [resTotal, setResTotal] = useState(0)
   const [resPage, setResPage] = useState(1)
   const [calReservations, setCalReservations] = useState([])
-  const [resStats, setResStats] = useState({ booked: 0, checked_out_today: 0, cancelled_today: 0, unpaid: 0, open_invoices: 0 })
+  const [resStats, setResStats] = useState({ booked: 0, checked_out_today: 0, cancelled_today: 0, not_billed: 0, open_invoices: 0 })
   const [extraCharges, setExtraCharges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -217,7 +217,7 @@ export default function FrontDesk() {
   const [resFilter, setResFilter] = useState('today') // today | week | all
   // Set by clicking the "To collect → unpaid" figure: the table then lists
   // exactly what that number counts.
-  const [resPayment, setResPayment] = useState(null) // null | 'unpaid'
+  const [resBilling, setResBilling] = useState(null) // null | 'not_billed'
   // Controlled so the summary cards can jump to the list behind a number.
   const [tab, setTab] = useState('reservations')
   const [pending, setPending] = useState(null) // key of the in-flight inline action
@@ -237,7 +237,7 @@ export default function FrontDesk() {
         listRooms(propertyId), listRoomRates(propertyId), listBookingSources(propertyId),
         listPromoRates(propertyId),
         pageReservations(propertyId, {
-          page: resPage, limit: RESERVATIONS_PER_PAGE, since, payment_status: resPayment ?? undefined,
+          page: resPage, limit: RESERVATIONS_PER_PAGE, since, billing: resBilling ?? undefined,
         }),
         listReservations(propertyId, { on_date: calDate }),
         reservationStats(propertyId), listExtraCharges(propertyId),
@@ -259,7 +259,7 @@ export default function FrontDesk() {
     } finally {
       setLoading(false)
     }
-  }, [propertyId, resPage, since, resPayment, calDate])
+  }, [propertyId, resPage, since, resBilling, calDate])
 
   // The active early check-in fee (0 if none) — shown in the warning and billed
   // automatically by the backend when an early check-in is confirmed.
@@ -286,7 +286,7 @@ export default function FrontDesk() {
     reservations: resStats.booked,
     checkedOutToday: resStats.checked_out_today,
     cancelledToday: resStats.cancelled_today,
-    unpaid: resStats.unpaid ?? 0,
+    notBilled: resStats.not_billed ?? 0,
     openInvoices: resStats.open_invoices ?? 0,
   }), [rooms, resStats])
 
@@ -353,17 +353,18 @@ export default function FrontDesk() {
     runTransition(r.id, transition)
   }
 
-  // Front Desk operational flag — independent of the booking lifecycle and of
-  // the invoice's own settled status (Food & Orders → Invoices).
-  async function togglePayment(r) {
-    const next = r.payment_status === 'paid' ? 'unpaid' : 'paid'
-    setPending(`payment-${r.id}`)
+  // Post room charge: bills the stay onto the guest's open invoice. Billing
+  // state then follows the invoice (Billed, then Settled once it's settled).
+  // There's no undo here on purpose: the audited Reverse room charge comes
+  // with the invoice event records; until then a Manager cancels the stay.
+  async function onPostCharge(r) {
+    setPending(`charge-${r.id}`)
     setError(null)
     try {
-      await setReservationPayment(r.id, next)
+      await postRoomCharge(r.id)
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not update payment status.')
+      setError(ex?.response?.data?.message ?? 'Could not post the room charge.')
     } finally {
       setPending(null)
     }
@@ -464,12 +465,12 @@ export default function FrontDesk() {
             <SummaryRow value={counts.checkedOutToday} label="checked out today" variant="secondary" />
             <SummaryRow value={counts.cancelledToday} label="cancelled today" variant="secondary" />
           </SummaryGroup>
-          <SummaryGroup label="To collect" highlight={counts.unpaid + counts.openInvoices > 0}>
-            <SummaryRow value={counts.unpaid} label="unpaid reservations"
-              variant={counts.unpaid > 0 ? 'warning' : 'secondary'}
-              title="Show them in the table"
-              onClick={() => { setResPayment('unpaid'); setResFilter('all'); setResPage(1); setTab('reservations') }} />
-            <SummaryRow value={counts.openInvoices} label="unsettled invoices"
+          <SummaryGroup label="Receivables" highlight={counts.notBilled + counts.openInvoices > 0}>
+            <SummaryRow value={counts.notBilled} label="not billed"
+              variant={counts.notBilled > 0 ? 'warning' : 'secondary'}
+              title="Started stays with no room charge posted. Show them in the table."
+              onClick={() => { setResBilling('not_billed'); setResFilter('all'); setResPage(1); setTab('reservations') }} />
+            <SummaryRow value={counts.openInvoices} label="outstanding invoices"
               variant={counts.openInvoices > 0 ? 'warning' : 'secondary'}
               title="Open the Invoices tab"
               onClick={() => setTab('invoices')} />
@@ -490,10 +491,10 @@ export default function FrontDesk() {
                     <option value="all">All</option>
                   </Form.Select>
                 </Form.Group>
-                {resPayment === 'unpaid' && (
-                  <Button size="sm" variant="outline-secondary" title="Show all payment statuses again"
-                    onClick={() => { setResPayment(null); setResPage(1) }}>
-                    Unpaid only ✕
+                {resBilling === 'not_billed' && (
+                  <Button size="sm" variant="outline-secondary" title="Show every reservation again"
+                    onClick={() => { setResBilling(null); setResPage(1) }}>
+                    Not billed only ✕
                   </Button>
                 )}
               </div>
@@ -506,8 +507,8 @@ export default function FrontDesk() {
                 <thead>
                   <tr>
                     <th>Guest</th><th>Room</th><th>Dates</th><th>Source</th>
-                    <th className="text-right">Total</th><th>Status</th><th>Payment</th>
-                    <th>Logs</th><th>Last receptionist</th><th className="text-right">Actions</th>
+                    <th className="text-right">Total</th><th>Status</th><th>Billing</th>
+                    <th>Logs</th><th>Last updated by</th><th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -585,23 +586,16 @@ export default function FrontDesk() {
                       </td>
                       <td><Badge bg={RES_VARIANT[r.status]}>{r.status.replace('_', ' ')}</Badge></td>
                       <td>
-                        <Badge bg={r.payment_status === 'paid' ? 'success' : 'secondary'}>
-                          {r.payment_status === 'paid' ? 'paid' : 'unpaid'}
+                        {/* Billing comes from the invoice (BL1): Not billed →
+                            Billed (charge on an open invoice) → Settled. */}
+                        <Badge bg={BILLING_STATE[r.billing_state]?.bg ?? 'secondary'}
+                          title={r.billing_state === 'billed'
+                            ? 'Settle it on the Invoices tab (Front Desk or Finance) for it to count as collected.'
+                            : r.billing_state === 'settled'
+                              ? 'Collected. It can no longer be edited or deleted.'
+                              : 'No room charge posted yet.'}>
+                          {BILLING_STATE[r.billing_state]?.label ?? 'Not billed'}
                         </Badge>
-                        {/* Marked paid is a desk flag; the money only counts as
-                            collected once the guest's invoice is settled. */}
-                        {r.payment_status === 'paid' && r.room_charge_invoice === 'open' && (
-                          <div className="mt-1 whitespace-nowrap text-[11px] text-amber-700 dark:text-amber-400"
-                            title="Settle it on Food & Orders → Invoices for it to count as collected.">
-                            invoice not settled
-                          </div>
-                        )}
-                        {isSettled(r) && (
-                          <div className="mt-1 whitespace-nowrap text-[11px] text-emerald-700 dark:text-emerald-400"
-                            title="Collected — it can no longer be edited, deleted or marked unpaid.">
-                            invoice settled
-                          </div>
-                        )}
                       </td>
                       <td className="min-w-[170px] text-xs text-muted">
                         <div>Booked: {fmtDateTime(r.created) ?? '—'}</div>
@@ -625,13 +619,14 @@ export default function FrontDesk() {
                               {pending === `check-out-${r.id}` ? <Spinner size="sm" /> : 'Check out'}
                             </Button>
                           )}
-                          {r.status !== 'cancelled' && !isSettled(r) && (
+                          {r.status !== 'cancelled' && r.billing_state === 'not_billed' && (
                             <Button size="sm" variant="outline-secondary"
-                              disabled={pending !== null}
-                              onClick={() => togglePayment(r)}>
-                              {pending === `payment-${r.id}`
-                                ? <Spinner size="sm" />
-                                : r.payment_status === 'paid' ? 'Mark unpaid' : 'Mark paid'}
+                              disabled={pending !== null || !r.guest_id}
+                              title={r.guest_id
+                                ? 'Post the room charge to the guest’s invoice'
+                                : 'Add a guest first to post the room charge.'}
+                              onClick={() => onPostCharge(r)}>
+                              {pending === `charge-${r.id}` ? <Spinner size="sm" /> : 'Post room charge'}
                             </Button>
                           )}
                           {(r.status === 'booked' || r.status === 'checked_in') && (
@@ -663,9 +658,9 @@ export default function FrontDesk() {
             )}
           </Tab>
 
-          {/* ---- Invoices ---- the same panel as Food & Orders, so the desk
+          {/* ---- Invoices ---- the same panel as Finance, so the desk
               can settle a guest's bill at check-out without leaving; settling
-              refreshes the "invoice not settled" flags above. */}
+              refreshes the billing badges above. */}
           <Tab eventKey="invoices" title="Invoices">
             <InvoicesPanel propertyId={propertyId} onSettled={refresh} />
           </Tab>
@@ -684,14 +679,14 @@ export default function FrontDesk() {
                   <Card.Body>
                     <div className="flex items-start justify-between">
                       <div className="text-2xl font-bold">{room.room_number}</div>
-                      <Badge bg={ROOM_VARIANT[room.status]}>{room.status}</Badge>
+                      <Badge bg={ROOM_VARIANT[room.status]}>{roomStatusLabel(room.status)}</Badge>
                     </div>
                     <div className="mb-2 text-sm text-muted">{room.room_type ?? 'Room'}</div>
                     <Form.Select size="sm" value={room.status} disabled={pending !== null}
                       onChange={(e) => onRoomStatusPick(room, e.target.value)}>
                       {statusOptions(room.status).map((s) => (
                         <option key={s} value={s}>
-                          {s === 'occupied' && room.status === 'available' ? 'occupied → new booking' : s}
+                          {s === 'occupied' && room.status === 'available' ? 'Occupied → new booking' : roomStatusLabel(s)}
                         </option>
                       ))}
                     </Form.Select>
@@ -800,7 +795,7 @@ export default function FrontDesk() {
               a promo rate adds it to the <strong>Source</strong> dropdown on New Reservation automatically
               — there&apos;s nothing to set up separately. When a reservation&apos;s Source is an OTA, the
               booking form computes original rate × multiplier automatically (a room-specific multiplier
-              wins over an &quot;All rooms&quot; one). Receptionists can&apos;t type promo prices by hand.
+              wins over an &quot;All rooms&quot; one). Front Desk Staff can&apos;t type promo prices by hand.
             </p>
           </Tab>
 
@@ -1305,8 +1300,7 @@ function ReservationModal({
          {readOnly && (
           <div className="border-b border-line bg-subtle px-4 py-3 text-sm">
             <span className="font-medium">{reservation.status.replace('_', ' ')}</span>
-            {' · '}{reservation.payment_status === 'paid' ? 'paid' : 'unpaid'}
-            {reservation.room_charge_invoice && ` · invoice ${reservation.room_charge_invoice}`}
+            {' · '}{BILLING_STATE[reservation.billing_state]?.label ?? 'Not billed'}
             <span className="text-muted"> — view only. {readOnlyReason}</span>
             {reservation.room_charge_invoice && (
               <div className="mt-1 text-xs text-muted">
@@ -1392,7 +1386,7 @@ function ReservationModal({
                 {rooms.map((r) => (
                   <option key={r.id} value={r.id} disabled={!stayEnded && r.status !== 'available' && r.id !== reservation?.room_id}>
                     {r.room_number} — {r.room_type ?? 'Room'}
-                    {r.status !== 'available' ? ` (${r.status})` : ''}
+                    {r.status !== 'available' ? ` (${roomStatusLabel(r.status)})` : ''}
                   </option>
                 ))}
               </Form.Select>

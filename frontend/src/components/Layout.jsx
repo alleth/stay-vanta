@@ -4,6 +4,7 @@ import BrandMark from './BrandMark'
 import ThemeToggle from './ThemeToggle'
 import { useAuth } from '../context/AuthContext'
 import { NAV } from '../nav'
+import { roleLabel } from '../utils/roles'
 
 // First letters of up to the first two words — for the header's avatar chip.
 function initials(name) {
@@ -49,7 +50,7 @@ export default function Layout() {
               {initials(user?.name)}
             </span>
             <span className="hidden whitespace-nowrap text-sm sm:inline">
-              {user?.name} <Badge bg="secondary" className="ml-1">{role}</Badge>
+              {user?.name} <Badge bg="secondary" className="ml-1">{roleLabel(role)}</Badge>
             </span>
             <Button size="sm" variant="outline-secondary" onClick={handleLogout}>
               Logout

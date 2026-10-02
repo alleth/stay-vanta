@@ -5,12 +5,13 @@ import Login from './pages/Login'
 import Landing from './pages/Landing'
 import Hub from './pages/Hub'
 import { useAuth } from './context/AuthContext'
-import Dashboard from './pages/Dashboard'
+import Operations from './pages/Operations'
+import PlatformDashboard from './pages/PlatformDashboard'
 import Inventory from './pages/Inventory'
 import FrontDesk from './pages/FrontDesk'
 import Guests from './pages/Guests'
-import Food from './pages/Food'
-import Revenue from './pages/Revenue'
+import Pos from './pages/Pos'
+import Finance from './pages/Finance'
 import Subscribers from './pages/Subscribers'
 import Staff from './pages/Staff'
 import PrivacyPolicy from './pages/PrivacyPolicy'
@@ -25,6 +26,18 @@ const OPS = ['admin', 'receptionist']
  * is no user yet, and rendering the landing in that gap would flash marketing
  * copy at someone who is already signed in.
  */
+/**
+ * /dashboard is the Platform Owner's page. Hotel staff who arrive there (an
+ * old bookmark or link from before the naming release) are forwarded to
+ * Operations, which replaced their Dashboard. Role-dependent, so it lives here
+ * rather than in Cloudflare's _redirects.
+ */
+function DashboardRoute() {
+  const { user } = useAuth()
+  if (user?.role !== 'owner') return <Navigate to="/operations" replace />
+  return <PlatformDashboard />
+}
+
 function RootRoute() {
   const { user, loading } = useAuth()
   if (loading) return null
@@ -54,7 +67,26 @@ export default function App() {
             module lives at its own path, and the header brand leads back
             here. */}
         <Route path="hub" element={<Hub />} />
-        <Route path="dashboard" element={<Dashboard />} />
+        <Route path="dashboard" element={<DashboardRoute />} />
+        <Route
+          path="operations"
+          element={
+            <ProtectedRoute roles={OPS}>
+              <Operations />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="finance"
+          element={
+            <ProtectedRoute roles={OPS}>
+              <Finance />
+            </ProtectedRoute>
+          }
+        />
+        {/* Old addresses from before the naming release keep working. */}
+        <Route path="revenue" element={<Navigate to="/finance" replace />} />
+        <Route path="food" element={<Navigate to="/pos" replace />} />
         <Route
           path="inventory"
           element={
@@ -80,18 +112,10 @@ export default function App() {
           }
         />
         <Route
-          path="food"
+          path="pos"
           element={
             <ProtectedRoute roles={OPS}>
-              <Food />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="revenue"
-          element={
-            <ProtectedRoute roles={OPS}>
-              <Revenue />
+              <Pos />
             </ProtectedRoute>
           }
         />

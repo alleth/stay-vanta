@@ -26,11 +26,10 @@ These decisions govern every recommendation, design and code change. If a task c
 one, say so instead of quietly deviating. Full rationale: the StayVanta Module Map and
 Implementation Plan (links in the user's memory, not in the repo).
 
-**Names below are the official ones. The code still uses the old ones until the naming release
-(build order step 3):** the property Dashboard is still `/dashboard` + `pages/Dashboard.jsx`,
-Finance is still `/revenue` + `pages/Revenue.jsx`, POS is still `/food` + `pages/Food.jsx`, and
-the money endpoints still live under `/api/reports/*`. Use the new names in UI copy, docs and
-new code; don't rename files piecemeal outside that release.
+**Names below are the official ones, in the code since the naming release (step 3, 2026-10-02).**
+Old addresses forward (`/dashboard` for hotel staff → `/operations`, `/revenue` → `/finance`,
+`/food` → `/pos`), and the old `/api/reports/*` and `/reservations/{id}/payment` routes still
+answer until they're removed a release later; never call them from new code.
 
 ### Principles
 1. **One module per business area**, named with a noun (never a page type like "Dashboard" or a
@@ -48,17 +47,17 @@ new code; don't rename files piecemeal outside that release.
 ### Hub and modules
 The Hub is grouped. Tiles show by role today and by permission later; empty groups are hidden.
 
-| Group | Module | Answers / owns | Today in code |
+| Group | Module | Answers / owns | In code |
 |---|---|---|---|
-| OVERVIEW | **Operations** | What's happening at the property now. Owns nothing. | Dashboard |
-| OVERVIEW | **Finance** | Money: collections, receivables, invoices, receipt booklets, financial analytics, expenses (future). The single home for money; no other financial module without strong justification. | Revenue |
-| GUEST SERVICES | **Front Desk** | Reservations: book, change, cancel, check in/out | Front Desk |
-| GUEST SERVICES | **Guests** | Guest identity and history | Guests |
-| GUEST SERVICES | **POS** | Sales: food, linens, charges to rooms | Food & Orders |
-| PROPERTY | **Rooms** (future) | The physical room: status, housekeeping, maintenance | Front Desk → Rooms tab |
-| PROPERTY | **Inventory** | Stock and (future) purchasing | Inventory |
-| TEAM | **Staff** | Accounts, roles, (future) time keeping | Staff |
-| SETTINGS | **Settings** (future, admin-only) | Property configuration; never ships without the configuration audit log | Spread across Front Desk tabs and Inventory |
+| OVERVIEW | **Operations** | What's happening at the property now. Owns nothing. | `/operations`, `pages/Operations.jsx`, `components/operations/`, `GET /api/operations/*` |
+| OVERVIEW | **Finance** | Money: collections, receivables, invoices, receipt booklets, financial analytics, expenses (future). The single home for money; no other financial module without strong justification. | `/finance`, `pages/Finance.jsx`, `components/finance/`, `GET /api/finance/*` |
+| GUEST SERVICES | **Front Desk** | Reservations: book, change, cancel, check in/out | `/front-desk` |
+| GUEST SERVICES | **Guests** | Guest identity and history | `/guests` |
+| GUEST SERVICES | **POS** | Sales: food, linens, charges to rooms | `/pos`, `pages/Pos.jsx`; API stays `/api/food-orders`, `/api/food-menu-items` |
+| PROPERTY | **Rooms** (future) | The physical room: status, housekeeping, maintenance | today: Front Desk → Rooms tab |
+| PROPERTY | **Inventory** | Stock and (future) purchasing | `/inventory` (receipt booklets move to Finance in step 9) |
+| TEAM | **Staff** | Accounts, roles, (future) time keeping | `/staff` |
+| SETTINGS | **Settings** (future, admin-only) | Property configuration; never ships without the configuration audit log | today: Front Desk tabs and Inventory |
 
 The platform owner has a separate, ungrouped Hub: **Dashboard** (platform overview) and
 Subscribers.
@@ -91,11 +90,11 @@ Subscribers.
 | Room status | Occupied · Vacant · Reserved · Maintenance (later Clean/Dirty/Inspected, Out of service) | "Available" on screens (code value stays `available`) |
 | Roles | Platform Owner (`owner`) · Manager (`admin`) · Front Desk Staff (`receptionist`) | Raw role values on screens; "Property Owner" is reserved for a future role |
 
-**Reservation billing (approved 2026-10-02; the UI and behavior change ships in step 3).** "Mark
-paid" doesn't collect money: it posts the room charge to the guest's open invoice, and only
-settling collects it. Worse, "Mark unpaid" only flips `payment_status` and leaves the posted charge
-on the invoice, and a reservation without a guest can be "paid" with nothing posted. So **the
-invoice is the source of truth** (`room_charge_invoice`), not `payment_status`:
+**Reservation billing (live since step 3).** The old "Mark paid" didn't collect money (it posted
+the room charge to the open invoice; only settling collects), "Mark unpaid" only flipped
+`payment_status` and left the charge on the invoice, and a guestless stay could be "paid" with
+nothing posted. So **the invoice is the source of truth** (`room_charge_invoice` →
+`billing_state` on every reservation), not `payment_status`:
 
 | Billing state | Derived from | Meaning |
 |---|---|---|
@@ -103,9 +102,15 @@ invoice is the source of truth** (`room_charge_invoice`), not `payment_status`:
 | Billed | `room_charge_invoice` = open | Charge on the guest's invoice; amount is outstanding |
 | Settled | `room_charge_invoice` = settled | Invoice settled; money collected |
 
-Actions: **Post room charge** (replaces "Mark paid"; disabled with a reason when no guest is on
-file) and **Reverse room charge** (replaces "Mark unpaid"; manager-only, reason required, actually
-removes the lines, refused once settled). `payment_status` stays in the database untouched.
+"Not billed" as a *set* (Front Desk count, `?billing=not_billed`, Finance → Receivables) = a stay
+that has **started** (checked in or out) with no room charge posted; future bookings aren't
+receivables. Actions: **Post room charge** (`POST /reservations/{id}/post-room-charge`; refuses
+with a reason when nothing can be posted: no guest, no rate, cancelled; the button is disabled
+with "Add a guest first…" when no guest is attached). "Mark unpaid" is gone and the API refuses
+it. **Reverse room charge** (Manager-only, reason required, removes the lines, refused once
+settled) ships with the invoice event records in step 6 — never earlier, because its reason must
+be stored; until then a Manager cancels the reservation to reverse its charges.
+`payment_status` stays in the database and is still set on posting, but nothing reads it.
 
 ### Design review for every feature proposal
 Before implementing a new feature or module, the proposal states, and the user approves:
@@ -283,11 +288,13 @@ Three roles on `users.role` (`UsersTable::ROLES`), shown on screens by their dis
   Staff/activity; on Finance, no Analytics tab and only the single-day collection report (the
   backend rejects month/range queries from them).
 
-**Operations = the property now, Finance = money.** Operations (still `pages/Dashboard.jsx`) is
-one call, `GET /reports/operations`, rendered by `src/components/Operations.jsx`; its only money
-figure is "Collected today" (the screen still says "Revenue today" until step 3). Collections,
-what's owed (open invoices, unpaid reservations), invoices and analytics live in Finance (still
-`src/pages/Revenue.jsx`) — keep them off Operations. The "Needs attention" panel is **computed**
+**Operations = the property now, Finance = money.** Operations (`pages/Operations.jsx`) is one
+call, `GET /api/operations/today` (`OperationsController`), rendered by
+`src/components/operations/Operations.jsx`; its only money figure is "Collected today".
+Collections, Receivables (outstanding invoices + not-billed stays), Invoices and Analytics live in
+Finance (`pages/Finance.jsx`, `components/finance/`, `FinanceController`) — keep them off
+Operations. The Platform Owner's Dashboard is `pages/PlatformDashboard.jsx` /
+`PlatformController`. The "Needs attention" panel is **computed**
 from live counts (no stored notification/read state) and operational only. "Reserved" rooms are
 derived (an available room held by a `booked` reservation covering today), not a room status.
 
@@ -336,7 +343,8 @@ would make the key attacker-controlled.
 ### Frontend structure
 - `src/api/client.js` is the single axios instance (token from localStorage `stayvanta_token`;
   base URL `VITE_API_BASE_URL` or `/api`). **Pages never call axios directly**: each module has a
-  thin wrapper (`inventory.js`, `frontdesk.js`, `guests.js`, `food.js`, `reports.js`, `staff.js`)
+  thin wrapper (`inventory.js`, `frontdesk.js`, `guests.js`, `food.js`, `operations.js`, `finance.js`,
+  `platform.js`, `staff.js`)
   with one function per endpoint unwrapping `r.data.<key>`; owners pass `propertyId` through its
   local `withProp()` helper. Add new calls there.
 - `AuthContext` (`useAuth()` → `{user, role, loading, login, logout}`, resolves the token via
@@ -351,7 +359,8 @@ would make the key attacker-controlled.
   add a tab bar back into `Layout.jsx`.
 - **Public routes** (no auth, no Layout): `/` → `Landing.jsx`, `/login`, `/privacy`, `/terms`.
   `RootRoute` redirects a signed-in user to `/hub` and renders nothing while `useAuth().loading`
-  resolves (avoids flashing marketing copy). Dashboard is `/dashboard`.
+  resolves (avoids flashing marketing copy). Hotel staff land on `/operations`; `/dashboard` is the
+  Platform Owner's (`DashboardRoute` forwards anyone else to `/operations`).
 - **`Landing.jsx` is deliberately outside the design system** (hard-coded dark promo palette,
   Manrope, no `ui.jsx`). Don't "fix" it to follow the theme. It shares only `BrandMark.jsx` /
   `BrandSplash.jsx` with the app.
@@ -360,16 +369,16 @@ would make the key attacker-controlled.
   the OS), and `dark:` is bound to that attribute via `@custom-variant`. Use `text-on-ink` (not
   `text-white`) on `bg-ink`/`bg-accent`, and give hand-written status colors an explicit `dark:`
   pair. Three places duplicate values and must be kept in sync: `index.html`'s pre-paint script
-  (storage key + splash colors), `BrandSplash.jsx`, and `Revenue.jsx`'s `CHART_COLORS`
+  (storage key + splash colors), `BrandSplash.jsx`, and `components/finance/SeasonalityChart.jsx`'s `CHART_COLORS`
   (ApexCharts can't read CSS variables). Use the `frontend-design` skill for UI work.
 - Initial loads use skeletons from `src/components/Skeleton.jsx`, not spinners (inline action
   buttons keep their small spinner). Stat tiles go through `src/components/StatCard.jsx` — extend
   it rather than hand-rolling a card + number (copies in pages drifted before). When a row of tiles
   gets crowded, group figures that answer one question with its `SummaryGroup` + `SummaryRow`
-  (Front Desk: Rooms / Today / To collect); a `SummaryRow` with `onClick` jumps to the list
+  (Front Desk: Rooms / Today / Receivables); a `SummaryRow` with `onClick` jumps to the list
   behind the number — `Tabs` takes react-bootstrap-style `activeKey`/`onSelect` for that.
 - The **Invoices** tab (list, folio view, Settle with SI/OR booklet numbers) is one component,
-  `src/components/Invoices.jsx` (`InvoicesPanel`), rendered by Food & Orders, Front Desk and Revenue —
+  `src/components/finance/InvoicesPanel.jsx`, rendered by Front Desk (checkout) and Finance —
   change it there, not in a page. It loads itself when its tab opens (`Tabs` mounts only the
   active tab); `onSettled` lets the host refresh what depends on settlement.
 
@@ -398,12 +407,12 @@ would make the key attacker-controlled.
 ### Money: revenue, invoices, receipts
 - **Hotel revenue = collected**: Σ settled `invoices.total` (by `settled_at`, stamped in
   `InvoicesController::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room food
-  already lives inside invoices, so only `paid` orders are added. **Marking a reservation paid is
-  not collecting it**: it posts the room charge to the guest's *open* invoice, which counts only
-  once settled (Settle is where SI/OR booklet numbers are assigned — deliberately kept). So reports
-  also return `outstanding` (Σ open invoices; the approved screen term is "Outstanding", today
-  still "Not yet settled" on Revenue → Collections), and the Reservations table flags "invoice not
-  settled" (`room_charge_invoice`).
+  already lives inside invoices, so only `paid` orders are added. **Posting a room charge is not
+  collecting it**: it puts the charge on the guest's *open* invoice (the stay reads **Billed**),
+  which counts only once settled (**Settled**; Settle is where SI/OR booklet numbers are assigned —
+  deliberately kept). So reports also return `outstanding` (Σ open invoices, shown as
+  "Outstanding"), and every reservation carries `billing_state` derived from
+  `room_charge_invoice`.
 - **Days are the hotel's, not UTC's.** Timestamps are stored UTC, but "today", daily/weekly/monthly
   windows and every day filter go through `App\Model\BusinessTime` (`App.businessTimezone`, env
   `APP_BUSINESS_TIMEZONE`, default Asia/Manila): `startOf()`/`endOf()` for datetime bounds,
@@ -413,13 +422,13 @@ would make the key attacker-controlled.
   `removeLinesFor()` — which recomputes the total from remaining lines, so multi-line reversals are
   order-independent). **Discounts are always itemized as their own negative lines** naming who got
   them, never folded into a net figure. VAT (12%, already included in prices) is derived for
-  display only in `Food.jsx`'s `vatBreakdown()`; the stored total is unchanged.
+  display only in `Pos.jsx`'s `vatBreakdown()`; the stored total is unchanged.
 - **Receipt series** (`receipt_series`, managed on Inventory → Receipt Booklets) register
   pre-printed Sales Invoice / Official Receipt booklets. `ReceiptSeriesTable::assignNext()`
   consumes the next number from the oldest active, non-exhausted series (`FOR UPDATE`), padded to
   `pad_length`. A series that has issued a number can be deactivated, not deleted.
 
-### Statutory Senior/PWD discount (shared by Front Desk and Food)
+### Statutory Senior/PWD discount (shared by Front Desk and POS)
 One rule over two bills, in **`App\Model\StatutoryDiscount`** — don't write a second copy. The 20%
 covers only each beneficiary's own even share (RA 9994): `subtotal × (beneficiaries / people) ×
 20%`, where people = `reservations.total_guests` or `food_orders.total_diners`. Beneficiaries can
@@ -471,8 +480,8 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   `transactionOn()` once anything was transacted (downpayment, invoice/lines, or the guest's food
   orders during the stay, matched by guest + date since orders carry no `reservation_id`).
   **Once the room charge's invoice is settled (`isSettled()`), a reservation of any status is
-  locked**: no edit, no delete, no Mark unpaid — backend-enforced; the table hides Mark unpaid
-  and shows "invoice settled". Every row still opens `ReservationModal`: when
+  locked**: no edit, no delete — backend-enforced; its Billing badge reads Settled. Every row
+  still opens `ReservationModal`: when
   `editBlockReason()` (settled / cancelled / a stay a non-admin can't change) returns a reason, it
   opens as a **read-only view** — the form inside a disabled `<fieldset>`, only a Close button.
 - **Downpayment**: an advance booking (check-in after today, guest on file) collects 50% as an
@@ -480,7 +489,8 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   day. `collectAdvanceDownpayment()` is shared by `add()` and `edit()`. Cancel from `booked`
   appends a negative `downpayment_refund` (90%), retaining 10%.
 - **Room charge**: `ReservationsController::postRoomCharge()` posts the itemized `quote()` onto
-  the guest's invoice. It's called by Mark paid (`payment()`) and by check-out, and is idempotent
+  the guest's invoice. It's called by Post room charge (`postCharge()`, via `postChargeOrFail()`)
+  and by check-out, and is idempotent
   (`invoiceForLine('reservation', …)`), so whichever fires first posts it. It posts the offsetting
   `downpayment_credit` in the same call, **only once the charge line exists** (so an unresolvable
   rate can't strand a credit), under a `FOR UPDATE` lock on the reservation. Cancel reverses the
@@ -495,11 +505,11 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
 - **The Reservations tab is paginated server-side** (25/page; the Today/This week/All window is
   the `since` param), so nothing on `FrontDesk.jsx` may be derived from that page: the summary
   cards come from `/reservations/stats` and the Calendar from `?on_date=`, each fetched on its own.
-  The summary is three grouped cards — Rooms (occupancy bar), Today, To collect (ringed when
-  anything's owed; "unpaid" filters the table via `?payment_status=unpaid`, "unsettled invoices"
-  opens the Invoices tab).
+  The summary is three grouped cards — Rooms (occupancy bar), Today, Receivables (ringed when
+  anything's owed; "not billed" filters the table via `?billing=not_billed`, "outstanding
+  invoices" opens the Invoices tab).
 
-### Food & Orders
+### POS (food & orders; code and API keep the `food` names)
 - **`FoodOrdersTable::place()` is the orchestrator**, one transaction: saves order + lines,
   decrements stock for the linked item, every recipe ingredient (per-serving qty × ordered qty) and
   picked options via `StockMovementsTable::record()` (short stock rolls back the whole order), and

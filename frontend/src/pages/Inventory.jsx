@@ -40,7 +40,7 @@ export default function Inventory() {
   const { role } = useAuth()
   const { propertyId } = useProperty()
   // Receptionists operate the catalogue read-only: no category creation, no
-  // manual stock moves, no edits. Stock leaves via Food & Orders instead.
+  // manual stock moves, no edits. Stock leaves via POS orders instead.
   const canManage = role === 'owner' || role === 'admin'
   const [categories, setCategories] = useState([])
   const [movements, setMovements] = useState([])
@@ -250,7 +250,7 @@ export default function Inventory() {
                       <th className="text-right">On hand</th>
                     )}
                     <th>Date added</th>
-                    <th>Last receptionist</th>
+                    <th>Last moved by</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -900,7 +900,7 @@ function ReceiptBooklets({ canManage, propertyId }) {
       </Card>
       <p className="mt-2 mb-0 text-sm text-muted">
         Register your pre-printed <strong>Sales Invoice</strong> and <strong>Official Receipt</strong> booklets
-        here. When an invoice is settled in Food &amp; Orders, the receptionist can mark which document was
+        here. When an invoice is settled (Front Desk or Finance → Invoices), staff mark which document was
         issued and the system stamps the next number from the active series onto the record. A series with
         issued numbers can be deactivated but not deleted.
       </p>

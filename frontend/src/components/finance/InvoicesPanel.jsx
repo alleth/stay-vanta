@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Card, Table, Button, Badge, Modal, Form, Alert, Spinner } from './ui'
-import { formatMoney } from '../utils/format'
-import { listInvoices, getInvoice, settleInvoice } from '../api/food'
-import { SkeletonTableRows, Skeleton } from './Skeleton'
+import { Card, Table, Button, Badge, Modal, Form, Alert, Spinner } from '../ui'
+import { formatMoney } from '../../utils/format'
+import { listInvoices, getInvoice, settleInvoice } from '../../api/food'
+import { SkeletonTableRows, Skeleton } from '../Skeleton'
 
 // The guests' invoices — the list, the folio view and Settle — as one panel,
-// rendered as a tab by both Food & Orders and Front Desk. Settling is where
+// rendered as a tab by Front Desk and Finance. Settling is where
 // a stay's money actually counts as collected (and where the SI/OR booklet
 // numbers are stamped), and it's the front desk that takes the payment at
 // check-out, so it belongs there as much as next to food. One component so
@@ -142,7 +142,7 @@ const LINE_GROUPS = {
   reservation: 'Room & stay',
   downpayment: 'Downpayment',
   early_check_in: 'Extra charges',
-  food_order: 'Food & orders',
+  food_order: 'POS',
   other: 'Other charges',
 }
 
@@ -294,7 +294,7 @@ function InvoiceModal({ id, onClose }) {
   )
 }
 
-// Settling shows the itemized charges first, and lets the receptionist mark
+// Settling shows the itemized charges first, and lets staff mark
 // which physical document was issued — the next number from the registered
 // booklet series (Inventory → Receipt Booklets) is stamped onto the invoice.
 function SettleModal({ id, onClose, onSettled }) {

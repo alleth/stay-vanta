@@ -3,9 +3,9 @@ import { Card, Table, Badge, Button, Spinner, Alert, Form } from '../components/
 import {
   listSubscribers,
   createSubscriber,
-  createSubscriberAdmin,
+  createSubscriberManager,
   updateProperty,
-} from '../api/reports'
+} from '../api/platform'
 import { SkeletonTable } from '../components/Skeleton'
 import { formatMoney } from '../utils/format'
 
@@ -70,7 +70,7 @@ export default function Subscribers() {
         address: form.address,
         subscription_fee: form.subscription_fee || 0,
       })
-      await createSubscriberAdmin(property.id, {
+      await createSubscriberManager(property.id, {
         name: form.admin_name,
         email: form.admin_email,
         password: form.admin_password,
@@ -100,7 +100,7 @@ export default function Subscribers() {
         </Button>
       </div>
       <p className="mb-6 text-muted">
-        Hotels &amp; resorts subscribed to the platform, each with its admin and monthly fee.
+        Hotels &amp; resorts subscribed to the platform, each with its Manager and monthly fee.
       </p>
 
       {showForm && (
@@ -138,15 +138,15 @@ export default function Subscribers() {
                 <div className="md:col-span-12">
                   <hr className="my-1" />
                   <div className="text-sm uppercase tracking-[0.04em] text-muted">
-                    Admin (hotel/resort head)
+                    Manager (runs the hotel)
                   </div>
                 </div>
                 <div className="md:col-span-4">
-                  <Form.Label>Admin name</Form.Label>
+                  <Form.Label>Manager name</Form.Label>
                   <Form.Control value={form.admin_name} onChange={set('admin_name')} required />
                 </div>
                 <div className="md:col-span-4">
-                  <Form.Label>Admin email</Form.Label>
+                  <Form.Label>Manager email</Form.Label>
                   <Form.Control type="email" value={form.admin_email} onChange={set('admin_email')} required />
                 </div>
                 <div className="md:col-span-4">
@@ -171,7 +171,7 @@ export default function Subscribers() {
             <tr>
               <th>Name</th>
               <th>Type</th>
-              <th>Admin</th>
+              <th>Manager</th>
               <th>Subscription</th>
               <th className="text-right">Monthly fee</th>
               <th>Expires</th>

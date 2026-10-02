@@ -79,10 +79,11 @@ export const deleteReservation = (id) =>
 export const transitionReservation = (id, transition, data = {}) =>
   client.post(`/reservations/${id}/${transition}`, data).then((r) => r.data.reservation)
 
-// Front Desk operational flag — independent of the booking lifecycle and of
-// the invoice's own settled status.
-export const setReservationPayment = (id, paymentStatus) =>
-  client.post(`/reservations/${id}/payment`, { payment_status: paymentStatus }).then((r) => r.data.reservation)
+// Post room charge: bills the stay onto the guest's open invoice (Not billed →
+// Billed; Settled once that invoice is settled). The API refuses with a reason
+// when nothing can be posted (no guest, no rate, cancelled).
+export const postRoomCharge = (id) =>
+  client.post(`/reservations/${id}/post-room-charge`).then((r) => r.data.reservation)
 
 // Extra charges (admin-configurable surcharges, e.g. early check-in).
 export const listExtraCharges = (propertyId) =>

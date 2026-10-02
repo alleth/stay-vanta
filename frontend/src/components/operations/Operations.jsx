@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert, Badge, Button, ButtonGroup, Card, ListGroup, Modal, Spinner, Table, Tabs, Tab,
-} from './ui'
-import { SummaryGroup, SummaryRow } from './StatCard'
-import { formatMoney } from '../utils/format'
-import { staffActivity } from '../api/reports'
-import { SkeletonTable } from './Skeleton'
+} from '../ui'
+import { SummaryGroup, SummaryRow } from '../StatCard'
+import { formatMoney } from '../../utils/format'
+import { staffActivity } from '../../api/operations'
+import { roleLabel } from '../../utils/roles'
+import { SkeletonTable } from '../Skeleton'
 
-// The operational half of the Dashboard (admin + receptionist), drawn from one
-// GET /reports/operations payload. Every figure is today's, on the hotel's
+// The Operations page's panels (Manager + Front Desk Staff), drawn from one
+// GET /operations/today payload. Every figure is today's, on the hotel's
 // clock; trends are the trailing seven days. See backend/API.md.
 
 // Room statuses, in the order the bar and legend read. Solid saturated fills
@@ -80,14 +81,14 @@ function TodayKpi({ guests, onPick }) {
   )
 }
 
-// The Dashboard's one money card: collected today (the collection report's
+// Operations' one money card: collected today (the collection report's
 // definition), split into POS and settled room invoices. Anything further —
-// what's owed, invoices, periods — is on the Revenue page.
-function RevenueTodayKpi({ revenue, pos }) {
+// what's owed, invoices, periods — is in Finance.
+function CollectedTodayKpi({ revenue, pos }) {
   const yesterday = pos.yesterday_paid
   const delta = yesterday > 0 ? Math.round(((pos.today.paid - yesterday) / yesterday) * 100) : null
   return (
-    <SummaryGroup label="Revenue today">
+    <SummaryGroup label="Collected today">
       <div className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">{formatMoney(revenue.collected)}</div>
       <div className="mt-1 text-xs text-muted">collected</div>
       <div className="mt-3 space-y-1 border-t border-line pt-2 text-sm">
@@ -111,7 +112,7 @@ function RevenueTodayKpi({ revenue, pos }) {
   )
 }
 
-// The top of the page: Rooms overview (two thirds) beside Today and Revenue today
+// The top of the page: Rooms overview (two thirds) beside Today and Collected today
 // stacked — what's visible on login without scrolling. With a dozen-odd rooms
 // the two sides come out about the same height.
 export function TopRow({ data, onPickGuests }) {
@@ -120,7 +121,7 @@ export function TopRow({ data, onPickGuests }) {
       <RoomsOverview rooms={data.rooms} className="lg:col-span-2" />
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-1">
         <TodayKpi guests={data.guests} onPick={onPickGuests} />
-        <RevenueTodayKpi revenue={data.revenue_today} pos={data.pos} />
+        <CollectedTodayKpi revenue={data.revenue_today} pos={data.pos} />
       </div>
     </div>
   )
@@ -385,9 +386,9 @@ function Sparkline({ trend }) {
 }
 
 const ORDER_PAY = {
-  paid: { bg: 'success', label: 'paid' },
-  charge_to_room: { bg: 'info', label: 'to room' },
-  unpaid: { bg: 'warning', label: 'unpaid' },
+  paid: { bg: 'success', label: 'Paid' },
+  charge_to_room: { bg: 'info', label: 'Charged to room' },
+  unpaid: { bg: 'warning', label: 'Unpaid' },
 }
 
 export function PosOverview({ pos }) {
@@ -638,7 +639,7 @@ function ActivityModal({ onHide }) {
 // aren't in it.
 //
 // Fixed-height by design: the card fills whatever height its grid slot gives
-// it (`h-full`, from the Dashboard's side column) and scrolls inside, so a busy
+// it (`h-full`, from the Operations page's grid) and scrolls inside, so a busy
 // day's feed or a long staff list never stretches the row or pushes the
 // sections below down. Activity and the staff list share one scroll area
 // behind a toggle rather than stacking.
@@ -682,7 +683,7 @@ export function StaffMonitor({ staff, activity, className = '' }) {
                   {m.name.trim().charAt(0).toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                <Badge bg={m.role === 'admin' ? 'primary' : 'secondary'}>{m.role}</Badge>
+                <Badge bg={m.role === 'admin' ? 'primary' : 'secondary'}>{roleLabel(m.role)}</Badge>
                 <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted"
                   title="Stock movements and food orders recorded today">
                   {plural(m.actions_today, 'action')}
