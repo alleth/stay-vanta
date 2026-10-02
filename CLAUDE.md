@@ -195,6 +195,8 @@ old routes) · 4 permissions Phase 1 · 5 shared event foundation · 6 invoice s
 accountability · 7 one shared collections calculation (`App\Model\Finance\Collections`) ·
 8 reservation event log + soft delete · 9 Settings + configuration audit · 10 permissions Phase 2.
 Deployment workflow (main → staging, `production` branch → production): `DEPLOYMENT.md` §5.
+Security issues get an entry in `docs/SECURITY-FINDINGS.md` (what, how found, fix, whether
+exploited); agreed follow-ups not on the build order live in `docs/BACKLOG.md`.
 
 ## Commands
 
