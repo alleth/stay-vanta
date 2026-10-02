@@ -20,6 +20,182 @@ independently-deployed apps that talk over a JSON API:
 Frontend → Cloudflare Pages; backend → Railway. Different origins in production (CORS), same
 origin in dev (Vite proxy).
 
+## Product architecture (approved 2026-10-02)
+
+These decisions govern every recommendation, design and code change. If a task conflicts with
+one, say so instead of quietly deviating. Full rationale: the StayVanta Module Map and
+Implementation Plan (links in the user's memory, not in the repo).
+
+**Names below are the official ones. The code still uses the old ones until the naming release
+(build order step 3):** the property Dashboard is still `/dashboard` + `pages/Dashboard.jsx`,
+Finance is still `/revenue` + `pages/Revenue.jsx`, POS is still `/food` + `pages/Food.jsx`, and
+the money endpoints still live under `/api/reports/*`. Use the new names in UI copy, docs and
+new code; don't rename files piecemeal outside that release.
+
+### Principles
+1. **One module per business area**, named with a noun (never a page type like "Dashboard" or a
+   feature like "Reports").
+2. **Every business process has exactly one owning module.** Others may display it or start it;
+   only the owner writes its data.
+3. **Overview modules only display.** Operations owns no process.
+4. **Setup is separate from daily work.** Configuration belongs in Settings.
+5. **Accountability is built into the data** (see "Accountability standard" below).
+6. **Access is per permission and per property** (see "Permission strategy").
+7. **The database is stable; names on screen evolve.** Tables, columns, stored values and role
+   values (`owner`/`admin`/`receptionist`) are not renamed for naming reasons. Display names live
+   in one map each (frontend `ROLE_LABELS`, nav labels in `nav.js`).
+
+### Hub and modules
+The Hub is grouped. Tiles show by role today and by permission later; empty groups are hidden.
+
+| Group | Module | Answers / owns | Today in code |
+|---|---|---|---|
+| OVERVIEW | **Operations** | What's happening at the property now. Owns nothing. | Dashboard |
+| OVERVIEW | **Finance** | Money: collections, receivables, invoices, receipt booklets, financial analytics, expenses (future). The single home for money; no other financial module without strong justification. | Revenue |
+| GUEST SERVICES | **Front Desk** | Reservations: book, change, cancel, check in/out | Front Desk |
+| GUEST SERVICES | **Guests** | Guest identity and history | Guests |
+| GUEST SERVICES | **POS** | Sales: food, linens, charges to rooms | Food & Orders |
+| PROPERTY | **Rooms** (future) | The physical room: status, housekeeping, maintenance | Front Desk → Rooms tab |
+| PROPERTY | **Inventory** | Stock and (future) purchasing | Inventory |
+| TEAM | **Staff** | Accounts, roles, (future) time keeping | Staff |
+| SETTINGS | **Settings** (future, admin-only) | Property configuration; never ships without the configuration audit log | Spread across Front Desk tabs and Inventory |
+
+The platform owner has a separate, ungrouped Hub: **Dashboard** (platform overview) and
+Subscribers.
+
+### Process ownership (the only writer)
+| Process | Owner | Notes |
+|---|---|---|
+| Reservation lifecycle | Front Desk | |
+| Guest identity | Guests | Front Desk/POS create guests through Guests' duplicate check |
+| Room occupancy | Front Desk (derived from reservations) | |
+| Room cleanliness / out of service | Rooms (future) | Room status will split into occupancy, cleanliness and service, each with one writer. Don't add housekeeping states to `rooms.status`. |
+| Sales | POS | |
+| Invoices, settlement, receipt numbers | Finance | Front Desk embeds the Invoices panel for checkout; POS will stop embedding it |
+| Stock levels | Inventory | Only via `StockMovementsTable::record()` |
+| Prices, rates, charges, discount rules | Settings (future) | Applied by `quote()` / `StatutoryDiscount`; the menu stays in POS |
+| Accounts and role assignment | Staff | Role definitions move to Settings in Permissions Phase 3 |
+
+### Terminology (use these words on screens, in docs and in comments)
+| Term | Meaning | Don't use |
+|---|---|---|
+| Collected | Money received: settled invoices + paid POS sales | "Revenue" on screens ("Revenue today" → **Collected today**) |
+| Outstanding | Amount still on open invoices | "Not yet settled", "unsettled" |
+| Receivables | The Finance tab of what's owed | "To collect" |
+| Invoice | The guest's bill (the BIR Sales Invoice) | "Folio", "tab", "bill" |
+| Settle | Record payment on an invoice and issue its SI/OR numbers | "Close", "pay" for invoices |
+| Open / Settled | The two invoice states | |
+| Reservation | A booking or stay record | Mixing "booking"/"stay" as the record's name |
+| Purchase order | Always in full | "PO", "order" |
+| POS sale states | Paid (collected at sale) · Charged to room (on an invoice) · Unpaid | |
+| Room status | Occupied · Vacant · Reserved · Maintenance (later Clean/Dirty/Inspected, Out of service) | "Available" on screens (code value stays `available`) |
+| Roles | Platform Owner (`owner`) · Manager (`admin`) · Front Desk Staff (`receptionist`) | Raw role values on screens; "Property Owner" is reserved for a future role |
+
+**Reservation billing (approved 2026-10-02; the UI and behavior change ships in step 3).** "Mark
+paid" doesn't collect money: it posts the room charge to the guest's open invoice, and only
+settling collects it. Worse, "Mark unpaid" only flips `payment_status` and leaves the posted charge
+on the invoice, and a reservation without a guest can be "paid" with nothing posted. So **the
+invoice is the source of truth** (`room_charge_invoice`), not `payment_status`:
+
+| Billing state | Derived from | Meaning |
+|---|---|---|
+| Not billed | `room_charge_invoice` null | Room charge not posted yet (check-out also posts it) |
+| Billed | `room_charge_invoice` = open | Charge on the guest's invoice; amount is outstanding |
+| Settled | `room_charge_invoice` = settled | Invoice settled; money collected |
+
+Actions: **Post room charge** (replaces "Mark paid"; disabled with a reason when no guest is on
+file) and **Reverse room charge** (replaces "Mark unpaid"; manager-only, reason required, actually
+removes the lines, refused once settled). `payment_status` stays in the database untouched.
+
+### Design review for every feature proposal
+Before implementing a new feature or module, the proposal states, and the user approves:
+1. **Owning module** (from the Hub table above) and **owning business process** (from the
+   ownership table; a process gets exactly one owner).
+2. **Required permissions**, named `module.resource.action`, including which are elevated
+   (reason required) and any separation-of-duties rule.
+3. **Required event records**: which `*_events` table, which event types, which require a reason.
+4. **Accountability requirements**: how who / what / when / why are answered, and what is never
+   overwritten or deleted.
+5. **Operations impact**: new counts, alerts or cards (display only).
+6. **Finance impact**: anything that changes collected, outstanding, receivables or invoices, and
+   through which Finance API.
+
+If a proposal can't answer one of these, it isn't ready to build.
+
+### Accountability standard
+Every module answers **who** did it, **what** changed, **when**, and **why** (when the action is
+sensitive). This applies to reservations, invoices, POS, inventory, purchasing, maintenance,
+housekeeping, expenses, time keeping and configuration.
+
+**Today:** only inventory meets it (`stock_movements`). Known gaps: settling an invoice records
+when but not who, and invoice lines have no actor; `reservations.receptionist_id` is overwritten on
+every edit and transition, and reservations are hard-deleted; rate, promo, charge and menu-price
+changes record nobody.
+
+**Event recording standard** (all new ledgers; the shared foundation is build step 5):
+- **Tables:** `<subject>_events` (`reservation_events`, `invoice_events`, `food_order_events`,
+  `room_events`, `purchase_order_events`, `expense_events`, `time_entry_events`). Existing
+  `stock_movements` keeps its name and gains the shared columns. Collections are invoice
+  settlements, recorded in `invoice_events`, not in a second table. Configuration changes go to
+  one shared `config_changes` table; sign-ins and permission changes to `access_events`.
+- **Columns:** `property_id`, the subject id (no `ON DELETE CASCADE`), `event_type`, `actor_id`
+  (NULL only when `source='system'`), `actor_role` (role at the time), `source`
+  (`web`|`system`|`import`), `reason`, `changes` JSON (before/after), `snapshot` JSON (names, room,
+  amounts at that moment), `correlation_id` (one per HTTP request), `occurred_at` (UTC),
+  `created`. Anything filtered or summed (amounts, line ids) is a real column, never JSON.
+  Index `(property_id, occurred_at)` and `(<subject>_id, id)`.
+- **Event types** are past-tense snake_case string constants on the Table class
+  (`ReservationEventsTable::CHECKED_IN`), not DB ENUMs. Permissions are present-tense
+  `module.resource.action`. Don't mix the two styles.
+- **One way in:** `<Subject>EventsTable::record(EventContext $ctx, string $type, $subject, ...)`,
+  provided by a shared `EventLedgerBehavior`. `EventContext` (actor, role, property, correlation
+  id, source, reason) is built once per request in `AppController`; jobs build a system context.
+- **Same transaction, always:** `record()` refuses to run outside a transaction. The caller wraps
+  the change and the event in one `transactional()` block, taking its `FOR UPDATE` lock first. If
+  the event can't be written, the change doesn't happen.
+- **Append-only:** event tables refuse updates and deletes (`beforeSave`/`beforeDelete`). A mistake
+  is corrected by a new event that references the original. No hard deletes of business records:
+  soft delete plus a `deleted` event.
+- **Reasons:** each events table lists the types that require one (`REQUIRES_REASON`): delete,
+  backdate, correction, cancellation after payment, discount override, void, reversal.
+- **Feed:** every ledger also writes one row to `activity_index` in the same transaction;
+  Operations → Activity pages that one table.
+- **Configuration audit** is a `ConfigAuditBehavior` on the configuration tables (room rates,
+  promo rates, extra charges, rooms, booking sources, receipt series, menu items): it diffs changed
+  fields and writes `config_changes`, and refuses to save without an actor. Audit follows the data,
+  not the screen, so menu prices are audited even though the menu stays in POS.
+- Until step 5 lands, keep stamping the acting user from `AppController::$currentUser` on any
+  endpoint that changes state, as today.
+
+### Permission strategy
+- **Today:** role checks via `userHasRole()` (37 call sites) and `roles` lists in `nav.js` /
+  `ProtectedRoute`. Every check on the frontend must also exist on the backend.
+- **Phase 1 (build step 4, no DB change):** `App\Auth\Permissions` defines `module.resource.action`
+  constants and a fixed map from each current role to its permissions.
+  `AppController::authorize('finance.invoice.settle')` replaces `userHasRole()` one controller at a
+  time with identical behavior; `/auth/me` adds `permissions`; the frontend gets
+  `useAuth().can()`. From then on, new code calls `authorize()`, never `userHasRole()`.
+- **Phase 2 (DB):** `roles`, `role_permissions`, `property_memberships` (user × property × role).
+  A migration seeds the three presets and one membership per user; `users.role` and
+  `users.property_id` stay as a fallback for one release. The platform owner becomes a platform
+  flag, not a property role. The request's property is resolved from the membership.
+- **Phase 3:** editable roles in Settings (audited), new starter roles (Property Owner,
+  Housekeeping, Storekeeper…), multi-property switcher; drop the old user columns.
+- **Rules for code written now:** resolve the property through `effectivePropertyId()` /
+  `scopeToProperty()`, never `currentUser->property_id` directly (`ReportsController`,
+  `UsersController` and `PropertiesController` still do; fixed in step 3). Sensitive actions
+  require a reason. Nobody approves their own expense or purchase order, or corrects their own
+  timesheet.
+
+### Build order
+0 decisions documented (this section) · 1 staging · 2 CI on MySQL 8 + access-control and
+data-isolation tests + pinned money figures · 3 naming and navigation release (Operations, Finance,
+POS, Hub groups, role labels, terminology, new `/operations` `/finance` `/platform` API beside the
+old routes) · 4 permissions Phase 1 · 5 shared event foundation · 6 invoice settlement
+accountability · 7 one shared collections calculation (`App\Model\Finance\Collections`) ·
+8 reservation event log + soft delete · 9 Settings + configuration audit · 10 permissions Phase 2.
+Deployment workflow (main → staging, `production` branch → production): `DEPLOYMENT.md` §5.
+
 ## Commands
 
 ### Backend (`cd backend`)
@@ -74,29 +250,30 @@ Every stock/asset state row and every mutating action records **who was responsi
   Quantities change **only** via `StockMovementsTable::record()` (transactional: writes the ledger
   row, updates `quantity`, stamps `inventory_items.last_receptionist_id`, rejects negative stock).
   Never mutate `inventory_items.quantity` directly.
-- `reservations.receptionist_id` (stamped at creation **and** on every transition),
-  `food_orders.receptionist_id`.
+- `reservations.receptionist_id` (stamped at creation **and** on every transition and edit, so
+  it's only "last touched by", not a history), `food_orders.receptionist_id` (who placed it).
 
-Stamp the acting user from `AppController::$currentUser` on any endpoint that changes state.
+Stamp the acting user from `AppController::$currentUser` on any endpoint that changes state. The
+target model, and today's gaps, are in "Accountability standard" above.
 
 ### Roles & subscriptions
-Three roles on `users.role` (`UsersTable::ROLES`):
-- **owner** — the platform operator, `property_id = null`. Sees Dashboard (subscription revenue
-  + counts) and Subscribers only.
-- **admin** — a subscribing hotel's head. Dashboard (today's operations + staff/activity),
-  Inventory, Front Desk, Guests, Food & Orders, Revenue (collections by day/month/range, to
-  collect, invoices, analytics), Staff. Creates receptionists.
-- **receptionist** — same modules minus Staff. Dashboard minus Staff/activity; on Revenue, no
-  Analytics tab and only the single-day collection report (the backend rejects month/range queries
-  from them).
+Three roles on `users.role` (`UsersTable::ROLES`), shown on screens by their display names:
+- **owner → Platform Owner** — the platform operator, `property_id = null`. Sees Dashboard
+  (subscription revenue + counts) and Subscribers only.
+- **admin → Manager** — runs one subscribing hotel. Operations (today + staff/activity),
+  Inventory, Front Desk, Guests, POS, Finance (collections by day/month/range, receivables,
+  invoices, analytics), Staff. Creates Front Desk Staff accounts.
+- **receptionist → Front Desk Staff** — same modules minus Staff. Operations minus
+  Staff/activity; on Finance, no Analytics tab and only the single-day collection report (the
+  backend rejects month/range queries from them).
 
-**Dashboard = operations, Revenue = money.** The admin/receptionist Dashboard is one call,
-`GET /reports/operations`, rendered by `src/components/Operations.jsx`; its only money figure is
-"Revenue today" (collected today). Collections, what's owed (open invoices, unpaid reservations),
-invoices and revenue analytics live on `src/pages/Revenue.jsx` — keep them off the Dashboard. The
-"Needs attention" panel is **computed** from live counts (no stored notification/read state) and
-operational only. "Reserved" rooms are derived (an available room held by a `booked` stay
-covering today), not a room status.
+**Operations = the property now, Finance = money.** Operations (still `pages/Dashboard.jsx`) is
+one call, `GET /reports/operations`, rendered by `src/components/Operations.jsx`; its only money
+figure is "Collected today" (the screen still says "Revenue today" until step 3). Collections,
+what's owed (open invoices, unpaid reservations), invoices and analytics live in Finance (still
+`src/pages/Revenue.jsx`) — keep them off Operations. The "Needs attention" panel is **computed**
+from live counts (no stored notification/read state) and operational only. "Reserved" rooms are
+derived (an available room held by a `booked` reservation covering today), not a room status.
 
 Nav visibility lives in `src/nav.js` (`roles` per item) and `ProtectedRoute roles=` in `App.jsx`,
 but those are UX only — **every role check must also exist on the backend**. `UsersController`
@@ -191,6 +368,10 @@ would make the key attacker-controlled.
   binds `$PORT` and runs `migrations migrate` on start. Required env: `DATABASE_URL`,
   `SECURITY_SALT`, `DEBUG=false`, `APP_FULL_BASE_URL` (HostHeaderMiddleware blocks requests
   without it), `CORS_ORIGINS`. `*.sh`/`Dockerfile` are pinned to LF in `.gitattributes`.
+- Release workflow (approved, being set up): `main` → staging, `production` branch → production,
+  promoted with `git push origin main:production` after verifying on staging. API changes are
+  additive first (the two apps deploy independently) and migrations must work with the previous
+  code (rollback restores code, not data). Details: `DEPLOYMENT.md` §5.
 
 ## Domain rules
 
@@ -200,8 +381,9 @@ would make the key attacker-controlled.
   already lives inside invoices, so only `paid` orders are added. **Marking a reservation paid is
   not collecting it**: it posts the room charge to the guest's *open* invoice, which counts only
   once settled (Settle is where SI/OR booklet numbers are assigned — deliberately kept). So reports
-  also return `outstanding` (Σ open invoices), shown as "Not yet settled" on Revenue → Collections, and
-  the Reservations table flags "invoice not settled" (`room_charge_invoice`).
+  also return `outstanding` (Σ open invoices; the approved screen term is "Outstanding", today
+  still "Not yet settled" on Revenue → Collections), and the Reservations table flags "invoice not
+  settled" (`room_charge_invoice`).
 - **Days are the hotel's, not UTC's.** Timestamps are stored UTC, but "today", daily/weekly/monthly
   windows and every day filter go through `App\Model\BusinessTime` (`App.businessTimezone`, env
   `APP_BUSINESS_TIMEZONE`, default Asia/Manila): `startOf()`/`endOf()` for datetime bounds,

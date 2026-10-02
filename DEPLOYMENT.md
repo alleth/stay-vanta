@@ -70,7 +70,7 @@ it's up. The root `/` returns the CakePHP welcome page.
 
 | Setting | Value |
 | --- | --- |
-| Production branch | `main` |
+| Production branch | `main` (becomes `production` with §5) |
 | Root directory | `frontend` |
 | Build command | `npm run build` |
 | Build output directory | `dist` |
@@ -98,6 +98,67 @@ Cloudflare picks up automatically.
 Point e.g. `app.stayvanta.com` → Pages and `api.stayvanta.com` → the Railway
 service, then update `APP_FULL_BASE_URL`, `CORS_ORIGINS`, and `VITE_API_BASE_URL`
 to the custom domains.
+
+---
+
+## 5. Staging and release workflow
+
+> **Status: approved 2026-10-02, being set up.** Until the steps in "One-time setup" are done,
+> `main` still deploys straight to production.
+
+Two long-lived branches, two environments, one direction of travel:
+
+| Branch | Deploys to | Who commits |
+| --- | --- | --- |
+| `main` | **Staging**: Railway environment `staging` + the Cloudflare preview at `https://main.<project>.pages.dev` | All work lands here |
+| `production` | **Production**: Railway environment `production` + the Cloudflare production URL | Nobody. It only ever fast-forwards to a `main` commit that passed staging |
+
+### Everyday release
+
+1. Commit and push to `main`. Railway staging and the Cloudflare `main` preview build automatically.
+2. Verify on staging with a marker unique to the new version (a new string in the bundle, the new
+   Railway deployment id), not a plain 200/401. Check that migrations ran (the entrypoint runs them).
+3. Promote exactly what you verified:
+   ```
+   git push origin main:production
+   ```
+   This is fast-forward only; Git refuses if `production` has diverged, which is the point.
+4. Verify production the same way.
+
+Hotfixes take the same path (main → staging → promote), just faster. Never commit to `production`.
+
+### Rules that make this safe
+
+- **API changes are additive first.** Cloudflare and Railway deploy independently and finish at
+  different times, so for a moment the new frontend can talk to the old API or the reverse. Add the
+  new endpoint, release, switch the frontend, and remove the old endpoint a release later.
+- **Migrations must work with the previous code.** A Railway rollback restores code, not the
+  database. Add tables and nullable columns; never rename or drop in the same release that stops
+  using them.
+- **Staging never gets production data.** It holds guests' personal data (Data Privacy Act,
+  RA 10173). Seed staging with `create_user` and made-up test data only.
+
+### Rollback
+
+- Backend: Railway → `production` environment → Deployments → redeploy the previous deployment.
+- Frontend: Cloudflare Pages → Deployments → roll back to the previous production deployment.
+- Then fix forward on `main` and promote again.
+
+### One-time setup (in this order, so production never breaks)
+
+1. Create the `production` branch at the current `main`:
+   `git branch production main && git push -u origin production`
+2. Railway, `production` environment → API service → Settings → Source → Branch: `production`.
+3. Cloudflare Pages → Settings → Builds → **Production branch: `production`**. Under preview
+   branches choose **Custom** and include only `main`, so other branches don't build.
+4. Railway → New environment `staging` (duplicate `production`). Give it its **own empty MySQL**,
+   set the API service's branch to `main`, and set its variables:
+   `APP_FULL_BASE_URL` = the staging API URL, `CORS_ORIGINS` = `https://main.<project>.pages.dev`,
+   a **different** `SECURITY_SALT`, `DEBUG=false`.
+5. Cloudflare Pages → Settings → Variables → **Preview** environment:
+   `VITE_API_BASE_URL` = `<staging-api-url>/api`.
+6. Create a staging owner with `create_user` (see "First admin user") and push a small change
+   to `main` to confirm staging builds while production stays put.
 
 ---
 
