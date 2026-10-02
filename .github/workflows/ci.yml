@@ -1,0 +1,85 @@
+# Runs on every push to main (staging) and production, and on pull requests.
+# Backend tests use a throwaway MySQL 9 inside the job (production runs
+# MySQL 9). They never touch a Railway database.
+name: CI
+
+on:
+  push:
+    branches: [main, production]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests (PHP 8.2, MySQL 9)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:9
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: stay_vanta_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_TEST_URL: mysql://root:root@127.0.0.1:3306/stay_vanta_test
+      # The default connection is aliased to the test one during tests; point it
+      # at the same throwaway database so nothing can reach a real one.
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/stay_vanta_test
+      SECURITY_SALT: ci-only-salt-not-a-secret-0123456789abcdef0123456789abcdef
+      DEBUG: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: intl, mbstring, pdo_mysql, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: composer-${{ hashFiles('backend/composer.lock') }}
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run tests
+        run: vendor/bin/phpunit --colors=never
+
+  frontend:
+    name: Frontend lint & build (Node 22)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
+      # package-lock.json is git-ignored on purpose (see CLAUDE.md), so install fresh.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

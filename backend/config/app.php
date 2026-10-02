@@ -380,6 +380,9 @@ return [
             'quoteIdentifiers' => false,
             'log' => false,
             //'init' => ['SET GLOBAL innodb_stats_on_metadata = 0'],
+            // CI (GitHub Actions) has no app_local.php: the test database comes
+            // from DATABASE_TEST_URL there. Never point this at a Railway DB.
+            'url' => env('DATABASE_TEST_URL', null),
         ],
     ],
 
