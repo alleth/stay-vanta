@@ -12,8 +12,8 @@ They live in one repo, so each platform points at a subdirectory.
 ## 1. Database — Railway MySQL
 
 1. In your Railway project: **New → Database → Add MySQL**.
-2. It exposes connection variables (`MYSQL_URL`, `MYSQLHOST`, …). You'll reference
-   `MYSQL_URL` from the API service below.
+2. It exposes connection variables (`MYSQL_URL`, `MYSQL_PUBLIC_URL`, `MYSQLHOST`, …). You'll reference
+   `MYSQL_PUBLIC_URL` from the API service below.
 
 ---
 
@@ -27,7 +27,7 @@ Create a service from this repo, then set its **Root Directory** to `backend`
 
 | Variable | Value | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | `${{MySQL.MYSQL_URL}}` | Reference the MySQL service; takes precedence over `DB_*`. |
+| `DATABASE_URL` | `${{MySQL.MYSQL_PUBLIC_URL}}` | **Always a reference, never a pasted URL**: a duplicated environment then reaches its own MySQL instead of production's. Takes precedence over `DB_*`. (The private `MYSQL_URL` would avoid proxy egress; untested so far, try it on staging first.) |
 | `SECURITY_SALT` | *(64-char random hex)* | `php -r "echo bin2hex(random_bytes(32));"` |
 | `DEBUG` | `false` | Never `true` in production. |
 | `APP_FULL_BASE_URL` | `https://<your-api>.up.railway.app` | **Required** — the API blocks requests otherwise (Host-header protection). |
@@ -70,7 +70,7 @@ it's up. The root `/` returns the CakePHP welcome page.
 
 | Setting | Value |
 | --- | --- |
-| Production branch | `main` (becomes `production` with §5) |
+| Production branch | `production` (see §5; `main` builds the staging preview) |
 | Root directory | `frontend` |
 | Build command | `npm run build` |
 | Build output directory | `dist` |
@@ -103,8 +103,15 @@ to the custom domains.
 
 ## 5. Staging and release workflow
 
-> **Status: approved 2026-10-02, being set up.** Until the steps in "One-time setup" are done,
-> `main` still deploys straight to production.
+> **Status: live since 2026-10-02.** Pushing `main` no longer touches production.
+
+| Environment | API (Railway) | Frontend (Cloudflare Pages) |
+| --- | --- | --- |
+| Staging | `https://stay-vanta-staging.up.railway.app` | `https://main.stay-vanta.pages.dev` |
+| Production | `https://stay-vanta-production.up.railway.app` | `https://stay-vanta.pages.dev` |
+
+Railway project `perceptive-creation`, environments `production` and `staging`, each with its own
+`stay-vanta` API service and its own `MySQL` (separate volume data).
 
 Two long-lived branches, two environments, one direction of travel:
 

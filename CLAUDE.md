@@ -14,7 +14,7 @@ independently-deployed apps that talk over a JSON API:
   react-bootstrap-style APIs (`variant`, `size`, `show`/`onHide`). The one external UI library is
   `apexcharts`/`react-apexcharts` for the Revenue page's seasonality chart, loaded via `React.lazy()`
   (~200KB gzipped) so only an admin who opens that chart pays for it.
-- `backend/` — **CakePHP 5** JSON REST API. **MySQL** (XAMPP locally, Railway in prod).
+- `backend/` — **CakePHP 5** JSON REST API. **MySQL** (MariaDB via XAMPP locally; MySQL 9 on Railway).
   Full per-endpoint contract: **`backend/API.md`** — update it when you add or change an endpoint.
 
 Frontend → Cloudflare Pages; backend → Railway. Different origins in production (CORS), same
@@ -188,7 +188,7 @@ changes record nobody.
   timesheet.
 
 ### Build order
-0 decisions documented (this section) · 1 staging · 2 CI on MySQL 8 + access-control and
+0 decisions documented (this section) · 1 staging · 2 CI on MySQL 9 + access-control and
 data-isolation tests + pinned money figures · 3 naming and navigation release (Operations, Finance,
 POS, Hub groups, role labels, terminology, new `/operations` `/finance` `/platform` API beside the
 old routes) · 4 permissions Phase 1 · 5 shared event foundation · 6 invoice settlement
@@ -237,7 +237,8 @@ DBs: `stay_vanta` (dev) and `stay_vanta_test` (tests), user `root` with empty pa
 DB migrates itself: `tests/bootstrap.php` runs `Migrations\TestSuite\Migrator` every PHPUnit run
 (`DB_TEST_DATABASE` / `DATABASE_TEST_URL` override the target).
 
-**Local is MariaDB, prod is MySQL 8** — MySQL 8 enforces `ONLY_FULL_GROUP_BY`, so a query can
+**Local is MariaDB, prod is MySQL 9** (Railway image `mysql:9`, auto-updated within 9.x; CI tests
+use MySQL 9 to match) — MySQL enforces `ONLY_FULL_GROUP_BY`, so a query can
 pass locally and 500 on Railway. Known footgun: `$query->distinct(['col'])->count()` — use
 `AppController::countDistinct($query, 'col')` (emits `COUNT(DISTINCT col)`). Prefer correlated
 `EXISTS` or one query per bucket over `GROUP BY` for aggregates.
@@ -368,10 +369,14 @@ would make the key attacker-controlled.
   binds `$PORT` and runs `migrations migrate` on start. Required env: `DATABASE_URL`,
   `SECURITY_SALT`, `DEBUG=false`, `APP_FULL_BASE_URL` (HostHeaderMiddleware blocks requests
   without it), `CORS_ORIGINS`. `*.sh`/`Dockerfile` are pinned to LF in `.gitattributes`.
-- Release workflow (approved, being set up): `main` → staging, `production` branch → production,
-  promoted with `git push origin main:production` after verifying on staging. API changes are
-  additive first (the two apps deploy independently) and migrations must work with the previous
-  code (rollback restores code, not data). Details: `DEPLOYMENT.md` §5.
+- **Release workflow (live since 2026-10-02):** pushing `main` deploys **staging** (API
+  `https://stay-vanta-staging.up.railway.app`, frontend `https://main.stay-vanta.pages.dev`);
+  production (`https://stay-vanta-production.up.railway.app`, `https://stay-vanta.pages.dev`) only
+  deploys from the `production` branch, promoted with `git push origin main:production` after
+  verifying on staging. API changes are additive first (the two apps deploy independently) and
+  migrations must work with the previous code (rollback restores code, not data). Database URLs are
+  Railway **references** (`${{MySQL.MYSQL_PUBLIC_URL}}`), never literals, so each environment
+  reaches its own database. Details: `DEPLOYMENT.md` §5.
 
 ## Domain rules
 
