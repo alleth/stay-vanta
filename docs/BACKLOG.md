@@ -48,7 +48,12 @@ Direction:
 
 ## CI gate on deployment: unresolved (infrastructure debt)
 
-**Status (2026-10-03): not working, not to be relied on.**
+**Status (2026-10-03): works on production, not on staging; staging not to be relied on.**
+- **Production waits.** The first promotion after enabling it (`30afd87`, 08:35:53 UTC) sat in
+  Railway's `WAITING` state until the production branch's CI run passed (08:37:27), then built and
+  deployed. So the setting and Railway's GitHub access work; the difference is the **staging
+  service**, whose deployments never enter `WAITING` (look there: its own "Wait for CI" toggle, its
+  source branch settings).
 - Railway's **"Wait for CI" is enabled** on the `stay-vanta` service (staging and production).
 - **Deployment still begins before CI completes.** Measured on five pushes to `main`: staging was
   live 54 s to 97 s before the backend tests finished (e.g. `776c9c2`: live 08:17:42 UTC, CI done

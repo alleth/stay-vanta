@@ -137,7 +137,8 @@ Hotfixes take the same path (main → staging → promote), just faster. Never c
 
 ### Rules that make this safe
 
-- **CI success is the manual approval point.** Railway's "Wait for CI" is enabled but does **not**
+- **CI success is the manual approval point.** On production, Railway's "Wait for CI" works (a
+  promotion shows `WAITING` until CI passes, seen 2026-10-03), but staging's does **not**
   hold deployments back (measured 2026-10-03: staging goes live about a minute before CI finishes;
   see `docs/BACKLOG.md`, "CI gate on deployment"). So a commit reaches staging whether or not its
   tests pass, and **nothing is promoted to production until CI for that exact commit is green**
