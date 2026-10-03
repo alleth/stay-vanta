@@ -10,6 +10,9 @@ explained in `CLAUDE.md`; this file is the per-endpoint contract.
 
 ## Auth
 - `POST /api/auth/login` (public) · `GET /api/auth/me` · `POST /api/auth/logout`
+- The `user` object both login and `me` return carries `permissions`: the sorted list of
+  `module.resource.action` names the user holds (`docs/PERMISSIONS.md`). It drives what the screens
+  offer; the server checks every action itself.
 
 ## Properties, Platform, Finance, Operations
 

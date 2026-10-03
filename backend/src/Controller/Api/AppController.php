@@ -3,10 +3,13 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
+use App\Auth\PermissionSet;
 use App\Model\Entity\User;
 use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
 use Cake\Event\EventInterface;
+use Cake\Http\Exception\ForbiddenException;
 use Cake\Http\Exception\UnauthorizedException;
 use Cake\ORM\Query\SelectQuery;
 
@@ -27,16 +30,29 @@ class AppController extends Controller
     protected ?User $currentUser = null;
 
     /**
+     * The current user's permissions, loaded once per request by permissions().
+     */
+    private ?PermissionSet $permissions = null;
+
+    /**
      * Actions that do not require a valid token.
      */
     protected array $publicActions = [];
 
+    /**
+     * @inheritDoc
+     */
     public function initialize(): void
     {
         parent::initialize();
         $this->loadComponent('Flash');
     }
 
+    /**
+     * Force JSON and resolve the bearer token to $this->currentUser.
+     *
+     * @param \Cake\Event\EventInterface $event The beforeFilter event.
+     */
     public function beforeFilter(EventInterface $event): void
     {
         parent::beforeFilter($event);
@@ -116,7 +132,46 @@ class AppController extends Controller
     }
 
     /**
+     * What the current user may do on this request. Phase 1 reads it from the
+     * user's role; Phase 2 reads the grants of their membership at the
+     * request's property, and only this method changes.
+     */
+    protected function permissions(): PermissionSet
+    {
+        return $this->permissions ??= Permissions::forRole($this->currentUser?->role);
+    }
+
+    /**
+     * Whether the current user holds a permission. For checks that depend on
+     * the data (e.g. cancelling an order that's already paid); a whole action
+     * is gated with authorize().
+     */
+    protected function can(string $permission): bool
+    {
+        return $this->permissions()->has($permission);
+    }
+
+    /**
+     * Refuse the request (403) unless the current user holds the permission.
+     * Every API action calls this first, after allowMethod() (deny by
+     * default; see docs/PERMISSIONS.md). It answers "may they do this?" only:
+     * the property is still scoped with scopeToProperty()/effectivePropertyId().
+     *
+     * @param string $permission A Permissions constant.
+     * @param string|null $message Shown to the user; name roles by their display names.
+     */
+    protected function authorize(string $permission, ?string $message = null): void
+    {
+        if (!$this->can($permission)) {
+            throw new ForbiddenException($message ?? "You don't have permission to do this.");
+        }
+    }
+
+    /**
      * True when the current user holds any of the given roles.
+     *
+     * Not for access checks: use authorize()/can(). Kept only for the rules
+     * that stay role-based (who may manage whom, in UsersController).
      */
     protected function userHasRole(string ...$roles): bool
     {

@@ -284,6 +284,20 @@ class PermissionMatrixApiTest extends TestCase
         $this->assertSame([], $unknown);
     }
 
+    public function testAuthMeListsWhatEachRoleHolds(): void
+    {
+        foreach (self::ROLES as $role) {
+            $this->callAs($this->tokens[$role], 'GET', '/api/auth/me');
+            $this->assertResponseOk();
+            $expected = array_keys(array_filter(
+                PermissionCatalog::rows(),
+                fn($row) => in_array($role, $row['roles'], true),
+            ));
+            sort($expected);
+            $this->assertSame($expected, $this->responseJson()['user']['permissions'], "permissions for $role");
+        }
+    }
+
     // ------------------------------------------- rules that depend on the data
 
     public function testOnlyCancelPaidHoldersCancelAServedPaidOrder(): void

@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\LoginThrottle;
+use App\Auth\Permissions;
+use App\Model\Entity\User;
 use App\Model\Table\UsersTable;
 use Cake\I18n\DateTime;
 
@@ -102,7 +104,12 @@ class AuthController extends AppController
         $this->viewBuilder()->setOption('serialize', ['ok']);
     }
 
-    private function publicUser(\App\Model\Entity\User $user): array
+    /**
+     * The signed-in user as the SPA sees them.
+     *
+     * @return array<string, mixed>
+     */
+    private function publicUser(User $user): array
     {
         return [
             'id' => $user->id,
@@ -110,6 +117,9 @@ class AuthController extends AppController
             'email' => $user->email,
             'role' => $user->role,
             'property_id' => $user->property_id,
+            // What the screens may offer. Convenience only: every action
+            // checks its permission on the server.
+            'permissions' => Permissions::forRole($user->role)->toArray(),
         ];
     }
 }
