@@ -17,6 +17,11 @@ $connection->transactional(function () use (...) {
 });
 ```
 
+- **Lock, then check, then change, then record** (an official rule): re-read the subject with
+  `FOR UPDATE` inside the transaction, check against that row, change it, record the event. It
+  applies to every ledgered action, named first for invoice settlement, reservation check-in/out
+  and correction, and expense and purchase order approvals. Test it: the second of two identical
+  requests is refused and records nothing (`LedgerWritesApiTest` does this for serve and cancel).
 - **One way in:** `EventLedgerBehavior::record()`. It refuses to run outside a transaction, so if
   the event can't be written the change rolls back with it.
 - **Context:** `AppController::eventContext()` (built once per request) or

@@ -159,6 +159,13 @@ changes record nobody.
 - **Same transaction, always:** `record()` refuses to run outside a transaction. The caller wraps
   the change and the event in one `transactional()` block, taking its `FOR UPDATE` lock first. If
   the event can't be written, the change doesn't happen.
+- **Lock, then check, then change, then record (mandatory, decided 2026-10-03).** Inside the one
+  transaction: (1) re-read the subject with `FOR UPDATE` (never trust an entity loaded before the
+  transaction); (2) check state and rules against *that* row; (3) change it; (4) `record()` the
+  event. Step 5 found two races this closes (stock computed from a stale item; a sale served or
+  cancelled twice). **Required for** invoice settlement, reservation check-in, check-out and
+  correction, expense approvals, purchase order approvals, and every future ledgered action.
+  Each gets a test that the second of two identical requests is refused and records nothing.
 - **Append-only:** event tables refuse updates and deletes (`beforeSave`/`beforeDelete`). A mistake
   is corrected by a new event that references the original. No hard deletes of business records:
   soft delete plus a `deleted` event.
