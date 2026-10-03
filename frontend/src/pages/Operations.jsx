@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Spinner } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
+import { P } from '../auth/permissions'
 import { operationsToday } from '../api/operations'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
 import {
@@ -28,8 +29,8 @@ const REFRESH_MS = 5 * 60 * 1000
 // rooms, arrivals/departures, collected today, what needs attention — then the
 // module summaries. Front Desk Staff get the same page minus Staff.
 export default function Operations() {
-  const { user, role } = useAuth()
-  const isAdmin = role === 'admin'
+  const { user, can } = useAuth()
+  const seesStaff = can(P.OPERATIONS_STAFF_VIEW)
   const [state, setState] = useState({ data: null, error: null, at: null })
   const [loadingNow, setLoadingNow] = useState(false)
   const [guestTab, setGuestTab] = useState('arrivals')
@@ -106,7 +107,7 @@ export default function Operations() {
               The Staff card never sizes the row: on desktop it's taken out of
               flow (absolute) and fills what POS/Inventory set, elsewhere it
               gets a fixed height; either way its feed scrolls inside. */}
-          <div className={`mb-8 grid grid-cols-1 gap-6 ${isAdmin && data.staff ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+          <div className={`mb-8 grid grid-cols-1 gap-6 ${seesStaff && data.staff ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
             <section className="grid grid-rows-[auto_1fr]">
               <SectionTitle>POS overview</SectionTitle>
               <PosOverview pos={data.pos} />
@@ -115,7 +116,7 @@ export default function Operations() {
               <SectionTitle>Inventory</SectionTitle>
               <InventoryMonitor inventory={data.inventory} />
             </section>
-            {isAdmin && data.staff && (
+            {seesStaff && data.staff && (
               <section className="grid grid-rows-[auto_1fr]">
                 <SectionTitle>Staff</SectionTitle>
                 <div className="relative h-[28rem] lg:h-auto lg:min-h-[20rem]">

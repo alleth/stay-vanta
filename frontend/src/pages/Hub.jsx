@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { GROUPS, NAV } from '../nav'
+import { GROUPS, NAV, canOpen } from '../nav'
 
-// The post-login landing screen: role-scoped module tiles, grouped for
+// The post-login landing screen: the modules this person may open (scope + permission, nav.js), grouped for
 // property users (Overview, Guest services, Property, Team), instead
 // of a persistent tab bar (see Layout.jsx — the header keeps only a Home
 // link back here, so every module-to-module switch returns through this
@@ -27,8 +27,9 @@ function Tile({ to, label, blurb, Icon }) {
 const TILE_GRID = 'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4'
 
 export default function Hub() {
-  const { user, role } = useAuth()
-  const items = NAV.filter((n) => n.roles.includes(role))
+  const auth = useAuth()
+  const { user } = auth
+  const items = NAV.filter((n) => canOpen(n, auth))
   // Property users see labeled groups; the Platform Owner's tiles have no
   // group and render as one plain grid. Empty groups are skipped.
   const grouped = GROUPS

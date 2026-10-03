@@ -3,6 +3,7 @@ import {
   Card, Table, Button, Badge, Modal, Form, Alert, Spinner, ButtonGroup, InputGroup, Pagination, Dropdown,
 } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
+import { P } from '../auth/permissions'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
 import { SkeletonTable, SkeletonTableRows } from '../components/Skeleton'
@@ -37,11 +38,13 @@ const fmtDateTime = (s) =>
 const ITEMS_PER_PAGE = 20
 
 export default function Inventory() {
-  const { role } = useAuth()
+  const { can } = useAuth()
   const { propertyId } = useProperty()
-  // Receptionists operate the catalogue read-only: no category creation, no
+  // Front Desk Staff use the catalogue read-only: no category creation, no
   // manual stock moves, no edits. Stock leaves via POS orders instead.
-  const canManage = role === 'owner' || role === 'admin'
+  const canManageItems = can(P.INVENTORY_ITEM_MANAGE)
+  const canManageCategories = can(P.INVENTORY_CATEGORY_MANAGE)
+  const canAdjustStock = can(P.INVENTORY_STOCK_ADJUST)
   const [categories, setCategories] = useState([])
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(true)
@@ -186,17 +189,23 @@ export default function Inventory() {
             Every in/out movement records the acting receptionist.
           </small>
         </div>
-        {canManage && (
+        {(canManageCategories || canManageItems) && (
           <div className="flex gap-2">
-            <Button variant="outline-secondary" onClick={() => setModal('categories')}>
-              Manage categories
-            </Button>
-            <Button variant="outline-secondary" onClick={() => setModal('category')}>
-              New category
-            </Button>
-            <Button onClick={() => { setEditTarget(null); setModal('item') }} disabled={categories.length === 0}>
-              New item
-            </Button>
+            {canManageCategories && (
+              <>
+                <Button variant="outline-secondary" onClick={() => setModal('categories')}>
+                  Manage categories
+                </Button>
+                <Button variant="outline-secondary" onClick={() => setModal('category')}>
+                  New category
+                </Button>
+              </>
+            )}
+            {canManageItems && (
+              <Button onClick={() => { setEditTarget(null); setModal('item') }} disabled={categories.length === 0}>
+                New item
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -216,7 +225,7 @@ export default function Inventory() {
       </ButtonGroup>
 
       {view === 'receipts' ? (
-        <ReceiptBooklets canManage={canManage} propertyId={propertyId} />
+        <ReceiptBooklets canManage={can(P.FINANCE_RECEIPT_SERIES_MANAGE)} propertyId={propertyId} />
       ) : loading ? (
         <SkeletonTable rows={6} />
       ) : (
@@ -329,13 +338,13 @@ export default function Inventory() {
                           {it.last_receptionist?.name ?? '—'}
                         </td>
                         <td className="whitespace-nowrap text-right">
-                          {canManage && (
+                          {(canAdjustStock || canManageItems) && (
                             <Dropdown
                               align="end"
                               disabled={pending === `item-${it.id}`}
                               toggle={pending === `item-${it.id}` ? <Spinner size="sm" /> : undefined}
                             >
-                              {Object.entries(reusable ? REUSABLE_ACTIONS : CONSUMABLE_ACTIONS).map(([key, a]) => (
+                              {canAdjustStock && Object.entries(reusable ? REUSABLE_ACTIONS : CONSUMABLE_ACTIONS).map(([key, a]) => (
                                 <Dropdown.Item key={key} onClick={() => openMove(it, key)}>
                                   <span className={a.direction === 'in'
                                     ? 'text-emerald-600 dark:text-emerald-400'
@@ -345,13 +354,17 @@ export default function Inventory() {
                                   {a.label}
                                 </Dropdown.Item>
                               ))}
-                              <Dropdown.Divider />
-                              <Dropdown.Item onClick={() => { setEditTarget(it); setModal('item') }}>
-                                Edit
-                              </Dropdown.Item>
-                              <Dropdown.Item danger onClick={() => doDeleteItem(it)}>
-                                Delete
-                              </Dropdown.Item>
+                              {canAdjustStock && canManageItems && <Dropdown.Divider />}
+                              {canManageItems && (
+                                <>
+                                  <Dropdown.Item onClick={() => { setEditTarget(it); setModal('item') }}>
+                                    Edit
+                                  </Dropdown.Item>
+                                  <Dropdown.Item danger onClick={() => doDeleteItem(it)}>
+                                    Delete
+                                  </Dropdown.Item>
+                                </>
+                              )}
                             </Dropdown>
                           )}
                         </td>

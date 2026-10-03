@@ -4,6 +4,7 @@ import {
   Pagination,
 } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
+import { P } from '../auth/permissions'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
@@ -28,9 +29,9 @@ const todayStr = () => new Date().toLocaleDateString('en-CA')
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : '—')
 
 export default function Pos() {
-  const { role } = useAuth()
+  const { can } = useAuth()
   const { propertyId } = useProperty()
-  const canManageMenu = role === 'owner' || role === 'admin'
+  const canManageMenu = can(P.POS_MENU_MANAGE)
 
   const [menu, setMenu] = useState([])
   const [inventory, setInventory] = useState([])
@@ -212,7 +213,7 @@ export default function Pos() {
                           </Button>
                         )}
                         {o.status !== 'cancelled'
-                          && !(role === 'receptionist' && o.status === 'served' && o.payment_status === 'paid') && (
+                          && !(!can(P.POS_SALE_CANCEL_PAID) && o.status === 'served' && o.payment_status === 'paid') && (
                           <Button size="sm" variant="outline-danger"
                             disabled={pending !== null}
                             onClick={() => act(`cancel-${o.id}`, cancelOrder, o.id)}>

@@ -4,6 +4,7 @@ import {
 } from '../components/ui'
 import { useProperty } from '../context/PropertyContext'
 import { useAuth } from '../context/AuthContext'
+import { P } from '../auth/permissions'
 import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
 import { matchGuests, listGuests } from '../api/guests'
@@ -94,12 +95,12 @@ const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : null)
 // Why a reservation can't be edited by this user, or null when it can. The
 // row always opens; this decides whether the modal opens editable or as a
 // read-only view. Mirrors ReservationsController::edit()/delete().
-function editBlockReason(r, isAdmin) {
+function editBlockReason(r, canCorrect) {
   if (r.room_charge_invoice === 'settled') {
     return 'Its invoice is settled, so it can no longer be edited or deleted.'
   }
   if (r.status === 'cancelled') return 'A cancelled reservation can’t be edited.'
-  if (r.status !== 'booked' && !isAdmin) return 'Only a Manager can change a stay that’s checked in or out.'
+  if (r.status !== 'booked' && !canCorrect) return 'Only a Manager can change a stay that’s checked in or out.'
   return null
 }
 
@@ -188,11 +189,15 @@ function statusOptions(status) {
 
 export default function FrontDesk() {
   const { propertyId } = useProperty()
-  const { role } = useAuth()
-  const canManageRooms = role === 'owner' || role === 'admin'
-  // Anyone can fix a booking before check-in; an admin can also correct (or
+  const { can } = useAuth()
+  const canManageRooms = can(P.SETTINGS_ROOM_MANAGE)
+  const canManageRates = can(P.SETTINGS_ROOM_RATE_MANAGE)
+  const canManagePromos = can(P.SETTINGS_PROMO_RATE_MANAGE)
+  const canManageCharges = can(P.SETTINGS_EXTRA_CHARGE_MANAGE)
+  // Anyone can fix a booking before check-in; a Manager can also correct (or
   // delete) a stay that's under way or over — the backend decides the rest.
-  const isAdmin = role === 'admin'
+  const canCorrect = can(P.FRONT_DESK_RESERVATION_CORRECT)
+  const canDelete = can(P.FRONT_DESK_RESERVATION_DELETE)
   // Every row opens its reservation; whether it opens editable is
   // editBlockReason()'s call (the backend enforces the same rules).
   const [rooms, setRooms] = useState([])
@@ -521,9 +526,9 @@ export default function FrontDesk() {
                         r.status === 'cancelled' && 'text-muted',
                         'cursor-pointer',
                       ].filter(Boolean).join(' ')}
-                      title={editBlockReason(r, isAdmin)
+                      title={editBlockReason(r, canCorrect)
                         ? 'Click to view the details'
-                        : isAdmin ? 'Click to view, edit or delete' : 'Click to view or edit this booking'}
+                        : canDelete ? 'Click to view, edit or delete' : 'Click to view or edit this booking'}
                       onClick={() => setModal({ type: 'reservation', reservation: r })}>
                       <td className="font-semibold">
                         {r.guest?.full_name ?? '—'}{' '}
@@ -712,7 +717,7 @@ export default function FrontDesk() {
 
           {/* ---- Rates ---- */}
           <Tab eventKey="rates" title={`Rates (${rates.length})`}>
-            {canManageRooms && (
+            {canManageRates && (
               <div className="mb-2 flex justify-end">
                 <Button onClick={() => setModal({ type: 'rate' })}>Add rate</Button>
               </div>
@@ -723,19 +728,19 @@ export default function FrontDesk() {
                   <tr>
                     <th>Applies to</th><th>Amenities &amp; bed</th>
                     <th className="text-right">Nightly rate</th>
-                    {canManageRooms && <th className="text-right">Actions</th>}
+                    {canManageRates && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rates.length === 0 && (
-                    <tr><td colSpan={canManageRooms ? 4 : 3} className="py-6 text-center text-muted">No rates yet.</td></tr>
+                    <tr><td colSpan={canManageRates ? 4 : 3} className="py-6 text-center text-muted">No rates yet.</td></tr>
                   )}
                   {rates.map((rt) => (
                     <tr key={rt.id}>
                       <td className="font-semibold">{rt.room ? `Room ${rt.room.room_number}` : 'All rooms'}</td>
                       <td className="max-w-[320px] text-xs text-muted">{rt.description || '—'}</td>
                       <td className="text-right">{formatMoney(rt.base_rate)}</td>
-                      {canManageRooms && (
+                      {canManageRates && (
                         <td className="text-right">
                           <Button size="sm" variant="outline-primary"
                             onClick={() => setModal({ type: 'rate', rate: rt })}>Edit</Button>
@@ -750,7 +755,7 @@ export default function FrontDesk() {
 
           {/* ---- Promo Rates (OTA nightly prices; auto-fill the booking form) ---- */}
           <Tab eventKey="promo-rates" title={`Promo Rates (${promoRates.length})`}>
-            {canManageRooms && (
+            {canManagePromos && (
               <div className="mb-2 flex justify-end">
                 <Button onClick={() => setModal({ type: 'promo' })}>Add promo rate</Button>
               </div>
@@ -760,19 +765,19 @@ export default function FrontDesk() {
                 <thead>
                   <tr>
                     <th>Source</th><th>Applies to</th><th className="text-right">Rate multiplier</th>
-                    {canManageRooms && <th className="text-right">Actions</th>}
+                    {canManagePromos && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {promoRates.length === 0 && (
-                    <tr><td colSpan={canManageRooms ? 4 : 3} className="py-6 text-center text-muted">No promo rates yet.</td></tr>
+                    <tr><td colSpan={canManagePromos ? 4 : 3} className="py-6 text-center text-muted">No promo rates yet.</td></tr>
                   )}
                   {promoRates.map((pr) => (
                     <tr key={pr.id}>
                       <td className="font-semibold">{sourceLabel(bookingSources, pr.source)}</td>
                       <td>{pr.room ? roomLabel(pr.room) : 'All rooms'}</td>
                       <td className="text-right">×{Number(pr.multiplier)}</td>
-                      {canManageRooms && (
+                      {canManagePromos && (
                         <td className="whitespace-nowrap text-right">
                           <Button size="sm" variant="outline-primary" className="mr-1"
                             disabled={pending !== null}
@@ -864,7 +869,7 @@ export default function FrontDesk() {
           </Tab>
 
           {/* ---- Extra Charges (admin/owner only) ---- */}
-          {canManageRooms && (
+          {canManageCharges && (
             <Tab eventKey="charges" title="Extra Charges">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <p className="mb-0 text-sm text-muted">
@@ -1068,15 +1073,18 @@ function ReservationModal({
   const isWalkIn = form.source === WALK_IN
   const hasChannels = bookingSources.length > 0
 
-  // Only an admin may record a stay that started before today (the backend
-  // refuses anyone else). It's saved as whatever its dates say it is by now:
-  // checked out if it's over, checked in if the guest is still here.
-  const { role } = useAuth()
-  const canBackdate = role === 'admin'
+  // Only a holder of front_desk.reservation.backdate (a Manager) may record a
+  // stay that started before today (the backend refuses anyone else). It's
+  // saved as whatever its dates say it is by now: checked out if it's over,
+  // checked in if the guest is still here.
+  const { can } = useAuth()
+  const canBackdate = can(P.FRONT_DESK_RESERVATION_BACKDATE)
+  const canCorrect = can(P.FRONT_DESK_RESERVATION_CORRECT)
+  const canDelete = can(P.FRONT_DESK_RESERVATION_DELETE)
   // Opened on a reservation this user can't change (settled, cancelled, or a
   // stay only an admin may correct): same form, every field disabled, no
   // Save/Delete — a view of all its details.
-  const readOnlyReason = editing ? editBlockReason(reservation, canBackdate) : null
+  const readOnlyReason = editing ? editBlockReason(reservation, canCorrect) : null
   const readOnly = readOnlyReason !== null
   const isPast = !editing && Boolean(form.check_in) && form.check_in < todayStr()
   const pastEnded = isPast && Boolean(form.check_out) && form.check_out <= todayStr()
@@ -1744,7 +1752,7 @@ function ReservationModal({
             <Button variant="secondary" onClick={onClose}>Close</Button>
           ) : (
             <>
-              {editing && canBackdate && (
+              {editing && canDelete && (
                 <Button variant="outline-danger" className="mr-auto" disabled={busy || deleting} onClick={remove}>
                   {deleting ? <Spinner size="sm" /> : 'Delete'}
                 </Button>

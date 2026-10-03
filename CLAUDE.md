@@ -45,7 +45,8 @@ answer until they're removed a release later; never call them from new code.
    in one map each (frontend `ROLE_LABELS`, nav labels in `nav.js`).
 
 ### Hub and modules
-The Hub is grouped. Tiles show by role today and by permission later; empty groups are hidden.
+The Hub is grouped. A tile shows when its scope (platform or property) and permission match the
+signed-in person (`nav.js`, `canOpen()`); empty groups are hidden.
 
 | Group | Module | Answers / owns | In code |
 |---|---|---|---|
@@ -173,16 +174,23 @@ changes record nobody.
   endpoint that changes state, as today.
 
 ### Permission strategy
-- **Phase 1 (build step 4, no DB change) — backend done:** `App\Auth\Permissions` defines the 35
+- **Phase 1 (build step 4, no DB change) — done:** `App\Auth\Permissions` defines the 35
   `module.resource.action` constants and a fixed map from each role value to its permissions; the
   approved catalog, design rules and endpoint map are **`docs/PERMISSIONS.md`** (the source of
   truth; `PermissionsTest` keeps code and document identical). **Every API action calls
   `$this->authorize(Permissions::X)`** first (after `allowMethod()`); data-dependent checks use
   `$this->can(Permissions::X)`. Deny by default: a role the map doesn't know holds nothing.
   `userHasRole()` survives only for the staff hierarchy in `UsersController` (a test forbids it
-  elsewhere). Login and `/auth/me` return `user.permissions`. Still to do: the frontend's
-  `useAuth().can()` replacing `roles` in `nav.js` / `ProtectedRoute` and the `role === …` checks
-  in pages. Every check on the frontend must also exist on the backend.
+  elsewhere). Login and `/auth/me` return `user.permissions`.
+  **Frontend:** `useAuth()` gives `can(P.X)` (names in `src/auth/permissions.js`, mirrored from
+  the PHP class; `PermissionsTest` fails on drift or an undefined `P.X`) and `scope`
+  (`'platform'` | `'property'`). **Screens check permission and scope, never permission alone**:
+  each `nav.js` item has `scope` + `permission`, and `canOpen(item, auth)` drives the Hub,
+  `ProtectedRoute module="/path"` and `/dashboard`. Scope keeps the Platform Owner on platform
+  screens even though they hold some hotel permissions today. Pages use `can()` for what they
+  offer; the only role checks left are the staff hierarchy in `Staff.jsx` and display labels.
+  A session without `user.permissions` falls back to `ROLE_FALLBACK` (remove it a release after
+  Phase 1 ships). Every check on the frontend must also exist on the backend.
 - **Adding an endpoint or permission:** add the catalog row and endpoint-map row to
   `docs/PERMISSIONS.md`, the constant (and grants) to `Permissions`, and a probe to
   `PermissionMatrixApiTest::PROBES` — `testEveryApiRouteHasAProbe` fails on an unmapped route.
@@ -308,8 +316,9 @@ Operations. The Platform Owner's Dashboard is `pages/PlatformDashboard.jsx` /
 from live counts (no stored notification/read state) and operational only. "Reserved" rooms are
 derived (an available room held by a `booked` reservation covering today), not a room status.
 
-Nav visibility lives in `src/nav.js` (`roles` per item) and `ProtectedRoute roles=` in `App.jsx`,
-but those are UX only — **every role check must also exist on the backend**. `UsersController`
+Nav visibility lives in `src/nav.js` (`scope` + `permission` per item, see "Permission strategy")
+and `ProtectedRoute module=` in `App.jsx`, but those are UX only — **every check must also exist
+on the backend**. `UsersController`
 is the canonical example (`findManageable()` confines admins to their property and excludes
 owners; deactivation blocks login; reset-password nulls `api_token`). Owner/admin-only writes
 are the norm across modules; see `backend/API.md` for which endpoint allows what.

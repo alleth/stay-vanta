@@ -10,6 +10,7 @@ use App\Test\TestSuite\PermissionCatalog;
 use Cake\TestSuite\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use ReflectionClass;
 
 /**
  * The permission definitions and the Phase 1 role map.
@@ -89,6 +90,58 @@ class PermissionsTest extends TestCase
             }
         }
         $this->assertSame([], $found, 'Use $this->authorize()/can() with a Permissions constant instead.');
+    }
+
+    /**
+     * frontend/src/auth/permissions.js mirrors this class: the same names, and
+     * the same role map as the fallback for sessions from before
+     * user.permissions existed. A typo there would silently hide a screen.
+     */
+    public function testTheFrontendMirrorsTheseDefinitions(): void
+    {
+        $js = (string)file_get_contents(dirname(ROOT) . '/frontend/src/auth/permissions.js');
+        $this->assertNotSame('', $js, 'frontend/src/auth/permissions.js is missing');
+
+        // \R and \r? so a Windows checkout (CRLF) reads the same as CI.
+        preg_match('/export const P = \{(.*?)\R\}/s', $js, $block);
+        preg_match_all("/^\s*([A-Z_]+): '([a-z_.]+)',\r?$/m", $block[1] ?? '', $pairs, PREG_SET_ORDER);
+        $frontend = [];
+        foreach ($pairs as [, $name, $value]) {
+            $frontend[$name] = $value;
+        }
+        $backend = array_filter(
+            (new ReflectionClass(Permissions::class))->getConstants(),
+            fn($value) => is_string($value),
+        );
+        $this->assertSame($backend, $frontend, 'P in permissions.js must match the Permissions constants');
+
+        preg_match('/export const ROLE_FALLBACK = \{(.*?)\R\}/s', $js, $fallback);
+        preg_match_all('/^  ([a-z]+): \[(.*?)^  \],\r?$/ms', $fallback[1] ?? '', $roles, PREG_SET_ORDER);
+        $map = [];
+        foreach ($roles as [, $role, $list]) {
+            preg_match_all('/P\.([A-Z_]+)/', $list, $names);
+            $map[$role] = array_map(fn($name) => $frontend[$name] ?? "unknown $name", $names[1]);
+        }
+        $this->assertSame(Permissions::ROLE_GRANTS, $map, 'ROLE_FALLBACK must match Permissions::ROLE_GRANTS');
+    }
+
+    public function testTheFrontendOnlyNamesDefinedPermissions(): void
+    {
+        $src = dirname(ROOT) . '/frontend/src';
+        $unknown = [];
+        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($src));
+        foreach ($files as $file) {
+            if (!in_array($file->getExtension(), ['js', 'jsx'], true)) {
+                continue;
+            }
+            preg_match_all('/\bP\.([A-Z_]+)\b/', (string)file_get_contents($file->getPathname()), $m);
+            foreach ($m[1] as $name) {
+                if (!defined(Permissions::class . '::' . $name)) {
+                    $unknown[] = $file->getFilename() . ': P.' . $name;
+                }
+            }
+        }
+        $this->assertSame([], $unknown);
     }
 
     public function testAPermissionSetAnswersOnlyForWhatItHolds(): void

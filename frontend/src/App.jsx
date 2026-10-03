@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Landing from './pages/Landing'
 import Hub from './pages/Hub'
 import { useAuth } from './context/AuthContext'
+import { canOpen, navItem } from './nav'
 import Operations from './pages/Operations'
 import PlatformDashboard from './pages/PlatformDashboard'
 import Inventory from './pages/Inventory'
@@ -17,9 +18,6 @@ import Staff from './pages/Staff'
 import PrivacyPolicy from './pages/PrivacyPolicy'
 import TermsOfService from './pages/TermsOfService'
 
-// Roles allowed in the operational (hotel-floor) tabs.
-const OPS = ['admin', 'receptionist']
-
 /**
  * "/" serves the landing page to visitors and forwards signed-in staff to the
  * Hub. `loading` matters here: while the stored token is being resolved there
@@ -29,12 +27,12 @@ const OPS = ['admin', 'receptionist']
 /**
  * /dashboard is the Platform Owner's page. Hotel staff who arrive there (an
  * old bookmark or link from before the naming release) are forwarded to
- * Operations, which replaced their Dashboard. Role-dependent, so it lives here
+ * Operations, which replaced their Dashboard. Depends on who is signed in, so it lives here
  * rather than in Cloudflare's _redirects.
  */
 function DashboardRoute() {
-  const { user } = useAuth()
-  if (user?.role !== 'owner') return <Navigate to="/operations" replace />
+  const auth = useAuth()
+  if (!canOpen(navItem('/dashboard'), auth)) return <Navigate to="/operations" replace />
   return <PlatformDashboard />
 }
 
@@ -62,7 +60,7 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        {/* /hub is the post-login home — a role-scoped icon grid
+        {/* /hub is the post-login home — an icon grid of the modules this person may open
             (src/pages/Hub.jsx) that replaces a persistent tab bar; every
             module lives at its own path, and the header brand leads back
             here. */}
@@ -71,7 +69,7 @@ export default function App() {
         <Route
           path="operations"
           element={
-            <ProtectedRoute roles={OPS}>
+            <ProtectedRoute module="/operations">
               <Operations />
             </ProtectedRoute>
           }
@@ -79,7 +77,7 @@ export default function App() {
         <Route
           path="finance"
           element={
-            <ProtectedRoute roles={OPS}>
+            <ProtectedRoute module="/finance">
               <Finance />
             </ProtectedRoute>
           }
@@ -90,7 +88,7 @@ export default function App() {
         <Route
           path="inventory"
           element={
-            <ProtectedRoute roles={OPS}>
+            <ProtectedRoute module="/inventory">
               <Inventory />
             </ProtectedRoute>
           }
@@ -98,7 +96,7 @@ export default function App() {
         <Route
           path="front-desk"
           element={
-            <ProtectedRoute roles={OPS}>
+            <ProtectedRoute module="/front-desk">
               <FrontDesk />
             </ProtectedRoute>
           }
@@ -106,7 +104,7 @@ export default function App() {
         <Route
           path="guests"
           element={
-            <ProtectedRoute roles={OPS}>
+            <ProtectedRoute module="/guests">
               <Guests />
             </ProtectedRoute>
           }
@@ -114,7 +112,7 @@ export default function App() {
         <Route
           path="pos"
           element={
-            <ProtectedRoute roles={OPS}>
+            <ProtectedRoute module="/pos">
               <Pos />
             </ProtectedRoute>
           }
@@ -122,7 +120,7 @@ export default function App() {
         <Route
           path="subscribers"
           element={
-            <ProtectedRoute roles={['owner']}>
+            <ProtectedRoute module="/subscribers">
               <Subscribers />
             </ProtectedRoute>
           }
@@ -130,7 +128,7 @@ export default function App() {
         <Route
           path="staff"
           element={
-            <ProtectedRoute roles={['admin']}>
+            <ProtectedRoute module="/staff">
               <Staff />
             </ProtectedRoute>
           }

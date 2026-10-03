@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import client, { getToken, setToken } from '../api/client'
+import { ROLE_FALLBACK } from '../auth/permissions'
 
 const AuthContext = createContext(null)
 
@@ -30,7 +31,21 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
-  const value = { user, loading, login, logout, role: user?.role ?? null }
+  const role = user?.role ?? null
+  // What this person may do (docs/PERMISSIONS.md). Sent by the server; a
+  // session from before it was sent falls back to the role's fixed list.
+  const granted = useMemo(
+    () => new Set(user?.permissions ?? ROLE_FALLBACK[user?.role] ?? []),
+    [user],
+  )
+  const value = {
+    user, loading, login, logout, role,
+    can: (permission) => granted.has(permission),
+    // Where they work, which a permission never implies: the platform (the
+    // Platform Owner, bound to no property) or one property. Screens check
+    // both: scope picks platform vs hotel screens, can() what's on them.
+    scope: user ? (user.property_id == null ? 'platform' : 'property') : null,
+  }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

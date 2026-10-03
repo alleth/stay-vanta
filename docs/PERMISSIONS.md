@@ -31,6 +31,10 @@ Approved 2026-10-03. They explain the catalog; follow them when you add to it.
   catalog rows, endpoint map rows and access-matrix probes land with the first endpoint.
 - **Gates are on actions, not routes.** The API scope has `fallbacks()`, so an action can also be
   reached at `/api/<controller>/<action>`. A check inside the action covers every route to it.
+- **Screens combine permission, scope and context, never permission alone.** A Hub tile or route
+  opens for a person in its scope (platform or property) who holds its permission
+  (`frontend/src/nav.js`, `canOpen()`). The Platform Owner holds some hotel permissions today and
+  still sees only platform screens.
 - **Business rules stay business rules.** State locks, separation of duties and the staff
   hierarchy are not permissions (see "Rules that stay outside permissions").
 
