@@ -15,6 +15,7 @@ use Cake\ORM\TableRegistry;
 class FoodOrderEventsTable extends Table
 {
     use AppendOnlyTableTrait;
+    use EventLedgerTableTrait;
 
     public const PLACED = 'placed';
     public const SERVED = 'served';

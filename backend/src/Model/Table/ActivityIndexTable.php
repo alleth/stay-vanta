@@ -47,7 +47,7 @@ class ActivityIndexTable extends Table
         array $summary,
     ): EntityInterface {
         $row = $this->newEntity([], ['validate' => false]);
-        $row->set([
+        $row->patch([
             'property_id' => $event->get('property_id'),
             'occurred_at' => $event->get('occurred_at'),
             'actor_id' => $event->get('actor_id'),

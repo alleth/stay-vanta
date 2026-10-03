@@ -17,6 +17,7 @@ declare(strict_types=1);
 namespace App\Test\TestCase;
 
 use App\Application;
+use App\Middleware\CorrelationIdMiddleware;
 use App\Middleware\CorsMiddleware;
 use App\Middleware\HostHeaderMiddleware;
 use Cake\Core\Configure;
@@ -82,13 +83,17 @@ class ApplicationTest extends TestCase
         // it must decorate every response — including error/host-rejection responses
         // from the layers below — with CORS headers.
         $this->assertInstanceOf(CorsMiddleware::class, $middleware->current());
+        // The correlation id sits outside the error handler, so error responses
+        // carry X-Request-Id too and errors are logged under the request's id.
         $middleware->seek(1);
-        $this->assertInstanceOf(ErrorHandlerMiddleware::class, $middleware->current());
+        $this->assertInstanceOf(CorrelationIdMiddleware::class, $middleware->current());
         $middleware->seek(2);
-        $this->assertInstanceOf(HostHeaderMiddleware::class, $middleware->current());
+        $this->assertInstanceOf(ErrorHandlerMiddleware::class, $middleware->current());
         $middleware->seek(3);
-        $this->assertInstanceOf(AssetMiddleware::class, $middleware->current());
+        $this->assertInstanceOf(HostHeaderMiddleware::class, $middleware->current());
         $middleware->seek(4);
+        $this->assertInstanceOf(AssetMiddleware::class, $middleware->current());
+        $middleware->seek(5);
         $this->assertInstanceOf(RoutingMiddleware::class, $middleware->current());
     }
 }

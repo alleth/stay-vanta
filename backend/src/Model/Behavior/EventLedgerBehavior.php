@@ -15,8 +15,8 @@ use LogicException;
  * The one way an event is recorded (the accountability standard in CLAUDE.md;
  * catalog in docs/EVENTS.md).
  *
- * A ledger table attaches this with its subject column, and declares on its
- * class:
+ * A ledger table attaches this with its subject column, uses
+ * EventLedgerTableTrait (its record() method), and declares on its class:
  * - `TYPES`: its event types (past-tense constants);
  * - `REQUIRES_REASON`: the types that must say why;
  * - `REASON_GRACE`: required types still accepted without a reason during a
@@ -113,7 +113,7 @@ class EventLedgerBehavior extends Behavior
 
         $snapshot = method_exists($table, 'snapshotOf') ? $table->snapshotOf($subject) : [];
         $event = $table->newEntity([], ['validate' => false]);
-        $event->set([
+        $event->patch([
             'property_id' => $propertyId,
             $this->getConfig('subjectKey') => $subject->get('id'),
             'event_type' => $type,
