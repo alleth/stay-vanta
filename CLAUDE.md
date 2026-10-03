@@ -482,8 +482,13 @@ would make the key attacker-controlled.
 ## Domain rules
 
 ### Money: revenue, invoices, receipts
+- **One calculation: `App\Model\Finance\Collections`** (build step 7a) — `collected($from, $to)`,
+  `collectedOn($day)`, `byPeriod()`, `settledInvoices()`, `paidSales()`, `outstanding()`. Finance
+  and Operations read every Collected/Outstanding figure from it; never write a second money query.
+  `CollectionsEquivalenceTest` holds it to the pre-7a queries (retire that reference deliberately
+  when step 7b changes the meaning; don't edit it to match).
 - **Hotel revenue = collected**: Σ settled `invoices.total` (by `settled_at`, stamped in
-  `InvoicesController::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room food
+  `InvoicesTable::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room food
   already lives inside invoices, so only `paid` orders are added. **Posting a room charge is not
   collecting it**: it puts the charge on the guest's *open* invoice (the stay reads **Billed**),
   which counts only once settled (**Settled**; Settle is where SI/OR booklet numbers are assigned —

@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
+use App\Model\Finance\Collections;
 use App\Model\Entity\Reservation;
 use App\Model\Table\InvoiceEventsTable;
 use Cake\Http\Exception\BadRequestException;
@@ -76,17 +77,10 @@ class OperationsController extends AppController
         [$pos, $todaysOrders] = $this->posSummary($propertyId, $dayStart, $dayEnd, $trendFrom);
         $inventory = $this->inventorySummary($propertyId, $trendFrom);
 
-        // The one revenue figure the operations Dashboard keeps: collected
-        // today, the collection report's definition (settled invoices by
-        // settled_at + paid food orders). Everything else about money lives
-        // on the Revenue page.
-        $inv = $this->fetchTable('Invoices')->find()->where([
-            'property_id' => $propertyId,
-            'status' => 'settled',
-            'settled_at >=' => $dayStart,
-            'settled_at <' => $dayEnd,
-        ]);
-        $invoicesToday = round((float)$inv->select(['s' => $inv->func()->sum('total')])->first()->s, 2);
+        // The one money figure Operations keeps: collected today, from the
+        // shared definition (Collections). Everything else about money lives
+        // in Finance.
+        $invoicesToday = (new Collections($propertyId))->settledInvoices($dayStart, $dayEnd)['total'];
 
         $this->set('operations', [
             'date' => $today,
@@ -332,19 +326,15 @@ class OperationsController extends AppController
             $rows,
         )), 2);
 
-        // One query per day, oldest first (no GROUP BY DATE(...)).
+        // Paid sales per day, oldest first (Collections' POS part; one query
+        // per day, no GROUP BY DATE(...)).
+        $money = new Collections($propertyId);
         $trend = [];
         for ($i = self::TREND_DAYS - 1; $i >= 0; $i--) {
             $date = BusinessTime::today()->subDays($i)->format('Y-m-d');
-            $q = $orders->find()->where([
-                'property_id' => $propertyId,
-                'payment_status' => 'paid',
-                'created >=' => BusinessTime::startOf($date),
-                'created <' => BusinessTime::endOf($date),
-            ]);
             $trend[] = [
                 'date' => $date,
-                'total' => round((float)$q->select(['s' => $q->func()->sum('total')])->first()->s, 2),
+                'total' => $money->paidSales(BusinessTime::startOf($date), BusinessTime::endOf($date))['total'],
             ];
         }
 

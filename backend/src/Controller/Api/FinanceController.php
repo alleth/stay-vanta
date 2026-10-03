@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
+use App\Model\Finance\Collections;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 
@@ -14,8 +15,8 @@ use Cake\Http\Exception\ForbiddenException;
  * GET /api/finance/collections, /api/finance/summary, /api/finance/seasonality.
  * The old /api/reports/daily-collection, /admin-dashboard and /monthly-summary
  * routes point here too until they're removed (build step 3 compatibility
- * window). Collected = settled invoices (by settled_at) + paid POS orders (by
- * created); outstanding = open invoices right now.
+ * window). Every figure comes from App\Model\Finance\Collections, the one
+ * definition of Collected and Outstanding (build step 7a).
  */
 class FinanceController extends AppController
 {
@@ -31,8 +32,8 @@ class FinanceController extends AppController
         $propertyId = (int)$this->effectivePropertyId();
 
         $this->set('summary', [
-            'collected' => $this->collectedByPeriod($propertyId),
-            'outstanding' => $this->outstanding($propertyId),
+            'collected' => $this->money($propertyId)->byPeriod(),
+            'outstanding' => $this->money($propertyId)->outstanding(),
         ]);
         $this->viewBuilder()->setOption('serialize', ['summary']);
     }
@@ -69,49 +70,19 @@ class FinanceController extends AppController
                 'guests_today' => $guestsToday,
                 'open_food_orders' => $openFoodOrders,
             ],
-            'revenue' => $this->collectedByPeriod($propertyId),
-            'outstanding' => $this->outstanding($propertyId),
+            'revenue' => $this->money($propertyId)->byPeriod(),
+            'outstanding' => $this->money($propertyId)->outstanding(),
         ]);
         $this->viewBuilder()->setOption('serialize', ['dashboard']);
     }
 
     /**
-     * Collected per period, on the hotel's calendar.
-     *
-     * @return array{week: float, month: float, ytd: float, all_time: float}
+     * The property's money figures (Collected, Outstanding): one definition
+     * for every report.
      */
-    private function collectedByPeriod(int $propertyId): array
+    private function money(int $propertyId): Collections
     {
-        // Week/month/year as the hotel counts them, not as UTC does.
-        $now = BusinessTime::now();
-        $ranges = [
-            'week' => BusinessTime::stored($now->startOfWeek()),
-            'month' => BusinessTime::stored($now->startOfMonth()),
-            'ytd' => BusinessTime::stored($now->startOfYear()),
-            'all_time' => null,
-        ];
-
-        $invoices = $this->fetchTable('Invoices');
-        $foodOrders = $this->fetchTable('FoodOrders');
-        $collected = [];
-        foreach ($ranges as $key => $from) {
-            // Collected = settled invoices (room + charged food) + paid standalone
-            // food orders. Charge-to-room food already lives inside invoices, so
-            // only `paid` food orders are added here (no double counting).
-            $inv = $invoices->find()
-                ->where(['property_id' => $propertyId, 'status' => 'settled']);
-            $food = $foodOrders->find()
-                ->where(['property_id' => $propertyId, 'payment_status' => 'paid']);
-            if ($from !== null) {
-                $inv->where(['settled_at >=' => $from]);
-                $food->where(['created >=' => $from]);
-            }
-            $invTotal = (float)$inv->select(['s' => $inv->func()->sum('total')])->first()->s;
-            $foodTotal = (float)$food->select(['s' => $food->func()->sum('total')])->first()->s;
-            $collected[$key] = round($invTotal + $foodTotal, 2);
-        }
-
-        return $collected;
+        return new Collections($propertyId);
     }
 
     /**
@@ -169,55 +140,19 @@ class FinanceController extends AppController
             $label = $date;
         }
 
-        $inv = $this->fetchTable('Invoices')->find()->where([
-            'property_id' => $propertyId,
-            'status' => 'settled',
-            'settled_at >=' => $from,
-            'settled_at <' => $to,
-        ]);
-        $invRow = $inv->select(['s' => $inv->func()->sum('total'), 'c' => $inv->func()->count('*')])
-            ->disableHydration()->first();
-
-        $food = $this->fetchTable('FoodOrders')->find()->where([
-            'property_id' => $propertyId,
-            'payment_status' => 'paid',
-            'created >=' => $from,
-            'created <' => $to,
-        ]);
-        $foodRow = $food->select(['s' => $food->func()->sum('total'), 'c' => $food->func()->count('*')])
-            ->disableHydration()->first();
-
-        $invTotal = round((float)($invRow['s'] ?? 0), 2);
-        $foodTotal = round((float)($foodRow['s'] ?? 0), 2);
+        $money = $this->money($propertyId);
+        $collected = $money->collected($from, $to);
 
         $this->set('collection', [
             'scope' => $scope,
             'label' => $label,
-            'invoices' => ['total' => $invTotal, 'count' => (int)($invRow['c'] ?? 0)],
-            'food_orders' => ['total' => $foodTotal, 'count' => (int)($foodRow['c'] ?? 0)],
-            'total' => round($invTotal + $foodTotal, 2),
+            'invoices' => $collected['invoices'],
+            'food_orders' => $collected['pos'],
+            'total' => $collected['total'],
             // Not part of the window: what's still owed right now.
-            'outstanding' => $this->outstanding($propertyId),
+            'outstanding' => $money->outstanding(),
         ]);
         $this->viewBuilder()->setOption('serialize', ['collection']);
-    }
-
-    /**
-     * What's been charged but not yet collected: the total still on the
-     * property's open invoices — room charges from Mark paid, food charged to
-     * the room, early check-in fees — until someone settles them on Food &
-     * Orders → Invoices. A snapshot of now, not tied to any date window.
-     *
-     * @return array{total: float, count: int}
-     */
-    private function outstanding(int $propertyId): array
-    {
-        $query = $this->fetchTable('Invoices')->find()
-            ->where(['property_id' => $propertyId, 'status' => 'open']);
-        $row = $query->select(['s' => $query->func()->sum('total'), 'c' => $query->func()->count('*')])
-            ->disableHydration()->first();
-
-        return ['total' => round((float)($row['s'] ?? 0), 2), 'count' => (int)($row['c'] ?? 0)];
     }
 
     /**
@@ -258,9 +193,8 @@ class FinanceController extends AppController
      * Seasonality, two ways, one year at a time (defaults to current year):
      * - `count` — non-cancelled reservations by the month of their check-in
      *   date (how busy the property was).
-     * - `revenue` — collected revenue for the month: settled invoices (by
-     *   `settled_at`) + paid standalone food orders (by `created`), the same
-     *   definition adminDashboard() uses for its revenue buckets.
+     * - `revenue` — collected in the month (Collections, the same definition
+     *   as every other report).
      * One query per bucket per month (rather than a `GROUP BY MONTH(...)`)
      * to sidestep the ONLY_FULL_GROUP_BY divergence between local MariaDB and
      * prod MySQL 8 (see CLAUDE.md) — the same pattern adminDashboard() uses.
@@ -277,8 +211,7 @@ class FinanceController extends AppController
         $year = (int)$year;
 
         $reservations = $this->fetchTable('Reservations');
-        $invoices = $this->fetchTable('Invoices');
-        $foodOrders = $this->fetchTable('FoodOrders');
+        $money = $this->money($propertyId);
         $months = [];
         for ($m = 1; $m <= 12; $m++) {
             [$from, $to] = $this->monthBounds($year, $m);
@@ -296,27 +229,11 @@ class FinanceController extends AppController
                 ])
                 ->count();
 
-            $inv = $invoices->find()->where([
-                'property_id' => $propertyId,
-                'status' => 'settled',
-                'settled_at >=' => $from,
-                'settled_at <' => $to,
-            ]);
-            $invTotal = (float)$inv->select(['s' => $inv->func()->sum('total')])->first()->s;
-
-            $food = $foodOrders->find()->where([
-                'property_id' => $propertyId,
-                'payment_status' => 'paid',
-                'created >=' => $from,
-                'created <' => $to,
-            ]);
-            $foodTotal = (float)$food->select(['s' => $food->func()->sum('total')])->first()->s;
-
             $months[] = [
                 'month' => $m,
                 'label' => self::MONTH_LABELS[$m],
                 'count' => $count,
-                'revenue' => round($invTotal + $foodTotal, 2),
+                'revenue' => $money->collected($from, $to)['total'],
             ];
         }
 
