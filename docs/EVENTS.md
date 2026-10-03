@@ -73,6 +73,13 @@ nothing), **auditable** (`source = 'import'`, `import-<table>-<id>` correlation 
 count check logged) and **repeatable** (a batched command beside the migration). It never invents
 what the data didn't record: no actor, no reason, no unobserved event.
 
+The first one is `App\Event\ActivityBackfill` (step 5, part 3): a `placed` event for every sale
+without one, and an `activity_index` row for every POS event and stock movement without one. It runs
+once in the `BackfillActivityIndex` migration and again any time with `bin/cake activity_backfill`
+(`--property N`, `--check-only`). It never changes a ledger row (old `stock_movements` keep their
+nulls; only their index row says `import-`), and leaves out rows with no recorded time, counting
+them as undated in the check.
+
 ## Privacy
 
 Snapshots keep the minimum: ids, amounts, states, room numbers and a guest's id and display name.

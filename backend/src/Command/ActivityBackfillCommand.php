@@ -1,0 +1,71 @@
+<?php
+declare(strict_types=1);
+
+namespace App\Command;
+
+use App\Event\ActivityBackfill;
+use Cake\Command\Command;
+use Cake\Console\Arguments;
+use Cake\Console\ConsoleIo;
+use Cake\Console\ConsoleOptionParser;
+use Cake\Datasource\ConnectionManager;
+
+/**
+ * `bin/cake activity_backfill [--property N] [--check-only]`
+ *
+ * Re-runs the activity_index backfill (safe any number of times: it only adds
+ * what's missing) and prints the per-property check. The deployment runs it
+ * once through the BackfillActivityIndex migration.
+ */
+class ActivityBackfillCommand extends Command
+{
+    /**
+     * @param \Cake\Console\ConsoleOptionParser $parser The parser.
+     * @return \Cake\Console\ConsoleOptionParser
+     */
+    protected function buildOptionParser(ConsoleOptionParser $parser): ConsoleOptionParser
+    {
+        return $parser
+            ->setDescription('Index stock movements and sales that predate the event foundation.')
+            ->addOption('property', ['help' => 'Only this property id'])
+            ->addOption('check-only', ['boolean' => true, 'help' => 'Report counts without inserting']);
+    }
+
+    /**
+     * @param \Cake\Console\Arguments $args The arguments.
+     * @param \Cake\Console\ConsoleIo $io The console.
+     * @return int
+     */
+    public function execute(Arguments $args, ConsoleIo $io): int
+    {
+        /** @var \Cake\Database\Connection $connection */
+        $connection = ConnectionManager::get('default');
+        $backfill = new ActivityBackfill($connection);
+        $propertyId = $args->getOption('property') !== null ? (int)$args->getOption('property') : null;
+
+        if (!$args->getOption('check-only')) {
+            foreach ($backfill->run($propertyId) as $what => $count) {
+                $io->out(sprintf('%-14s %d added', $what, $count));
+            }
+        }
+        $incomplete = 0;
+        foreach ($backfill->check($propertyId) as $id => $c) {
+            $ok = $c['stock_indexed'] === $c['stock'] - $c['stock_undated']
+                && $c['placed'] === $c['orders'] - $c['orders_undated']
+                && $c['placed_indexed'] === $c['placed'];
+            $incomplete += $ok ? 0 : 1;
+            $io->out(sprintf(
+                'property %d: stock %d/%d indexed, orders %d/%d placed and %d indexed%s',
+                $id,
+                $c['stock_indexed'],
+                $c['stock'],
+                $c['placed'],
+                $c['orders'],
+                $c['placed_indexed'],
+                $ok ? '' : '  <- INCOMPLETE',
+            ));
+        }
+
+        return $incomplete === 0 ? static::CODE_SUCCESS : static::CODE_ERROR;
+    }
+}

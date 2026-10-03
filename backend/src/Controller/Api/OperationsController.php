@@ -538,10 +538,6 @@ class OperationsController extends AppController
      *
      * The whole activity feed behind the Dashboard's Staff card ("View all
      * activity"), newest first, 25 per page → {activity, page, has_more}.
-     *
-     * Two ledgers merged by time can't be paged with one OFFSET, so each is
-     * read up to the end of the requested page and the merge is sliced — the
-     * cost grows with depth, hence the page cap.
      */
     public function activity(): void
     {
@@ -550,71 +546,119 @@ class OperationsController extends AppController
         if ($page < 1 || $page > self::ACTIVITY_MAX_PAGE) {
             throw new BadRequestException(sprintf('page must be 1-%d.', self::ACTIVITY_MAX_PAGE));
         }
-        $end = $page * self::ACTIVITY_PAGE_SIZE;
-        // One past the page's end, so we know whether another page exists.
-        $events = $this->recentActivity((int)$this->effectivePropertyId(), $end + 1);
+        // One more than a page, so we know whether another page exists.
+        $events = $this->recentActivity(
+            (int)$this->effectivePropertyId(),
+            self::ACTIVITY_PAGE_SIZE + 1,
+            ($page - 1) * self::ACTIVITY_PAGE_SIZE,
+        );
 
         $this->set([
-            'activity' => array_slice($events, $end - self::ACTIVITY_PAGE_SIZE, self::ACTIVITY_PAGE_SIZE),
+            'activity' => array_slice($events, 0, self::ACTIVITY_PAGE_SIZE),
             'page' => $page,
-            'has_more' => count($events) > $end,
+            'has_more' => count($events) > self::ACTIVITY_PAGE_SIZE,
         ]);
         $this->viewBuilder()->setOption('serialize', ['activity', 'page', 'has_more']);
     }
 
     /**
-     * The latest `$limit` ledgered actions, newest first: stock movements and
-     * food orders, each with the person who took it. Reading `$limit` from
-     * each ledger guarantees the merged top `$limit` is exact.
+     * Ledgered actions newest first, from activity_index (build step 5): every
+     * stock movement, and each sale once (its `placed` event). The index
+     * decides which lines exist and their order; what each line shows is read
+     * now, as the feed always has (the item's and person's current names, the
+     * sale's current status and total), so it looks exactly as before. The
+     * moment-in-time summaries in the index are kept for the event feed that
+     * steps 6-8 bring.
+     *
+     * At the same instant, stock lines come before sale lines and later ids
+     * first, which is the order the earlier two-table merge produced.
+     *
+     * @return list<array<string, mixed>>
      */
-    private function recentActivity(int $propertyId, int $limit = self::LIST_LIMIT): array
+    private function recentActivity(int $propertyId, int $limit = self::LIST_LIMIT, int $offset = 0): array
     {
-        $events = [];
-        $movements = $this->fetchTable('StockMovements')->find()
+        $rows = $this->fetchTable('ActivityIndex')->find()
+            ->select(['event_table', 'event_id', 'subject_id'])
+            ->where([
+                'property_id' => $propertyId,
+                'OR' => [
+                    ['event_table' => 'stock_movements'],
+                    ['event_table' => 'food_order_events', 'event_type' => 'placed'],
+                ],
+            ])
+            ->orderBy(['occurred_at' => 'DESC'])
+            ->orderBy(fn($exp, $q) => $q->expr("CASE event_table WHEN 'stock_movements' THEN 0 ELSE 1 END"))
+            // Later movement first, later sale first (by order id: a sale's
+            // placed event may be backfilled after a newer sale recorded live).
+            ->orderBy(fn($exp, $q) => $q->expr(
+                "CASE event_table WHEN 'stock_movements' THEN event_id ELSE subject_id END DESC",
+            ))
+            ->limit($limit)
+            ->offset($offset)
+            ->disableHydration()
+            ->all()
+            ->toList();
+
+        $movementIds = [];
+        $orderIds = [];
+        foreach ($rows as $row) {
+            if ($row['event_table'] === 'stock_movements') {
+                $movementIds[] = (int)$row['event_id'];
+            } else {
+                $orderIds[] = (int)$row['subject_id'];
+            }
+        }
+        $movements = $movementIds === [] ? [] : $this->fetchTable('StockMovements')->find()
             ->contain([
                 'InventoryItems' => ['fields' => ['id', 'name', 'unit']],
                 'Receptionist' => ['fields' => ['id', 'name']],
             ])
-            ->where(['StockMovements.property_id' => $propertyId])
-            ->orderBy(['StockMovements.created' => 'DESC', 'StockMovements.id' => 'DESC'])
-            ->limit($limit)
-            ->all();
-        foreach ($movements as $m) {
-            $events[] = [
-                'type' => 'stock',
-                'id' => 'stock-' . $m->id,
-                'at' => $m->created,
-                'actor' => $m->receptionist?->name,
-                'direction' => $m->direction,
-                'quantity' => (float)$m->quantity,
-                'item' => $m->inventory_item?->name,
-                'unit' => $m->inventory_item?->unit,
-                'reason' => $m->reason,
-            ];
-        }
-
-        $orders = $this->fetchTable('FoodOrders')->find()
+            ->where(['StockMovements.id IN' => $movementIds])
+            ->all()
+            ->indexBy('id')
+            ->toArray();
+        $orders = $orderIds === [] ? [] : $this->fetchTable('FoodOrders')->find()
             ->contain(['Rooms' => ['fields' => ['id', 'room_number']], 'Receptionist' => ['fields' => ['id', 'name']]])
-            ->where(['FoodOrders.property_id' => $propertyId])
-            ->orderBy(['FoodOrders.created' => 'DESC', 'FoodOrders.id' => 'DESC'])
-            ->limit($limit)
-            ->all();
-        foreach ($orders as $o) {
-            $events[] = [
-                'type' => 'order',
-                'id' => 'order-' . $o->id,
-                'at' => $o->created,
-                'actor' => $o->receptionist?->name,
-                'order_id' => (int)$o->id,
-                'total' => round((float)$o->total, 2),
-                'room' => $o->room?->room_number,
-                'payment_status' => $o->payment_status,
-                'status' => $o->status,
-            ];
+            ->where(['FoodOrders.id IN' => $orderIds])
+            ->all()
+            ->indexBy('id')
+            ->toArray();
+
+        $events = [];
+        foreach ($rows as $row) {
+            if ($row['event_table'] === 'stock_movements') {
+                $m = $movements[(int)$row['event_id']] ?? null;
+                if ($m !== null) {
+                    $events[] = [
+                        'type' => 'stock',
+                        'id' => 'stock-' . $m->id,
+                        'at' => $m->created,
+                        'actor' => $m->receptionist?->name,
+                        'direction' => $m->direction,
+                        'quantity' => (float)$m->quantity,
+                        'item' => $m->inventory_item?->name,
+                        'unit' => $m->inventory_item?->unit,
+                        'reason' => $m->reason,
+                    ];
+                }
+                continue;
+            }
+            $o = $orders[(int)$row['subject_id']] ?? null;
+            if ($o !== null) {
+                $events[] = [
+                    'type' => 'order',
+                    'id' => 'order-' . $o->id,
+                    'at' => $o->created,
+                    'actor' => $o->receptionist?->name,
+                    'order_id' => (int)$o->id,
+                    'total' => round((float)$o->total, 2),
+                    'room' => $o->room?->room_number,
+                    'payment_status' => $o->payment_status,
+                    'status' => $o->status,
+                ];
+            }
         }
 
-        usort($events, fn($a, $b) => (string)$b['at']?->format('c') <=> (string)$a['at']?->format('c'));
-
-        return array_slice($events, 0, $limit);
+        return $events;
     }
 }

@@ -193,8 +193,12 @@ changes record nobody.
   `[req:<id>]`; deployed environments log to stderr). The event-type catalog is
   **`docs/EVENTS.md`** (`EventsCatalogTest` keeps it in step with the code). **Wired (part 2):**
   stock movements and POS sales (placed/served/cancelled) write through the foundation, so both
-  meet the accountability standard; the Operations feed still reads `stock_movements` +
-  `food_orders` until part 3 switches it to `activity_index`. Expected 4xx answers are logged as
+  meet the accountability standard. **Part 3:** the Operations feed reads `activity_index` (which
+  lines, in what order), showing current values through batched lookups so it looks as before;
+  history from before step 5 is indexed by `App\Event\ActivityBackfill` (migration
+  `BackfillActivityIndex`; re-run with `bin/cake activity_backfill [--property N] [--check-only]`;
+  its per-property check is logged). `FeedEquivalenceApiTest` keeps the old two-table merge as the
+  reference the feed must match. Expected 4xx answers are logged as
   one `info` line (`App\Error\AppErrorLogger`), not as errors. Approved decisions (2026-10-03): hybrid tables,
   POS as the pilot ledger, a reason for `pos.sale.cancel_paid` (accepted-not-required until the
   cleanup release: `REASON_GRACE`), minimal snapshots (guest id + display name only) with one

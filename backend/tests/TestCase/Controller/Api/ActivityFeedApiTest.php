@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
 
+use App\Event\ActivityBackfill;
 use Cake\I18n\DateTime;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\TestSuite\IntegrationTestTrait;
@@ -63,6 +64,18 @@ class ActivityFeedApiTest extends TestCase
         parent::tearDown();
     }
 
+    /**
+     * Rows here are inserted straight into the old tables, as history is; the
+     * feed reads activity_index, so index them the way the deployment does.
+     * Nothing else in this test changed when the feed moved (step 5, part 3).
+     */
+    private function backfill(): void
+    {
+        /** @var \Cake\Database\Connection $connection */
+        $connection = $this->getTableLocator()->get('Properties')->getConnection();
+        (new ActivityBackfill($connection))->run($this->propertyId);
+    }
+
     private function at(int $minutes): DateTime
     {
         return new DateTime('2026-09-30 00:00:00 +' . $minutes . ' minutes');
@@ -93,6 +106,7 @@ class ActivityFeedApiTest extends TestCase
      */
     private function feed(int $page = 1): array
     {
+        $this->backfill();
         $this->callAs($this->adminToken, 'GET', "/api/operations/activity?page=$page");
         $this->assertResponseOk();
 
@@ -175,6 +189,7 @@ class ActivityFeedApiTest extends TestCase
         for ($i = 1; $i <= 10; $i++) {
             $this->movement($i, 'in', 1, null);
         }
+        $this->backfill();
         $this->callAs($this->adminToken, 'GET', '/api/operations/today');
         $this->assertResponseOk();
         $activity = $this->normalize($this->responseJson()['operations']['activity']);
