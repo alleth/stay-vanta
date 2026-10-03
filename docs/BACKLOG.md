@@ -46,7 +46,28 @@ Direction:
 - [ ] Support access to a hotel is deliberate: started explicitly, scoped to one property, time
   limited, and recorded with actor, reason and timestamp in `access_events`.
 
+## Staging waits for CI before deploying
+
+**Ready when:** before Permissions Phase 2, the event foundation (step 5) or any data migration.
+Evaluate then; no change wanted now (decided 2026-10-03).
+
+**What:** Railway builds `main` for staging as soon as it's pushed, while CI is still running. On
+2026-10-03 commit `9a39ac6` (a missing import, 500 on `GET /api/booking-sources`) reached staging
+while its CI run was failing. That's acceptable today, since staging exists to catch problems, but
+a migration that deploys before its tests fail is harder to undo (rollback restores code, not
+data).
+
+- [ ] Evaluate Railway's "Wait for CI" for the staging service (and production), and what it does
+  to a hotfix's path.
+
 ## Smaller items
+
+- [ ] **Staff accounts can name a property that doesn't exist.** `POST /api/users` as the Platform
+  Owner accepts any `property_id` (found 2026-10-03: a timed-out property creation left
+  `property_id` 0 in a script, and two staging accounts were created bound to it; they're
+  deactivated). `UsersTable` has no `existsIn` rule for `property_id`. Add one (Platform Owner
+  only today, so no isolation risk: such a user sees nothing). Phase 2 memberships replace the
+  column anyway.
 
 - [ ] **phpcs backlog:** about 97 pre-existing style violations in 43 files. Clean them up, then add
   `composer cs-check` to CI so style is enforced.
