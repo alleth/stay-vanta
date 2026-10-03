@@ -137,6 +137,12 @@ Hotfixes take the same path (main → staging → promote), just faster. Never c
 
 ### Rules that make this safe
 
+- **CI success is the manual approval point.** Railway's "Wait for CI" is enabled but does **not**
+  hold deployments back (measured 2026-10-03: staging goes live about a minute before CI finishes;
+  see `docs/BACKLOG.md`, "CI gate on deployment"). So a commit reaches staging whether or not its
+  tests pass, and **nothing is promoted to production until CI for that exact commit is green**
+  (`gh run list --branch main`). Treat the gate as unresolved until it's proven with a failing run.
+
 - **API changes are additive first.** Cloudflare and Railway deploy independently and finish at
   different times, so for a moment the new frontend can talk to the old API or the reverse. Add the
   new endpoint, release, switch the frontend, and remove the old endpoint a release later.

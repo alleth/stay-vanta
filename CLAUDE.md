@@ -183,7 +183,8 @@ changes record nobody.
   one `info` line (`App\Error\AppErrorLogger`), not as errors. Approved decisions (2026-10-03): hybrid tables,
   POS as the pilot ledger, a reason for `pos.sale.cancel_paid` (accepted-not-required until the
   cleanup release: `REASON_GRACE`), minimal snapshots (guest id + display name only) with one
-  controlled redaction routine, CI gates deployment ("Wait for CI"). **The activity feed becomes an
+  controlled redaction routine, CI should gate deployment (Railway "Wait for CI" is on but **does not
+  work** yet; see below). **The activity feed becomes an
   event feed** (one line per business event, with who did it) when the invoice and reservation
   ledgers arrive; in step 5 it stays visually identical (`docs/EVENTS.md`).
 - Until a module's ledger is wired, keep stamping the acting user from
@@ -258,6 +259,9 @@ exploited); agreed follow-ups not on the build order live in `docs/BACKLOG.md`.
 backend PHPUnit against a throwaway **MySQL 9** service (the test connection reads
 `DATABASE_TEST_URL`, since CI has no `app_local.php`), plus frontend lint + build. Check results
 with `gh run list` / `gh run view <id> --log-failed`. A red run blocks promotion to production.
+**Staging deploys before CI finishes** (Railway's "Wait for CI" is enabled but ignored, unresolved:
+`docs/BACKLOG.md`), so a failing commit still reaches staging: check CI for the exact commit before
+trusting staging, and never promote one whose run isn't green.
 phpcs is **not** in CI yet: the codebase has ~97 pre-existing violations; keep new and changed
 files clean.
 
