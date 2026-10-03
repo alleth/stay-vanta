@@ -61,6 +61,22 @@ jobs:
       - name: Run tests
         run: vendor/bin/phpunit --colors=never
 
+      # The schema dump (config/Migrations/schema-dump-default.lock) is made
+      # here, from the migrated MySQL 9 database, rather than on a developer
+      # machine. When a migration changes the schema, download the
+      # "schema-dump" artifact and commit it.
+      - name: Dump the migrated schema
+        run: |
+          php bin/cake.php migrations migrate --no-lock
+          php bin/cake.php migrations dump
+          git diff --stat -- config/Migrations/schema-dump-default.lock || true
+
+      - name: Upload the schema dump
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-dump
+          path: backend/config/Migrations/schema-dump-default.lock
+
   frontend:
     name: Frontend lint & build (Node 22)
     runs-on: ubuntu-latest

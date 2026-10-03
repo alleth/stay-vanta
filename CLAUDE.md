@@ -170,8 +170,21 @@ changes record nobody.
   promo rates, extra charges, rooms, booking sources, receipt series, menu items): it diffs changed
   fields and writes `config_changes`, and refuses to save without an actor. Audit follows the data,
   not the screen, so menu prices are audited even though the menu stays in POS.
-- Until step 5 lands, keep stamping the acting user from `AppController::$currentUser` on any
-  endpoint that changes state, as today.
+- **Step 5 (in progress) — the foundation exists:** `App\Event\EventContext`
+  (`AppController::eventContext()`), `EventLedgerBehavior` + `AppendOnlyBehavior` /
+  `AppendOnlyTableTrait`, `activity_index` (`ActivityIndexTable::forCorrelation()`),
+  `food_order_events`, `authorizeElevated()`, and `CorrelationIdMiddleware` (one id per request,
+  **mandatory** on every event, returned as `X-Request-Id`). The event-type catalog is
+  **`docs/EVENTS.md`** (`EventsCatalogTest` keeps it in step with the code). Not yet wired: stock
+  movements and POS still write the old way, and the Operations feed still reads
+  `stock_movements` + `food_orders` (parts 2–3). Approved decisions (2026-10-03): hybrid tables,
+  POS as the pilot ledger, a reason for `pos.sale.cancel_paid` (accepted-not-required until the
+  cleanup release: `REASON_GRACE`), minimal snapshots (guest id + display name only) with one
+  controlled redaction routine, CI gates deployment ("Wait for CI").
+- Until a module's ledger is wired, keep stamping the acting user from
+  `AppController::$currentUser` on any endpoint that changes state, as today. Tests must clean
+  ledger rows through the connection (`ApiScenarioTrait::LEDGER_TABLES`), since the tables refuse
+  deletes.
 
 ### Permission strategy
 - **Phase 1 (build step 4, no DB change) — done:** `App\Auth\Permissions` defines the 35
@@ -226,7 +239,10 @@ exploited); agreed follow-ups not on the build order live in `docs/BACKLOG.md`.
 - Migrate / roll back: `php bin/cake.php migrations migrate` / `migrations rollback`
 - New migration: `php bin/cake.php bake migration CreateThings` — every schema change ships its
   own dated migration on top of `config/Migrations/20260615000000_InitialSchema.php`; never edit
-  the base schema. `schema-dump-default.lock` is the regenerated dump.
+  the base schema. `schema-dump-default.lock` is the regenerated dump: CI makes it from the
+  migrated MySQL 9 test database (the `schema-dump` artifact of a run); download and commit it when
+  a migration changes the schema. Migrations must work with the previous code (new columns
+  nullable first, tightened a release later).
 - Seed a user: `php bin/cake.php create_user --name N --email E --password P --role owner|admin|receptionist [--property-id N]`
 - Tests: `vendor/bin/phpunit` — single file: `vendor/bin/phpunit tests/TestCase/Path/ThingTest.php`;
   single test: add `--filter testName`. `composer check` = `phpunit` + `phpcs`.

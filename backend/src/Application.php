@@ -16,6 +16,7 @@ declare(strict_types=1);
  */
 namespace App;
 
+use App\Middleware\CorrelationIdMiddleware;
 use App\Middleware\CorsMiddleware;
 use App\Middleware\HostHeaderMiddleware;
 use Cake\Core\Configure;
@@ -71,6 +72,10 @@ class Application extends BaseApplication
             // Otherwise a 4xx/5xx comes back without Access-Control-Allow-Origin and
             // the browser reports an opaque CORS failure that masks the real error.
             ->add(new CorsMiddleware())
+
+            // One correlation id per request (X-Request-Id), set outside the
+            // error handler so error responses carry it too.
+            ->add(new CorrelationIdMiddleware())
 
             // Catch any exceptions in the lower layers,
             // and make an error page/response

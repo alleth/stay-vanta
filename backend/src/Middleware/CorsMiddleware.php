@@ -17,9 +17,16 @@ use Psr\Http\Server\RequestHandlerInterface;
  */
 class CorsMiddleware implements MiddlewareInterface
 {
+    /**
+     * Answer preflight directly; add CORS headers to every other response.
+     *
+     * @param \Psr\Http\Message\ServerRequestInterface $request The request.
+     * @param \Psr\Http\Server\RequestHandlerInterface $handler The next handler.
+     * @return \Psr\Http\Message\ResponseInterface
+     */
     public function process(
         ServerRequestInterface $request,
-        RequestHandlerInterface $handler
+        RequestHandlerInterface $handler,
     ): ResponseInterface {
         $origin = $request->getHeaderLine('Origin');
         $allowed = (array)Configure::read('App.corsOrigins', []);
@@ -43,6 +50,8 @@ class CorsMiddleware implements MiddlewareInterface
                 ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
                 ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept')
                 ->withHeader('Access-Control-Allow-Credentials', 'true')
+                // Let the SPA read the correlation id (shown with API errors).
+                ->withHeader('Access-Control-Expose-Headers', CorrelationIdMiddleware::HEADER)
                 ->withHeader('Vary', 'Origin');
         }
 

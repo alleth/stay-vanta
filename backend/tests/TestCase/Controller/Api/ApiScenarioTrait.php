@@ -45,6 +45,12 @@ trait ApiScenarioTrait
         'BookingSources', 'RoomRates', 'Rooms', 'Users',
     ];
 
+    /**
+     * Append-only ledgers: their tables refuse deletes, so cleanup removes
+     * test rows through the connection, the one place that may.
+     */
+    private const LEDGER_TABLES = ['activity_index', 'food_order_events'];
+
     protected function createProperty(string $name): int
     {
         $properties = $this->getTableLocator()->get('Properties');
@@ -161,6 +167,10 @@ trait ApiScenarioTrait
                 if ($parents[$key]) {
                     $locator->get($table)->deleteAll([$key . ' IN' => $parents[$key]]);
                 }
+            }
+            $connection = $locator->get('Properties')->getConnection();
+            foreach (self::LEDGER_TABLES as $table) {
+                $connection->delete($table, ['property_id' => $propertyId]);
             }
             foreach (self::PROPERTY_SCOPED_TABLES as $table) {
                 $locator->get($table)->deleteAll(['property_id' => $propertyId]);

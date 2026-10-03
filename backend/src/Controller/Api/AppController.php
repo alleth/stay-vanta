@@ -5,6 +5,9 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Auth\PermissionSet;
+use App\Event\EventContext;
+use App\Event\ReasonRequiredException;
+use App\Middleware\CorrelationIdMiddleware;
 use App\Model\Entity\User;
 use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
@@ -12,6 +15,7 @@ use Cake\Event\EventInterface;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\Http\Exception\UnauthorizedException;
 use Cake\ORM\Query\SelectQuery;
+use Cake\Utility\Text;
 
 /**
  * Base controller for all JSON API endpoints.
@@ -33,6 +37,11 @@ class AppController extends Controller
      * The current user's permissions, loaded once per request by permissions().
      */
     private ?PermissionSet $permissions = null;
+
+    /**
+     * This request's event context, built once by eventContext().
+     */
+    private ?EventContext $eventContext = null;
 
     /**
      * Actions that do not require a valid token.
@@ -165,6 +174,50 @@ class AppController extends Controller
         if (!$this->can($permission)) {
             throw new ForbiddenException($message ?? "You don't have permission to do this.");
         }
+    }
+
+    /**
+     * Like authorize(), for an elevated permission (Permissions::ELEVATED):
+     * the request must also say why, in `reason`. The reason reaches the
+     * ledger through eventContext(), where record() checks it again.
+     *
+     * @param string $permission A Permissions constant.
+     * @param string|null $message Refusal message; name roles by their display names.
+     * @param bool $reasonOptional Only for a compatibility window, while a
+     *   released frontend can't send a reason yet (the ledger's REASON_GRACE).
+     */
+    protected function authorizeElevated(
+        string $permission,
+        ?string $message = null,
+        bool $reasonOptional = false,
+    ): void {
+        $this->authorize($permission, $message);
+        if (!$reasonOptional && $this->eventContext()->reason === null) {
+            throw new ReasonRequiredException();
+        }
+    }
+
+    /**
+     * Who is acting in this request, for every ledger write: the user, their
+     * role now, the request's property, its correlation id (one per request,
+     * from CorrelationIdMiddleware) and the `reason` it sent, if any. Built
+     * once, so every event of the request shares the id and the clock.
+     */
+    protected function eventContext(): EventContext
+    {
+        if ($this->eventContext === null) {
+            $reason = $this->request->getData('reason');
+            $this->eventContext = new EventContext(
+                $this->currentUser?->id !== null ? (int)$this->currentUser->id : null,
+                $this->currentUser?->role,
+                $this->effectivePropertyId(),
+                (string)($this->request->getAttribute(CorrelationIdMiddleware::ATTRIBUTE) ?? Text::uuid()),
+                EventContext::SOURCE_WEB,
+                is_string($reason) ? $reason : null,
+            );
+        }
+
+        return $this->eventContext;
     }
 
     /**
