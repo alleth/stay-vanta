@@ -103,6 +103,7 @@ several properties.
 | `GET /finance/summary`, `GET /reports/admin-dashboard`, `GET /finance/seasonality`, `GET /reports/monthly-summary` | `finance.analytics.view` | |
 | `GET /invoices`, `GET /invoices/{id}`, `GET /receipt-series` | `finance.invoice.view` | Booklets are listed to settle against |
 | `POST /invoices/{id}/settle` | `finance.invoice.settle` | Locked, recorded once; a second settle is 400 |
+| `POST /reservations/{id}/reverse-room-charge` | `finance.invoice.reverse` | Front Desk's Reverse room charge: needs `reason`; open invoice only |
 | `POST /invoices/{id}/lines/{lineId}/reverse` | `finance.invoice.reverse` | Needs `reason`; open invoices only (build step 6) |
 | `POST/PATCH/PUT/DELETE /receipt-series…` | `finance.receipt_series.manage` | |
 | `GET /reservations`, `GET /reservations/stats` | `front_desk.reservation.view` | |

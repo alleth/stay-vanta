@@ -8,6 +8,7 @@ use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
+use App\Model\Table\InvoiceEventsTable;
 use App\Model\Table\ReservationExtraChargesTable;
 use App\Model\Table\ReservationsTable;
 use Cake\Database\Expression\QueryExpression;
@@ -987,6 +988,63 @@ class ReservationsController extends AppController
         }
 
         $this->postChargeOrFail($reservation);
+        $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * POST /api/reservations/{id}/reverse-room-charge  { reason }  (Manager)
+     *
+     * Takes a posted room charge back off the guest's open invoice: every
+     * line of it (charge, discounts, extras) and the downpayment credit that
+     * offsets it get a reversal line, recorded as line_reversed with the
+     * Manager and the reason (finance.invoice.reverse, elevated). The stay
+     * reads Not billed again and can be posted afresh. Refused once the
+     * invoice is settled, and when nothing is posted.
+     */
+    public function reverseRoomCharge(int $id): void
+    {
+        $this->request->allowMethod('post');
+        $this->authorizeElevated(Permissions::FINANCE_INVOICE_REVERSE, 'Only a Manager can reverse a room charge.');
+        $reservations = $this->fetchTable('Reservations');
+        $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))->firstOrFail();
+        if ($this->isSettled($reservation)) {
+            throw new BadRequestException(
+                'Its invoice is already settled, so its room charge can no longer be reversed.',
+            );
+        }
+
+        $connection = $reservations->getConnection();
+        try {
+            $reversed = $connection->transactional(function () use ($reservations, $reservation): int {
+                // Lock the stay so a concurrent post or reverse waits.
+                $reservations->find()->where(['Reservations.id' => $reservation->id])
+                    ->epilog('FOR UPDATE')->firstOrFail();
+                /** @var \App\Model\Table\InvoicesTable $invoices */
+                $invoices = $this->fetchTable('Invoices');
+                $count = $invoices->reverseLinesFor(
+                    $this->eventContext(),
+                    'reservation',
+                    (int)$reservation->id,
+                    InvoiceEventsTable::LINE_REVERSED,
+                );
+                if ($count === 0) {
+                    return 0;
+                }
+
+                return $count + $invoices->reverseLinesFor(
+                    $this->eventContext(),
+                    'downpayment_credit',
+                    (int)$reservation->id,
+                    InvoiceEventsTable::LINE_REVERSED,
+                );
+            });
+        } catch (RuntimeException $e) {
+            throw new BadRequestException($e->getMessage());
+        }
+        if ($reversed === 0) {
+            throw new BadRequestException('No room charge is posted for this reservation.');
+        }
+
         $this->respondWithReservation($reservation, 200);
     }
 

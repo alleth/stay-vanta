@@ -209,20 +209,26 @@ class InvoicesTable extends Table
     }
 
     /**
-     * Reverse every line in force from a source whose business was cancelled
-     * (a sale, a reservation's charges). Refused if any of them is on a
+     * Reverse every line in force from a source: because its business was
+     * cancelled (a sale, a reservation's charges; the default type), or by a
+     * Manager's decision (LINE_REVERSED, with the context's reason; e.g.
+     * Front Desk's Reverse room charge). Refused if any of them is on a
      * settled invoice.
      *
      * @return int Lines reversed.
      */
-    public function reverseLinesFor(EventContext $context, string $sourceType, int $sourceId): int
-    {
-        return $this->getConnection()->transactional(function () use ($context, $sourceType, $sourceId): int {
+    public function reverseLinesFor(
+        EventContext $context,
+        string $sourceType,
+        int $sourceId,
+        string $type = InvoiceEventsTable::LINE_REVERSED_ON_CANCEL,
+    ): int {
+        return $this->getConnection()->transactional(function () use ($context, $sourceType, $sourceId, $type): int {
             $lines = $this->InvoiceLines->find('active')
                 ->where(['InvoiceLines.source_type' => $sourceType, 'InvoiceLines.source_id' => $sourceId])
                 ->all();
             foreach ($lines as $line) {
-                $this->reverseLine($context, $line, InvoiceEventsTable::LINE_REVERSED_ON_CANCEL);
+                $this->reverseLine($context, $line, $type);
             }
 
             return $lines->count();

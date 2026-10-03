@@ -46,39 +46,26 @@ Direction:
 - [ ] Support access to a hotel is deliberate: started explicitly, scoped to one property, time
   limited, and recorded with actor, reason and timestamp in `access_events`.
 
-## CI gate on deployment: unresolved (infrastructure debt)
+## CI gate on deployment: resolved (under observation)
 
-**Status (2026-10-03): works on production, not on staging; staging not to be relied on.**
-- **Production waits.** The first promotion after enabling it (`30afd87`, 08:35:53 UTC) sat in
-  Railway's `WAITING` state until the production branch's CI run passed (08:37:27), then built and
-  deployed. So the setting and Railway's GitHub access work; the difference is the **staging
-  service**, whose deployments never enter `WAITING` (look there: its own "Wait for CI" toggle, its
-  source branch settings).
-- Railway's **"Wait for CI" is enabled** on the `stay-vanta` service (staging and production).
-- **Deployment still begins before CI completes.** Measured on five pushes to `main`: staging was
-  live 54 s to 97 s before the backend tests finished (e.g. `776c9c2`: live 08:17:42 UTC, CI done
-  08:19:19). One push (`b68ce2f`) looked gated only because its uncached build happened to take as
-  long as CI.
-- **The gate is not considered reliable.** Until it is proven, a green CI run is the **manual
-  approval point**: nothing is promoted to production (`git push origin main:production`) before
-  CI for that commit has passed.
+**Status (2026-10-03): working on staging and production.** Railway's "Wait for CI" is enabled on
+the `stay-vanta` service in both environments, and both now hold deployments back:
+- **A failing run blocks the deploy.** `961e850` and `d7352c0` failed CI on `main` (a migration
+  ordering bug, see CLAUDE.md "migrations must work on a fresh DB in order"): Railway marked both
+  deployments `SKIPPED` and staging stayed on the previous good build. This is the proof by a
+  failing run that the item asked for.
+- **A passing run deploys after CI.** `390a888` sat in `WAITING` until its CI run passed, then
+  built and deployed. Production has waited the same way since `30afd87`.
+- Earlier the same day staging went live 54 s to 97 s before CI finished (five pushes, e.g.
+  `776c9c2`); that stopped once the setting took effect on the staging service.
 
-**Why it matters:** a commit that fails CI still reaches staging (it happened with `9a39ac6`, a 500
-on `GET /api/booking-sources`), and a migration that deploys before its tests fail is harder to
-undo (rollback restores code, not data).
+**Keep observing:** after each push, check that staging's deployment shows `WAITING` before CI
+finishes. If a failing commit ever reaches staging again, reopen this item; the fallback plan is to
+deploy from CI (Railway auto-deploy off, a final workflow job triggers the deployment with a
+Railway token kept as a GitHub secret).
 
-**What's known:** `railway-app` is installed on the repository: it creates a check suite on each
-commit (left `queued`) and posts the commit status `perceptive-creation - stay-vanta`, which goes
-`pending` → `success` with its own deployment and never waits for GitHub Actions.
-
-- [ ] Check the Railway GitHub app's permissions (github.com/settings/installations → Railway →
-  Configure): can it read check runs / Actions results; is a permission request pending?
-- [ ] If Railway's gate can't be made to work: deploy from CI instead. Turn off Railway's automatic
-  deploy for the service, and add a final workflow job that runs only after every test passes and
-  triggers the Railway deployment with a Railway token kept as a GitHub secret (same for the
-  `production` branch).
-- [ ] Prove the gate with a deliberately failing test on a throwaway branch wired to it: it must not
-  deploy. Timing alone isn't proof (see `b68ce2f`).
+**Note:** a CI run that is cancelled or re-run (a GitHub hiccup) leaves Railway's deployment
+`SKIPPED` even when the re-run is green; push an empty commit to redeploy.
 
 ## Step 7 agenda: refunds, credit notes, adjustments and what "Collected" means
 
@@ -112,7 +99,7 @@ Carry these into steps 6–10:
 - [ ] **`occurred_at` is the authoritative time** of an event. The step 5 feed still shows each
   record's `created` (same second today); the event feed shows `occurred_at`. For a backdated stay
   that's when it was recorded, not the stay's dates.
-- The staging deployment gate is tracked above ("CI gate on deployment").
+- The deployment gate (resolved, under observation) is described above ("CI gate on deployment").
 
 ## Smaller items
 

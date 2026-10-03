@@ -181,6 +181,10 @@ return function (RouteBuilder $routes): void {
             '/reservations/{id}/post-room-charge',
             ['controller' => 'Reservations', 'action' => 'postCharge'],
         )->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post(
+            '/reservations/{id}/reverse-room-charge',
+            ['controller' => 'Reservations', 'action' => 'reverseRoomCharge'],
+        )->setPatterns(['id' => '\d+'])->setPass(['id']);
         // Old "Mark paid / Mark unpaid" path: `paid` posts the room charge, `unpaid`
         // is refused. Remove once the frontend has moved off it (build step 3).
         $builder->post('/reservations/{id}/payment', ['controller' => 'Reservations', 'action' => 'payment'])

@@ -137,12 +137,12 @@ Hotfixes take the same path (main → staging → promote), just faster. Never c
 
 ### Rules that make this safe
 
-- **CI success is the manual approval point.** On production, Railway's "Wait for CI" works (a
-  promotion shows `WAITING` until CI passes, seen 2026-10-03), but staging's does **not**
-  hold deployments back (measured 2026-10-03: staging goes live about a minute before CI finishes;
-  see `docs/BACKLOG.md`, "CI gate on deployment"). So a commit reaches staging whether or not its
-  tests pass, and **nothing is promoted to production until CI for that exact commit is green**
-  (`gh run list --branch main`). Treat the gate as unresolved until it's proven with a failing run.
+- **CI gates every deployment.** Railway's "Wait for CI" holds staging and production deployments
+  in `WAITING` until the commit's CI run passes, and marks them `SKIPPED` when it fails (proven
+  2026-10-03 with two failing runs on `main`; see `docs/BACKLOG.md`, "CI gate on deployment", still
+  under observation). Still, **nothing is promoted to production until CI for that exact commit is
+  green** (`gh run list --branch main`) and it has been checked on staging. A cancelled or re-run CI
+  run leaves the deployment `SKIPPED`: push an empty commit to redeploy.
 
 - **API changes are additive first.** Cloudflare and Railway deploy independently and finish at
   different times, so for a moment the new frontend can talk to the old API or the reverse. Add the

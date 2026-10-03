@@ -19,10 +19,11 @@ import {
   listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
   listReservations, pageReservations, reservationStats,
   createReservation, updateReservation, deleteReservation, transitionReservation,
-  postRoomCharge,
+  postRoomCharge, reverseRoomCharge,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
 import { describeError } from '../utils/apiError'
+import ReasonModal from '../components/ReasonModal'
 
 // Standard check-in is from noon; arriving earlier in the day is an early check-in.
 const isEarlyCheckInNow = () => new Date().getHours() < 12
@@ -199,6 +200,8 @@ export default function FrontDesk() {
   // delete) a stay that's under way or over — the backend decides the rest.
   const canCorrect = can(P.FRONT_DESK_RESERVATION_CORRECT)
   const canDelete = can(P.FRONT_DESK_RESERVATION_DELETE)
+  // Reverse room charge (elevated: a Manager, with a reason).
+  const canReverse = can(P.FINANCE_INVOICE_REVERSE)
   // Every row opens its reservation; whether it opens editable is
   // editBlockReason()'s call (the backend enforces the same rules).
   const [rooms, setRooms] = useState([])
@@ -228,6 +231,7 @@ export default function FrontDesk() {
   const [tab, setTab] = useState('reservations')
   const [pending, setPending] = useState(null) // key of the in-flight inline action
   const [earlyConfirm, setEarlyConfirm] = useState(null) // reservation pending an early check-in
+  const [reverseFor, setReverseFor] = useState(null) // reservation whose room charge is being reversed
   const today = todayStr()
 
   // Front Desk shows a "fresh start" each day: pending bookings (booked /
@@ -361,8 +365,8 @@ export default function FrontDesk() {
 
   // Post room charge: bills the stay onto the guest's open invoice. Billing
   // state then follows the invoice (Billed, then Settled once it's settled).
-  // There's no undo here on purpose: the audited Reverse room charge comes
-  // with the invoice event records; until then a Manager cancels the stay.
+  // The undo is Reverse room charge: a Manager, with a reason, while the
+  // invoice is open (recorded in invoice_events; lines are never deleted).
   async function onPostCharge(r) {
     setPending(`charge-${r.id}`)
     setError(null)
@@ -633,6 +637,14 @@ export default function FrontDesk() {
                                 : 'Add a guest first to post the room charge.'}
                               onClick={() => onPostCharge(r)}>
                               {pending === `charge-${r.id}` ? <Spinner size="sm" /> : 'Post room charge'}
+                            </Button>
+                          )}
+                          {canReverse && r.billing_state === 'billed' && (
+                            <Button size="sm" variant="outline-danger"
+                              disabled={pending !== null}
+                              title="Take the room charge off the guest’s open invoice (reason required)"
+                              onClick={() => setReverseFor(r)}>
+                              Reverse charge
                             </Button>
                           )}
                           {(r.status === 'booked' || r.status === 'checked_in') && (
@@ -926,6 +938,18 @@ export default function FrontDesk() {
         </>
       )}
 
+      <ReasonModal show={reverseFor !== null}
+        title="Reverse room charge"
+        description={reverseFor && `Takes the room charge${Number(reverseFor.downpayment) > 0 ? ' and downpayment credit' : ''} for `
+          + `${reverseFor.guest?.full_name ?? 'this stay'} off the open invoice. The lines stay on the invoice as reversals; `
+          + 'the stay reads Not billed and can be billed again.'}
+        confirmLabel="Reverse charge"
+        onHide={() => setReverseFor(null)}
+        onConfirm={async (reason) => {
+          await reverseRoomCharge(reverseFor.id, reason)
+          setReverseFor(null)
+          await refresh()
+        }} />
       {modal?.type === 'reservation' && (
         <ReservationModal rooms={rooms} rates={rates} bookingSources={bookingSources} promoRates={promoRates}
           extraCharges={extraCharges}

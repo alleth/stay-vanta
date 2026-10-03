@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card, Table, Button, Badge, Modal, Form, Alert, Spinner } from '../ui'
 import { formatMoney } from '../../utils/format'
-import { listInvoices, getInvoice, settleInvoice } from '../../api/food'
+import { listInvoices, getInvoice, settleInvoice, reverseInvoiceLine } from '../../api/food'
 import { SkeletonTableRows, Skeleton } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
+import { useAuth } from '../../context/AuthContext'
+import { P } from '../../auth/permissions'
+import ReasonModal from '../ReasonModal'
 
 // The guests' invoices — the list, the folio view and Settle — as one panel,
 // rendered as a tab by Front Desk and Finance. Settling is where
@@ -23,6 +26,20 @@ const vatBreakdown = (total) => {
 // Today on the device's own clock (the hotel's), not UTC.
 const todayStr = () => new Date().toLocaleDateString('en-CA')
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : '—')
+
+// Who did it, from the invoice's ledger. History imported from before the
+// ledger existed has no actor, and we say so rather than guess.
+const actorLabel = (name, recorded) => (recorded === false ? 'Not recorded' : name ?? 'Unknown user')
+
+const EVENT_LABELS = {
+  opened: 'Invoice opened',
+  line_added: 'Line added',
+  line_reversed: 'Line reversed',
+  line_reversed_on_cancel: 'Reversed on cancellation',
+  settled: 'Settled',
+  settled_on_creation: 'Settled on creation',
+  refund_recorded: 'Refund recorded',
+}
 
 // `onSettled` lets the host page refresh whatever depends on an invoice being
 // settled (e.g. Front Desk's "invoice not settled" flag).
@@ -108,6 +125,9 @@ export function InvoicesPanel({ propertyId, onSettled }) {
                       {fmtDateTime(inv.settled_at)}
                     </div>
                   )}
+                  {inv.settled_by && (
+                    <div className="whitespace-nowrap text-[11px] text-muted">by {actorLabel(inv.settled_by.name, inv.settled_by.recorded)}</div>
+                  )}
                 </td>
                 <td className="whitespace-nowrap text-right">
                   <Button size="sm" variant="outline-secondary" className="mr-1"
@@ -126,7 +146,7 @@ export function InvoicesPanel({ propertyId, onSettled }) {
       </Card>
 
       {modal?.type === 'invoice' && (
-        <InvoiceModal id={modal.id} onClose={() => setModal(null)} />
+        <InvoiceModal id={modal.id} onClose={() => setModal(null)} onChanged={load} />
       )}
       {modal?.type === 'settle' && (
         <SettleModal id={modal.id} onClose={() => setModal(null)}
@@ -147,35 +167,68 @@ const LINE_GROUPS = {
   other: 'Other charges',
 }
 
-function InvoiceModal({ id, onClose }) {
+function InvoiceModal({ id, onClose, onChanged }) {
+  const { can } = useAuth()
   const [invoice, setInvoice] = useState(null)
   const [error, setError] = useState(null)
+  const [reversing, setReversing] = useState(null) // the line a Manager is reversing
 
   useEffect(() => {
     getInvoice(id).then(setInvoice).catch((ex) => setError(describeError(ex, 'Could not load the invoice.')))
   }, [id])
 
-  // Group lines by source_type so the invoice reads like a folio.
+  // The ledger event that put each line on the invoice (added, or the
+  // reversal that created a negative line), and which lines were reversed.
+  const { eventForLine, reversedBy } = useMemo(() => {
+    const eventForLine = {}
+    for (const e of invoice?.history ?? []) {
+      if (e.line_id !== null) eventForLine[e.line_id] = e
+    }
+    const reversedBy = {}
+    for (const l of invoice?.invoice_lines ?? []) {
+      if (l.reverses_line_id) reversedBy[l.reverses_line_id] = l
+    }
+    return { eventForLine, reversedBy }
+  }, [invoice])
+
+  // Group lines by source_type so the invoice reads like a folio; a reversal
+  // sits in its original's group, right after it.
   const groups = useMemo(() => {
     const lines = invoice?.invoice_lines ?? []
+    const byId = Object.fromEntries(lines.map((l) => [l.id, l]))
+    const kindOf = (l) => (l.reverses_line_id && byId[l.reverses_line_id]
+      ? byId[l.reverses_line_id].source_type : l.source_type)
     const known = ['reservation', 'early_check_in', 'food_order']
-    const isDownpayment = (l) => l.source_type.startsWith('downpayment')
+    const isDownpayment = (l) => kindOf(l).startsWith('downpayment')
+    const ordered = lines.filter((l) => !l.reverses_line_id || !byId[l.reverses_line_id])
+      .flatMap((l) => (reversedBy[l.id] ? [l, reversedBy[l.id]] : [l]))
     return Object.entries(LINE_GROUPS)
       .map(([key, label]) => {
         const rows = key === 'other'
-          ? lines.filter((l) => !known.includes(l.source_type) && !isDownpayment(l))
+          ? ordered.filter((l) => !known.includes(kindOf(l)) && !isDownpayment(l))
           : key === 'downpayment'
-            ? lines.filter(isDownpayment)
-            : lines.filter((l) => l.source_type === key)
+            ? ordered.filter(isDownpayment)
+            : ordered.filter((l) => kindOf(l) === key)
         return { key, label, rows, subtotal: rows.reduce((s, l) => s + Number(l.amount), 0) }
       })
       .filter((g) => g.rows.length > 0)
-  }, [invoice])
+  }, [invoice, reversedBy])
 
   const settled = invoice?.status === 'settled'
+  // Elevated: a Manager, with a reason, on an open invoice. The backend
+  // refuses everything else the same way.
+  const canReverse = can(P.FINANCE_INVOICE_REVERSE) && invoice?.status === 'open'
+
+  async function reverse(reason) {
+    await reverseInvoiceLine(invoice.id, reversing.id, reason)
+    setReversing(null)
+    setInvoice(await getInvoice(id))
+    onChanged?.()
+  }
 
   return (
-    <Modal show onHide={onClose} centered size="lg">
+    <>
+    <Modal show={reversing === null} onHide={onClose} centered size="lg">
       <Modal.Header closeButton className="border-0 px-6 pt-4 pb-0" />
       <Modal.Body className="px-6 pt-0 pb-6">
         {error && <Alert variant="danger">{error}</Alert>}
@@ -248,15 +301,34 @@ function InvoiceModal({ id, onClose }) {
                   </span>
                   <span className="text-xs text-muted">{g.rows.length} item(s)</span>
                 </div>
-                {g.rows.map((l) => (
-                  <div key={l.id} className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2">
-                    <div className="min-w-0">
-                      <div className="text-sm">{l.description}</div>
-                      <div className="text-[11px] text-muted">{fmtDateTime(l.created)}</div>
+                {g.rows.map((l) => {
+                  const ev = eventForLine[l.id]
+                  const isReversal = Boolean(l.reverses_line_id)
+                  const reversed = Boolean(reversedBy[l.id])
+                  return (
+                    <div key={l.id} className={`flex items-center justify-between gap-3 border-b border-dashed border-line py-2 ${isReversal ? 'pl-4' : ''}`}>
+                      <div className="min-w-0">
+                        <div className={`text-sm ${reversed ? 'text-muted line-through' : ''}`}>
+                          {l.description}
+                          {reversed && <Badge bg="secondary" className="ml-2 no-underline">Reversed</Badge>}
+                        </div>
+                        <div className="text-[11px] text-muted">
+                          {fmtDateTime(ev?.at ?? l.created)}
+                          {ev && <> · {isReversal ? 'reversed' : 'added'} by {actorLabel(ev.actor, ev.recorded)}</>}
+                        </div>
+                        {isReversal && ev?.reason && (
+                          <div className="text-[11px] text-muted">Reason: {ev.reason}</div>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-sm tabular-nums">{formatMoney(l.amount)}</span>
+                        {canReverse && !isReversal && !reversed && (
+                          <Button size="sm" variant="outline-danger" onClick={() => setReversing(l)}>Reverse</Button>
+                        )}
+                      </div>
                     </div>
-                    <div className="shrink-0 text-sm tabular-nums">{formatMoney(l.amount)}</div>
-                  </div>
-                ))}
+                  )
+                })}
                 <div className="flex justify-between pt-1.5 text-xs text-muted">
                   <span>Subtotal — {g.label}</span>
                   <span className="tabular-nums">{formatMoney(g.subtotal)}</span>
@@ -283,7 +355,34 @@ function InvoiceModal({ id, onClose }) {
             {settled && (
               <p className="mt-2 mb-0 text-center text-xs text-muted">
                 Paid in full · settled {fmtDateTime(invoice.settled_at)}
+                {invoice.settled_by && <> by {actorLabel(invoice.settled_by.name, invoice.settled_by.recorded)}</>}
               </p>
+            )}
+
+            {/* ---- History: the invoice's ledger, oldest first ---- */}
+            {(invoice.history ?? []).length > 0 && (
+              <details className="mt-6">
+                <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  History ({invoice.history.length})
+                </summary>
+                <ol className="mt-2 mb-0 list-none space-y-1.5 p-0">
+                  {invoice.history.map((e) => (
+                    <li key={e.id} className="flex justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <span className="font-semibold">{EVENT_LABELS[e.event] ?? e.event}</span>
+                        <span className="text-muted"> · {actorLabel(e.actor, e.recorded)} · {fmtDateTime(e.at)}</span>
+                        {e.reason && <div className="text-muted">Reason: {e.reason}</div>}
+                        {(e.invoice_number || e.or_number) && (
+                          <div className="text-muted">
+                            {[e.invoice_number && `SI ${e.invoice_number}`, e.or_number && `OR ${e.or_number}`].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                      {e.amount !== null && <span className="shrink-0 tabular-nums">{formatMoney(e.amount)}</span>}
+                    </li>
+                  ))}
+                </ol>
+              </details>
             )}
           </div>
         )}
@@ -292,6 +391,14 @@ function InvoiceModal({ id, onClose }) {
         <Button variant="secondary" onClick={onClose}>Close</Button>
       </Modal.Footer>
     </Modal>
+      <ReasonModal show={reversing !== null}
+        title="Reverse invoice line"
+        description={reversing && `Adds a reversal of “${reversing.description}” (${formatMoney(reversing.amount)}). `
+          + 'The original line stays on the invoice; the total goes down by its amount.'}
+        confirmLabel="Reverse line"
+        onHide={() => setReversing(null)}
+        onConfirm={reverse} />
+    </>
   )
 }
 

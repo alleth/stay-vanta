@@ -41,3 +41,8 @@ export const getInvoice = (id) =>
 // the property's registered booklet series onto the settled invoice.
 export const settleInvoice = (id, data = {}) =>
   client.post(`/invoices/${id}/settle`, data).then((r) => r.data.invoice)
+
+// Manager only (finance.invoice.reverse): adds a negative line pointing at
+// the original, with the reason recorded. Open invoices only.
+export const reverseInvoiceLine = (invoiceId, lineId, reason) =>
+  client.post(`/invoices/${invoiceId}/lines/${lineId}/reverse`, { reason }).then((r) => r.data.invoice)

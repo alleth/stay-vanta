@@ -224,8 +224,14 @@ its first 8 characters as the **Reference** on error alerts.
 - `POST /api/reservations/{id}/payment` (old "Mark paid / Mark unpaid", removed in a later
   release) — `{payment_status: paid}` does exactly what `post-room-charge` does;
   `{payment_status: unpaid}` is **always 400** since build step 3 (it left the posted charge on the
-  invoice). The audited **Reverse room charge** (Manager-only, reason required) arrives with the
-  invoice event records (build step 6); until then, cancel the reservation to reverse its charges.
+  invoice). Use `reverse-room-charge` instead.
+- `POST /api/reservations/{id}/reverse-room-charge` `{reason}` — **Manager only**
+  (`finance.invoice.reverse`, elevated: 400 without a reason). Under a `FOR UPDATE` lock on the
+  reservation, reverses every active `reservation`-sourced line (room charge, extras) and, if any
+  were reversed, the `downpayment_credit`, each recorded as `line_reversed` with the reason. Lines
+  are never deleted (an early check-in fee is its own charge: reverse it from the folio). The stay
+  then reads `billing_state: not_billed` and can be posted again.
+  400 when the invoice is settled, or when no room charge is posted. Returns the reservation.
 
 ## Guests
 - `GET /api/guests[?guest_type=&q=&page=&limit=]` → `{guests,total,page,limit}`. `limit` is only
@@ -265,8 +271,13 @@ its first 8 characters as the **Reference** on error alerts.
 
 ## Invoices
 - `GET /api/invoices[?guest_id=&status=&date=YYYY-MM-DD|all]` — `date` hides other days, but
-  **open tabs always show**; includes `InvoiceLines`.
-- `GET /api/invoices/{id}` — with line items (folio detail modal).
+  **open tabs always show**; includes `InvoiceLines`. Each invoice carries `settled_by`
+  (`{name, recorded, at}` from its `settled`/`settled_on_creation` event, or null): `recorded:
+  false` means it was imported from before step 6 and the person is unknown (`name` null).
+- `GET /api/invoices/{id}` — with line items (folio detail modal), `settled_by`, and `history`:
+  the invoice's `invoice_events`, oldest first, each `{id, event, at, actor, recorded, amount,
+  total_after, line_id, reverses_line_id, reason, invoice_number, or_number}`. `line_id` is the line
+  the event created (for a reversal, the negative line; `reverses_line_id` the original).
 - `POST /api/invoices/{id}/settle` — stamps `settled_at`; optional `{use_invoice, use_or}` each
   consume the next number from the property's active receipt series of that type
   (`ReceiptSeriesTable::assignNext()`) onto `invoice_number`/`or_number`; 400 if no active series

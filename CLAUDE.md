@@ -108,9 +108,11 @@ that has **started** (checked in or out) with no room charge posted; future book
 receivables. Actions: **Post room charge** (`POST /reservations/{id}/post-room-charge`; refuses
 with a reason when nothing can be posted: no guest, no rate, cancelled; the button is disabled
 with "Add a guest first…" when no guest is attached). "Mark unpaid" is gone and the API refuses
-it. **Reverse room charge** (Manager-only, reason required, removes the lines, refused once
-settled) ships with the invoice event records in step 6 — never earlier, because its reason must
-be stored; until then a Manager cancels the reservation to reverse its charges.
+it. **Reverse room charge** (`POST /reservations/{id}/reverse-room-charge`, step 6:
+`finance.invoice.reverse`, Manager-only, reason required) adds reversal lines for the room charge
+and its downpayment credit (never deletes them), records `line_reversed` with the reason, and is
+refused once the invoice is settled; the stay reads Not billed and can be posted again. A single
+line is reversed from the folio (Invoices → View → Reverse) the same way.
 `payment_status` stays in the database and is still set on posting, but nothing reads it.
 
 ### Design review for every feature proposal
@@ -202,8 +204,8 @@ changes record nobody.
   one `info` line (`App\Error\AppErrorLogger`), not as errors. Approved decisions (2026-10-03): hybrid tables,
   POS as the pilot ledger, a reason for `pos.sale.cancel_paid` (accepted-not-required until the
   cleanup release: `REASON_GRACE`), minimal snapshots (guest id + display name only) with one
-  controlled redaction routine, CI should gate deployment (Railway "Wait for CI" is on but **does not
-  work** yet; see below). **The activity feed becomes an
+  controlled redaction routine, CI gates deployment (Railway "Wait for CI", working on staging and
+  production since 2026-10-03; see below). **The activity feed becomes an
   event feed** (one line per business event, with who did it) when the invoice and reservation
   ledgers arrive; in step 5 it stays visually identical (`docs/EVENTS.md`).
 - Until a module's ledger is wired, keep stamping the acting user from
@@ -280,9 +282,9 @@ exploited); agreed follow-ups not on the build order live in `docs/BACKLOG.md`.
 backend PHPUnit against a throwaway **MySQL 9** service (the test connection reads
 `DATABASE_TEST_URL`, since CI has no `app_local.php`), plus frontend lint + build. Check results
 with `gh run list` / `gh run view <id> --log-failed`. A red run blocks promotion to production.
-**Staging deploys before CI finishes** (Railway's "Wait for CI" is enabled but ignored, unresolved:
-`docs/BACKLOG.md`), so a failing commit still reaches staging: check CI for the exact commit before
-trusting staging, and never promote one whose run isn't green.
+Railway's "Wait for CI" holds staging and production deployments until CI passes and skips them
+when it fails (resolved 2026-10-03, still observed: `docs/BACKLOG.md`); a cancelled or re-run CI
+run leaves the deployment skipped, so push an empty commit. Never promote a commit whose run isn't green.
 phpcs is **not** in CI yet: the codebase has ~97 pre-existing violations; keep new and changed
 files clean.
 

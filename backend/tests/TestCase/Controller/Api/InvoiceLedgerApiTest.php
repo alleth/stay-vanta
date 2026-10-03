@@ -200,4 +200,60 @@ class InvoiceLedgerApiTest extends TestCase
         $this->assertEqualsWithDelta($before * 0.1, (float)$refund->total_after, 0.01, '10% retained');
         $this->assertSame('settled', $this->getTableLocator()->get('Invoices')->get($invoiceId)->status);
     }
+
+    public function testAManagerReversesARoomChargeFromFrontDesk(): void
+    {
+        [$id, $invoiceId] = $this->billedStay();
+        $url = "/api/reservations/$id/reverse-room-charge";
+
+        $this->callAs($this->deskToken, 'POST', $url, ['reason' => 'x']);
+        $this->assertResponseCode(403, 'Front Desk Staff may not reverse');
+        $this->callAs($this->adminToken, 'POST', $url);
+        $this->assertResponseCode(400, 'a reason is required');
+
+        $this->callAs($this->adminToken, 'POST', $url, ['reason' => 'Booked the wrong room type']);
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $this->assertSame('not_billed', $this->responseJson()['reservation']['billing_state']);
+        $this->assertSame(0.0, $this->total($invoiceId));
+        $reversal = $this->getTableLocator()->get('InvoiceEvents')->find()
+            ->where(['invoice_id' => $invoiceId, 'event_type' => 'line_reversed'])->firstOrFail();
+        $this->assertSame('Booked the wrong room type', $reversal->reason);
+        $this->assertSame('admin', $reversal->actor_role);
+
+        $this->callAs($this->adminToken, 'POST', $url, ['reason' => 'Again']);
+        $this->assertResponseCode(400, 'nothing left to reverse');
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/post-room-charge");
+        $this->assertResponseOk('the stay can be billed afresh');
+        $this->assertSame(2000.0, $this->total($invoiceId));
+
+        $this->callAs($this->deskToken, 'POST', "/api/invoices/$invoiceId/settle");
+        $this->assertResponseOk();
+        $this->callAs($this->adminToken, 'POST', $url, ['reason' => 'Too late']);
+        $this->assertResponseCode(400, 'never once settled');
+        $this->assertStringContainsString('settled', (string)$this->responseJson()['message']);
+    }
+
+    public function testTheFolioCarriesItsHistoryAndWhoSettled(): void
+    {
+        [, $invoiceId] = $this->billedStay();
+        $this->callAs($this->deskToken, 'POST', "/api/invoices/$invoiceId/settle");
+        $this->assertResponseOk();
+
+        $this->callAs($this->adminToken, 'GET', "/api/invoices/$invoiceId");
+        $this->assertResponseOk();
+        $invoice = $this->responseJson()['invoice'];
+        $this->assertSame(['opened', 'line_added', 'settled'], array_column($invoice['history'], 'event'));
+        foreach ($invoice['history'] as $event) {
+            $this->assertTrue($event['recorded']);
+            $this->assertStringContainsString('ledger-desk', (string)$event['actor']);
+        }
+        $this->assertSame((int)$invoice['invoice_lines'][0]['id'], $invoice['history'][1]['line_id']);
+        $this->assertStringContainsString('ledger-desk', (string)$invoice['settled_by']['name']);
+
+        $this->callAs($this->adminToken, 'GET', '/api/invoices?date=all');
+        $this->assertResponseOk();
+        $listed = array_values(array_filter($this->responseJson()['invoices'], fn($i) => (int)$i['id'] === $invoiceId))[0];
+        $this->assertStringContainsString('ledger-desk', (string)$listed['settled_by']['name']);
+        $this->assertTrue($listed['settled_by']['recorded']);
+    }
 }

@@ -157,7 +157,7 @@ display name, reservation, status, total. Recorded only by `InvoicesTable`, each
 |---|---|---|---|
 | `opened` | | | A guest's invoice is opened (`openInvoiceFor()`, the guest row locked so there's one) |
 | `line_added` | | | A charge, discount, credit or extra is posted (`addLine()`; refused on a settled invoice) |
-| `line_reversed` | yes | | A Manager reverses a line by hand (`finance.invoice.reverse`, `POST /invoices/{id}/lines/{lineId}/reverse`) |
+| `line_reversed` | yes | | A Manager reverses a line by hand (`finance.invoice.reverse`, `POST /invoices/{id}/lines/{lineId}/reverse`, or Front Desk's `POST /reservations/{id}/reverse-room-charge`) |
 | `line_reversed_on_cancel` | | | A line's source was cancelled (a sale, a reservation's charges) |
 | `settled` | | | An invoice is settled, once; carries the SI/OR numbers |
 | `settled_on_creation` | | | An invoice created settled (an advance booking's downpayment) |

@@ -85,6 +85,12 @@ export const transitionReservation = (id, transition, data = {}) =>
 export const postRoomCharge = (id) =>
   client.post(`/reservations/${id}/post-room-charge`).then((r) => r.data.reservation)
 
+// Reverse room charge (Manager, reason required): reverses the stay's room
+// charge lines and downpayment credit on the open invoice (Billed → Not
+// billed). Refused once the invoice is settled.
+export const reverseRoomCharge = (id, reason) =>
+  client.post(`/reservations/${id}/reverse-room-charge`, { reason }).then((r) => r.data.reservation)
+
 // Extra charges (admin-configurable surcharges, e.g. early check-in).
 export const listExtraCharges = (propertyId) =>
   client.get('/extra-charges', { params: withProp({}, propertyId) }).then((r) => r.data.extraCharges)
