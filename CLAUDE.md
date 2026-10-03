@@ -176,9 +176,11 @@ changes record nobody.
   `food_order_events`, `authorizeElevated()`, and `CorrelationIdMiddleware` (one id per request,
   **mandatory** on every event, returned as `X-Request-Id` and prefixed to every server log line as
   `[req:<id>]`; deployed environments log to stderr). The event-type catalog is
-  **`docs/EVENTS.md`** (`EventsCatalogTest` keeps it in step with the code). Not yet wired: stock
-  movements and POS still write the old way, and the Operations feed still reads
-  `stock_movements` + `food_orders` (parts 2–3). Approved decisions (2026-10-03): hybrid tables,
+  **`docs/EVENTS.md`** (`EventsCatalogTest` keeps it in step with the code). **Wired (part 2):**
+  stock movements and POS sales (placed/served/cancelled) write through the foundation, so both
+  meet the accountability standard; the Operations feed still reads `stock_movements` +
+  `food_orders` until part 3 switches it to `activity_index`. Expected 4xx answers are logged as
+  one `info` line (`App\Error\AppErrorLogger`), not as errors. Approved decisions (2026-10-03): hybrid tables,
   POS as the pilot ledger, a reason for `pos.sale.cancel_paid` (accepted-not-required until the
   cleanup release: `REASON_GRACE`), minimal snapshots (guest id + display name only) with one
   controlled redaction routine, CI gates deployment ("Wait for CI"). **The activity feed becomes an
@@ -305,9 +307,10 @@ pass locally and 500 on Railway. Known footgun: `$query->distinct(['col'])->coun
 ### The accountability model (the reason this product exists)
 Every stock/asset state row and every mutating action records **who was responsible**:
 - `stock_movements.receptionist_id` — NOT NULL; the append-only ledger of every in/out.
-  Quantities change **only** via `StockMovementsTable::record()` (transactional: writes the ledger
-  row, updates `quantity`, stamps `inventory_items.last_receptionist_id`, rejects negative stock).
-  Never mutate `inventory_items.quantity` directly.
+  Quantities change **only** via `StockMovementsTable::record($this->eventContext(), $item, …)`
+  (transactional: locks the item row, writes the ledger row with the shared event columns and its
+  `activity_index` row, updates `quantity`, stamps `inventory_items.last_receptionist_id`, rejects
+  negative stock). Never mutate `inventory_items.quantity` directly.
 - `reservations.receptionist_id` (stamped at creation **and** on every transition and edit, so
   it's only "last touched by", not a history), `food_orders.receptionist_id` (who placed it).
 

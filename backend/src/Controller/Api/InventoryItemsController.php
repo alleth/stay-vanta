@@ -168,24 +168,35 @@ class InventoryItemsController extends AppController
             $item->set('total_quantity', 0);
         }
 
-        if (!$items->save($item)) {
+        // The item and its opening stock are one change: an item must never
+        // exist with stock its ledger doesn't show, so both commit or neither.
+        $opening = (float)($this->request->getData('quantity') ?? 0);
+        $context = $this->eventContext();
+        $saved = $items->getConnection()->transactional(
+            function () use ($items, $item, $opening, $context, $trackingType): bool {
+                if (!$items->save($item, ['atomic' => false])) {
+                    return false;
+                }
+                if ($opening > 0) {
+                    $this->fetchTable('StockMovements')->record(
+                        $context,
+                        $item,
+                        'in',
+                        $opening,
+                        ['reason' => 'opening_balance'],
+                        $trackingType === 'reusable', // opening units are also owned units
+                    );
+                }
+
+                return true;
+            },
+        );
+        if (!$saved) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $item->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);
 
             return;
-        }
-
-        $opening = (float)($this->request->getData('quantity') ?? 0);
-        if ($opening > 0) {
-            $this->fetchTable('StockMovements')->record(
-                $item,
-                'in',
-                $opening,
-                (int)$this->currentUser->id,
-                ['reason' => 'opening_balance'],
-                $trackingType === 'reusable' // opening units are also owned units
-            );
         }
 
         $this->set('item', $item);

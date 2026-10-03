@@ -83,11 +83,32 @@ POS sales. Subject `food_order_id`; activity subject `food_order`. Typed column:
 
 Grace for `cancelled_after_payment` ends in the cleanup release after step 5.
 
+Recorded by `FoodOrdersTable::place()`, `serve()` and `cancelOrder()`, each in one transaction
+with the order row locked (`FOR UPDATE`) before its check, so a double click can't serve or
+restock twice. A sale's stock movements share its correlation id.
+
+### stock_movements (`StockMovements`)
+
+Inventory. The row *is* the movement, so `StockMovementsTable::record()` builds it and
+`EventLedgerBehavior::write()` stamps the shared columns: `receptionist_id` is the actor column,
+`direction` implies the type (not stored again; `activity_index` has it), and the row's own
+`reason` ("restock", "food_order", what a Manager typed) is kept. Subject `inventory_item_id`;
+activity subject `inventory_item`. Snapshot: item name, unit, quantity after.
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `moved_in` | | | Stock comes in (restock, return, opening balance, a sale's restock on cancel) |
+| `moved_out` | | | Stock goes out (consumed, issued, retired, sold) |
+
+`record()` locks the item row (`FOR UPDATE`) and computes the new quantity from it, so two
+movements of one item can't both start from the same quantity. Creating an item and its opening
+stock are one transaction. Rows from before step 5 have no `correlation_id`/`actor_role`/`source`/
+`occurred_at` (nullable until the cleanup release makes them `NOT NULL`).
+
 ## Planned
 
 | Ledger | Build step |
 |---|---|
-| `stock_movements` (existing table, gains the shared columns) | 5, part 2 |
 | `invoice_events` | 6 |
 | `reservation_events` | 8 |
 | `config_changes` (ConfigAuditBehavior) | 9 |

@@ -39,6 +39,7 @@ use Cake\Datasource\ConnectionManager;
 use Cake\Error\ErrorTrap;
 use Cake\Error\ExceptionTrap;
 use Cake\Http\ServerRequest;
+use Cake\Log\Engine\ConsoleLog;
 use Cake\Log\Log;
 use Cake\Mailer\Mailer;
 use Cake\Mailer\TransportFactory;
@@ -187,7 +188,18 @@ Cache::setConfig(Configure::consume('Cache'));
 ConnectionManager::setConfig(Configure::consume('Datasources'));
 TransportFactory::setConfig(Configure::consume('EmailTransport'));
 Mailer::setConfig(Configure::consume('Email'));
-Log::setConfig(Configure::consume('Log'));
+// Railway keeps and shows what the container writes to stderr; files inside
+// it vanish on every redeploy. So with debug off (staging, production) the
+// debug and error logs go to stderr, unless LOG_TO_FILES is set. Decided here,
+// after app_local.php, because that's where local development turns debug on.
+$logConfig = Configure::consume('Log');
+if (!Configure::read('debug') && !filter_var(env('LOG_TO_FILES', false), FILTER_VALIDATE_BOOLEAN)) {
+    foreach (['debug', 'error'] as $engine) {
+        $logConfig[$engine]['className'] = ConsoleLog::class;
+        $logConfig[$engine]['stream'] = 'php://stderr';
+    }
+}
+Log::setConfig($logConfig);
 Security::setSalt(Configure::consume('Security.salt'));
 
 /*

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Model\Table;
 
+use App\Event\EventContext;
 use App\Model\Entity\FoodOrder;
 use App\Model\StatutoryDiscount;
 use Cake\ORM\Table;
@@ -141,8 +142,10 @@ class FoodOrdersTable extends Table
      * @throws \RuntimeException On charge-to-room without a guest (or a guest who
      *   isn't currently checked in), or short stock.
      */
-    public function place(array $payload, int $propertyId, int $receptionistId): FoodOrder
+    public function place(array $payload, int $propertyId, EventContext $context): FoodOrder
     {
+        // Who placed it (accountability): the request's actor.
+        $receptionistId = (int)$context->actorId;
         $items = $payload['items'] ?? [];
         if (empty($items)) {
             throw new InvalidArgumentException('An order needs at least one item.');
@@ -214,6 +217,7 @@ class FoodOrdersTable extends Table
                 $cookingCharge,
                 $propertyId,
                 $receptionistId,
+                $context,
             ): FoodOrder {
                 $menus = TableRegistry::getTableLocator()->get('FoodMenuItems');
                 $orderItems = TableRegistry::getTableLocator()->get('FoodOrderItems');
@@ -280,7 +284,7 @@ class FoodOrdersTable extends Table
                         // Decrement the linked Food Stock (stamped to this receptionist).
                         if ($menu->inventory_item_id) {
                             $item = $inventory->get($menu->inventory_item_id);
-                            $stock->record($item, 'out', (float)$qty, $receptionistId, [
+                            $stock->record($context, $item, 'out', (float)$qty, [
                                 'reason' => 'food_order',
                                 'reference_type' => 'food_order',
                                 'reference_id' => $order->id,
@@ -290,7 +294,7 @@ class FoodOrdersTable extends Table
                         // Decrement every recipe ingredient (per-serving qty × ordered qty).
                         foreach ($menu->food_menu_item_ingredients as $ingredient) {
                             $item = $inventory->get($ingredient->inventory_item_id);
-                            $stock->record($item, 'out', (float)$ingredient->quantity * $qty, $receptionistId, [
+                            $stock->record($context, $item, 'out', (float)$ingredient->quantity * $qty, [
                                 'reason' => 'food_order',
                                 'reference_type' => 'food_order',
                                 'reference_id' => $order->id,
@@ -304,7 +308,7 @@ class FoodOrdersTable extends Table
                             $option = $selection['option'];
                             if ($option->inventory_item_id) {
                                 $item = $inventory->get($option->inventory_item_id);
-                                $stock->record($item, 'out', (float)$selection['quantity'], $receptionistId, [
+                                $stock->record($context, $item, 'out', (float)$selection['quantity'], [
                                     'reason' => 'food_order',
                                     'reference_type' => 'food_order',
                                     'reference_id' => $order->id,
@@ -403,6 +407,12 @@ class FoodOrdersTable extends Table
                     }
                 }
 
+                /** @var \App\Model\Table\FoodOrderEventsTable $events */
+                $events = TableRegistry::getTableLocator()->get('FoodOrderEvents');
+                $events->record($context, FoodOrderEventsTable::PLACED, $order, [
+                    'columns' => ['amount' => $order->total],
+                ]);
+
                 return $order;
             },
         );
@@ -470,17 +480,67 @@ class FoodOrdersTable extends Table
     }
 
     /**
-     * Cancel an order: restock the inventory it consumed and reverse any
-     * charge-to-room invoice lines. Stamped to the cancelling receptionist.
+     * Re-read an order inside the caller's transaction with a FOR UPDATE lock,
+     * so the check-then-change that follows can't race another request.
      */
-    public function cancelOrder(FoodOrder $order, int $receptionistId): FoodOrder
+    private function lockOrder(FoodOrder $order): FoodOrder
+    {
+        /** @var \App\Model\Entity\FoodOrder $locked */
+        $locked = $this->find()
+            ->where(['FoodOrders.id' => $order->id])
+            ->epilog('FOR UPDATE')
+            ->firstOrFail();
+
+        return $locked;
+    }
+
+    /**
+     * Mark an open order served, recording who served it, in one transaction
+     * with the order row locked (so two staff can't both serve it).
+     */
+    public function serve(FoodOrder $order, EventContext $context): FoodOrder
+    {
+        return $this->getConnection()->transactional(function () use ($order, $context): FoodOrder {
+            $locked = $this->lockOrder($order);
+            if ($locked->status !== 'open') {
+                throw new RuntimeException('Only open orders can be served.');
+            }
+            $locked->set('status', 'served');
+            $this->saveOrFail($locked);
+
+            /** @var \App\Model\Table\FoodOrderEventsTable $events */
+            $events = TableRegistry::getTableLocator()->get('FoodOrderEvents');
+            $events->record($context, FoodOrderEventsTable::SERVED, $locked, [
+                'changes' => ['status' => ['open', 'served']],
+                'columns' => ['amount' => $locked->total],
+            ]);
+            $order->set('status', 'served');
+
+            return $order;
+        });
+    }
+
+    /**
+     * Cancel an order: restock the inventory it consumed, reverse any
+     * charge-to-room invoice lines, and record who cancelled it and why. A
+     * served and paid sale is recorded as cancelled_after_payment (the
+     * elevated pos.sale.cancel_paid; its reason comes with the context). The
+     * order row is locked first, so a double click can't restock twice.
+     */
+    public function cancelOrder(FoodOrder $order, EventContext $context): FoodOrder
     {
         if ($order->status === 'cancelled') {
             throw new RuntimeException('Order is already cancelled.');
         }
 
         return $this->getConnection()->transactional(
-            function () use ($order, $receptionistId): FoodOrder {
+            function () use ($order, $context): FoodOrder {
+                $locked = $this->lockOrder($order);
+                if ($locked->status === 'cancelled') {
+                    throw new RuntimeException('Order is already cancelled.');
+                }
+                $afterPayment = $locked->status === 'served' && $locked->payment_status === 'paid';
+
                 $orderItems = TableRegistry::getTableLocator()->get('FoodOrderItems');
                 $stock = TableRegistry::getTableLocator()->get('StockMovements');
                 $inventory = TableRegistry::getTableLocator()->get('InventoryItems');
@@ -494,7 +554,7 @@ class FoodOrdersTable extends Table
                     if ($line->food_menu_item) {
                         if ($line->food_menu_item->inventory_item_id) {
                             $item = $inventory->get($line->food_menu_item->inventory_item_id);
-                            $stock->record($item, 'in', (float)$line->quantity, $receptionistId, [
+                            $stock->record($context, $item, 'in', (float)$line->quantity, [
                                 'reason' => 'food_order_cancel',
                                 'reference_type' => 'food_order',
                                 'reference_id' => $order->id,
@@ -503,7 +563,7 @@ class FoodOrdersTable extends Table
                         foreach ($line->food_menu_item->food_menu_item_ingredients as $ingredient) {
                             $item = $inventory->get($ingredient->inventory_item_id);
                             $restockQty = (float)$ingredient->quantity * (float)$line->quantity;
-                            $stock->record($item, 'in', $restockQty, $receptionistId, [
+                            $stock->record($context, $item, 'in', $restockQty, [
                                 'reason' => 'food_order_cancel',
                                 'reference_type' => 'food_order',
                                 'reference_id' => $order->id,
@@ -516,7 +576,7 @@ class FoodOrdersTable extends Table
                     foreach ($line->food_order_item_options as $selectedOption) {
                         if ($selectedOption->inventory_item_id) {
                             $item = $inventory->get($selectedOption->inventory_item_id);
-                            $stock->record($item, 'in', (float)$selectedOption->quantity, $receptionistId, [
+                            $stock->record($context, $item, 'in', (float)$selectedOption->quantity, [
                                 'reason' => 'food_order_cancel',
                                 'reference_type' => 'food_order',
                                 'reference_id' => $order->id,
@@ -525,12 +585,26 @@ class FoodOrdersTable extends Table
                     }
                 }
 
-                if ($order->payment_status === 'charge_to_room') {
+                if ($locked->payment_status === 'charge_to_room') {
                     TableRegistry::getTableLocator()->get('Invoices')->removeLinesFor('food_order', (int)$order->id);
                 }
 
+                $previous = $locked->status;
+                $locked->set('status', 'cancelled');
+                $this->saveOrFail($locked);
+
+                /** @var \App\Model\Table\FoodOrderEventsTable $events */
+                $events = TableRegistry::getTableLocator()->get('FoodOrderEvents');
+                $events->record(
+                    $context,
+                    $afterPayment ? FoodOrderEventsTable::CANCELLED_AFTER_PAYMENT : FoodOrderEventsTable::CANCELLED,
+                    $locked,
+                    [
+                        'changes' => ['status' => [$previous, 'cancelled']],
+                        'columns' => ['amount' => $locked->total],
+                    ],
+                );
                 $order->set('status', 'cancelled');
-                $this->saveOrFail($order);
 
                 return $order;
             },

@@ -30,35 +30,17 @@ class ActivityIndexTable extends Table
     }
 
     /**
-     * Index a stored event. Called by EventLedgerBehavior::record() only.
+     * Index a stored event. Called by EventLedgerBehavior only, in the
+     * event's transaction.
      *
-     * @param \Cake\Datasource\EntityInterface $event The stored event row.
-     * @param string $eventTable Its table, e.g. food_order_events.
-     * @param string $subjectType e.g. food_order.
-     * @param int $subjectId The subject's id.
-     * @param array<string, mixed> $summary What the feed shows.
+     * @param array<string, mixed> $values property_id, occurred_at, actor_id, subject_type,
+     *   subject_id, event_table, event_id, event_type, correlation_id, summary.
      * @return \Cake\Datasource\EntityInterface
      */
-    public function add(
-        EntityInterface $event,
-        string $eventTable,
-        string $subjectType,
-        int $subjectId,
-        array $summary,
-    ): EntityInterface {
+    public function add(array $values): EntityInterface
+    {
         $row = $this->newEntity([], ['validate' => false]);
-        $row->patch([
-            'property_id' => $event->get('property_id'),
-            'occurred_at' => $event->get('occurred_at'),
-            'actor_id' => $event->get('actor_id'),
-            'subject_type' => $subjectType,
-            'subject_id' => $subjectId,
-            'event_table' => $eventTable,
-            'event_id' => $event->get('id'),
-            'event_type' => $event->get('event_type'),
-            'correlation_id' => $event->get('correlation_id'),
-            'summary' => $summary ?: null,
-        ], ['guard' => false]);
+        $row->patch($values, ['guard' => false]);
 
         return $this->saveOrFail($row, ['atomic' => false]);
     }

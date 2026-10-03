@@ -3,17 +3,11 @@
 use Cake\Cache\Engine\FileEngine;
 use Cake\Database\Connection;
 use Cake\Database\Driver\Mysql;
+use App\Error\AppErrorLogger;
 use App\Log\RequestIdFormatter;
-use Cake\Log\Engine\ConsoleLog;
 use Cake\Log\Engine\FileLog;
 use Cake\Mailer\Transport\MailTransport;
 use function Cake\Core\env;
-
-// Railway keeps and shows what the container writes to stdout/stderr; files
-// inside it vanish on every redeploy. So a deployed (non-debug) environment
-// logs to stderr unless LOG_TO_FILES is set; local and CI (debug) keep files.
-$logToStderr = !filter_var(env('DEBUG', false), FILTER_VALIDATE_BOOLEAN)
-    && !filter_var(env('LOG_TO_FILES', false), FILTER_VALIDATE_BOOLEAN);
 
 return [
     /*
@@ -212,6 +206,9 @@ return [
     'Error' => [
         'errorLevel' => E_ALL,
         'skipLog' => [],
+        // Expected 4xx answers (401, 403, 400, 404…) are logged as one info
+        // line, not an error with a trace; real failures are unchanged.
+        'logger' => AppErrorLogger::class,
         'log' => true,
         'trace' => true,
         'ignoredDeprecationPaths' => [],
@@ -398,11 +395,11 @@ return [
      * Configures logging options
      */
     // Every line written during a request starts with [req:<X-Request-Id>]
-    // (RequestIdFormatter), linking user reports, logs and event records.
+    // (RequestIdFormatter), linking user reports, logs and event records. With
+    // debug off, bootstrap.php sends debug and error to stderr (Railway).
     'Log' => [
         'debug' => [
-            'className' => $logToStderr ? ConsoleLog::class : FileLog::class,
-            'stream' => 'php://stderr',
+            'className' => FileLog::class,
             'path' => LOGS,
             'file' => 'debug',
             'url' => env('LOG_DEBUG_URL', null),
@@ -411,8 +408,7 @@ return [
             'formatter' => ['className' => RequestIdFormatter::class],
         ],
         'error' => [
-            'className' => $logToStderr ? ConsoleLog::class : FileLog::class,
-            'stream' => 'php://stderr',
+            'className' => FileLog::class,
             'path' => LOGS,
             'file' => 'error',
             'url' => env('LOG_ERROR_URL', null),

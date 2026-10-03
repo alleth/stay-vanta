@@ -40,7 +40,7 @@ trait ApiScenarioTrait
     ];
 
     private const PROPERTY_SCOPED_TABLES = [
-        'StockMovements', 'FoodOrders', 'Invoices', 'Reservations', 'Guests', 'FoodMenuItems',
+        'FoodOrders', 'Invoices', 'Reservations', 'Guests', 'FoodMenuItems',
         'InventoryItems', 'InventoryCategories', 'ReceiptSeries', 'ExtraCharges', 'PromoRates',
         'BookingSources', 'RoomRates', 'Rooms', 'Users',
     ];
@@ -49,7 +49,7 @@ trait ApiScenarioTrait
      * Append-only ledgers: their tables refuse deletes, so cleanup removes
      * test rows through the connection, the one place that may.
      */
-    private const LEDGER_TABLES = ['activity_index', 'food_order_events'];
+    private const LEDGER_TABLES = ['activity_index', 'food_order_events', 'stock_movements'];
 
     protected function createProperty(string $name): int
     {

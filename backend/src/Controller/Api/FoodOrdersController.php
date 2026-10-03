@@ -6,7 +6,6 @@ namespace App\Controller\Api;
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 use Cake\ORM\Query\SelectQuery;
 use InvalidArgumentException;
 use RuntimeException;
@@ -113,7 +112,7 @@ class FoodOrdersController extends AppController
                     'cooking_charge' => $this->request->getData('cooking_charge') ?? 0,
                 ],
                 $propertyId,
-                (int)$this->currentUser->id,
+                $this->eventContext(),
             );
         } catch (InvalidArgumentException | RuntimeException $e) {
             // e.g. no items, charge-to-room without guest, or insufficient stock.
@@ -133,11 +132,11 @@ class FoodOrdersController extends AppController
         $orders = $this->fetchTable('FoodOrders');
         $order = $this->scopeToProperty($orders->find()->where(['FoodOrders.id' => $id]))->firstOrFail();
 
-        if ($order->status !== 'open') {
-            throw new BadRequestException('Only open orders can be served.');
+        try {
+            $orders->serve($order, $this->eventContext());
+        } catch (RuntimeException $e) {
+            throw new BadRequestException($e->getMessage());
         }
-        $order->set('status', 'served');
-        $orders->saveOrFail($order);
 
         $this->respondWith($order->id, 200);
     }
@@ -155,17 +154,19 @@ class FoodOrdersController extends AppController
 
         // An order that has been both served and paid is closed business:
         // reversing it takes pos.sale.cancel_paid (a Manager), not just
-        // pos.sale.manage.
-        if (
-            !$this->can(Permissions::POS_SALE_CANCEL_PAID)
-            && $order->status === 'served'
-            && $order->payment_status === 'paid'
-        ) {
-            throw new ForbiddenException('A paid, served order can only be cancelled by a Manager.');
+        // pos.sale.manage, and a reason. The reason is accepted but not yet
+        // required until the POS that sends one has replaced the old one
+        // (FoodOrderEventsTable::REASON_GRACE; required from the cleanup release).
+        if ($order->status === 'served' && $order->payment_status === 'paid') {
+            $this->authorizeElevated(
+                Permissions::POS_SALE_CANCEL_PAID,
+                'A paid, served order can only be cancelled by a Manager.',
+                reasonOptional: true,
+            );
         }
 
         try {
-            $orders->cancelOrder($order, (int)$this->currentUser->id);
+            $orders->cancelOrder($order, $this->eventContext());
         } catch (RuntimeException $e) {
             throw new BadRequestException($e->getMessage());
         }
@@ -173,6 +174,9 @@ class FoodOrdersController extends AppController
         $this->respondWith($order->id, 200);
     }
 
+    /**
+     * Answer with the order as it now stands.
+     */
     private function respondWith(int $orderId, int $status): void
     {
         $orders = $this->fetchTable('FoodOrders');

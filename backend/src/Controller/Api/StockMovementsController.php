@@ -25,7 +25,7 @@ class StockMovementsController extends AppController
             $movements->find()
                 ->contain(['InventoryItems', 'Receptionist'])
                 ->orderBy(['StockMovements.created' => 'DESC'])
-                ->limit(200)
+                ->limit(200),
         );
 
         $itemId = $this->request->getQuery('inventory_item_id');
@@ -70,15 +70,15 @@ class StockMovementsController extends AppController
 
         try {
             $movement = $this->fetchTable('StockMovements')->record(
+                $this->eventContext(),
                 $item,
                 $direction,
                 $quantity,
-                (int)$this->currentUser->id,
                 [
                     'reason' => $this->request->getData('reason'),
                     'note' => $this->request->getData('note'),
                 ],
-                (bool)$this->request->getData('affects_total')
+                (bool)$this->request->getData('affects_total'),
             );
         } catch (RuntimeException $e) {
             throw new BadRequestException($e->getMessage());

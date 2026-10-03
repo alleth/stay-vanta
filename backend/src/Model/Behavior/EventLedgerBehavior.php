@@ -15,8 +15,8 @@ use LogicException;
  * The one way an event is recorded (the accountability standard in CLAUDE.md;
  * catalog in docs/EVENTS.md).
  *
- * A ledger table attaches this with its subject column, uses
- * EventLedgerTableTrait (its record() method), and declares on its class:
+ * A ledger table attaches this with its subject column, and declares on its
+ * class:
  * - `TYPES`: its event types (past-tense constants);
  * - `REQUIRES_REASON`: the types that must say why;
  * - `REASON_GRACE`: required types still accepted without a reason during a
@@ -26,9 +26,14 @@ use LogicException;
  *   and display names, never contact details or ID numbers);
  * - optionally `summaryOf($subject, $type)`: what the activity feed shows.
  *
- * record() writes the event and its activity_index row, and must run inside
- * the transaction of the change it describes: if the event can't be written,
- * the change rolls back with it.
+ * Two ways in, both requiring the transaction of the change they describe
+ * (if the event can't be written, the change rolls back with it):
+ * - record(): an `*_events` table builds and stores a whole event row
+ *   (tables use EventLedgerTableTrait for their record() method);
+ * - write(): a ledger that builds its own rows (stock_movements, whose row
+ *   is the movement itself) has the shared columns stamped and the row
+ *   stored and indexed.
+ * Either way one activity_index row is written alongside.
  */
 class EventLedgerBehavior extends Behavior
 {
@@ -40,6 +45,11 @@ class EventLedgerBehavior extends Behavior
         'subjectKey' => null,
         // Name of the subject in activity_index, e.g. food_order.
         'subjectType' => null,
+        // Column holding the actor (stock_movements keeps receptionist_id).
+        'actorColumn' => 'actor_id',
+        // Column holding the event type, or null when the row implies it
+        // (a stock movement's direction); activity_index always has it.
+        'eventTypeColumn' => 'event_type',
     ];
 
     /**
@@ -61,7 +71,7 @@ class EventLedgerBehavior extends Behavior
     }
 
     /**
-     * Record that `$type` happened to `$subject`.
+     * Record that `$type` happened to `$subject`, as a new row of this table.
      *
      * @param \App\Event\EventContext $context Who, for whom, why, which action.
      * @param string $type One of the table's TYPES.
@@ -77,11 +87,51 @@ class EventLedgerBehavior extends Behavior
         array $options = [],
     ): EntityInterface {
         $table = $this->table();
+        $columns = (array)($options['columns'] ?? []);
+        foreach (array_keys($columns) as $column) {
+            if (!$table->getSchema()->hasColumn($column)) {
+                throw new InvalidArgumentException($table::class . " has no typed column '$column'.");
+            }
+        }
+
+        $event = $table->newEntity([], ['validate' => false]);
+        $event->patch([
+            $this->getConfig('subjectKey') => $subject->get('id'),
+            'changes' => $options['changes'] ?? null,
+            'corrects_event_id' => $options['correctsEventId'] ?? null,
+        ] + $columns, ['guard' => false]);
+
+        return $this->write($context, $type, $event, $subject);
+    }
+
+    /**
+     * Stamp the shared columns on a row this ledger built, store it, and
+     * index it. The row's own reason (e.g. a stock movement's "restock") is
+     * kept; the context's reason fills it only when it's empty.
+     *
+     * @param \App\Event\EventContext $context Who, for whom, why, which action.
+     * @param string $type One of the table's TYPES.
+     * @param \Cake\Datasource\EntityInterface $row The new ledger row, not yet saved.
+     * @param \Cake\Datasource\EntityInterface $subject The record it's about (has property_id).
+     * @param array<string, mixed> $options `snapshot` and `summary` to use instead of the table's.
+     * @return \Cake\Datasource\EntityInterface The stored row.
+     */
+    public function write(
+        EventContext $context,
+        string $type,
+        EntityInterface $row,
+        EntityInterface $subject,
+        array $options = [],
+    ): EntityInterface {
+        $table = $this->table();
         if (!$table->getConnection()->inTransaction()) {
             throw new LogicException(
                 'Record an event inside the transaction of the change it describes ' .
                 '(wrap both in transactional(), taking the lock first).',
             );
+        }
+        if (!$row->isNew()) {
+            throw new LogicException('Only a new row can be recorded.');
         }
 
         $class = $table::class;
@@ -104,37 +154,44 @@ class EventLedgerBehavior extends Behavior
             throw new LogicException('An event cannot be recorded for another property than the request\'s.');
         }
 
-        $columns = (array)($options['columns'] ?? []);
-        foreach (array_keys($columns) as $column) {
-            if (!$table->getSchema()->hasColumn($column)) {
-                throw new InvalidArgumentException("$class has no typed column '$column'.");
-            }
-        }
-
-        $snapshot = method_exists($table, 'snapshotOf') ? $table->snapshotOf($subject) : [];
-        $event = $table->newEntity([], ['validate' => false]);
-        $event->patch([
+        $snapshot = $options['snapshot']
+            ?? (method_exists($table, 'snapshotOf') ? $table->snapshotOf($subject) : []);
+        $stamp = [
             'property_id' => $propertyId,
-            $this->getConfig('subjectKey') => $subject->get('id'),
-            'event_type' => $type,
-            'actor_id' => $context->actorId,
+            $this->getConfig('actorColumn') => $context->actorId,
             'actor_role' => $context->actorRole,
             'source' => $context->source,
-            'reason' => $context->reason,
-            'changes' => $options['changes'] ?? null,
             'snapshot' => $snapshot ?: null,
             'correlation_id' => $context->correlationId,
             'occurred_at' => $context->now,
-            'corrects_event_id' => $options['correctsEventId'] ?? null,
-        ] + $columns, ['guard' => false]);
-        $table->saveOrFail($event, ['atomic' => false]);
+        ];
+        if ($this->getConfig('eventTypeColumn') !== null) {
+            $stamp[$this->getConfig('eventTypeColumn')] = $type;
+        }
+        if (($row->get('reason') === null || $row->get('reason') === '') && $context->reason !== null) {
+            $stamp['reason'] = $context->reason;
+        }
+        $row->patch($stamp, ['guard' => false]);
+        $table->saveOrFail($row, ['atomic' => false]);
 
-        $summary = method_exists($table, 'summaryOf') ? $table->summaryOf($subject, $type) : $snapshot;
+        $summary = $options['summary']
+            ?? (method_exists($table, 'summaryOf') ? $table->summaryOf($subject, $type) : $snapshot);
         /** @var \App\Model\Table\ActivityIndexTable $index */
         $index = TableRegistry::getTableLocator()->get('ActivityIndex');
-        $index->add($event, $table->getTable(), $this->getConfig('subjectType'), (int)$subject->get('id'), $summary);
+        $index->add([
+            'property_id' => $propertyId,
+            'occurred_at' => $context->now,
+            'actor_id' => $context->actorId,
+            'subject_type' => $this->getConfig('subjectType'),
+            'subject_id' => (int)$subject->get('id'),
+            'event_table' => $table->getTable(),
+            'event_id' => (int)$row->get('id'),
+            'event_type' => $type,
+            'correlation_id' => $context->correlationId,
+            'summary' => $summary ?: null,
+        ]);
 
-        return $event;
+        return $row;
     }
 
     /**
