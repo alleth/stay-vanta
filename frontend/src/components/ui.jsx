@@ -4,6 +4,7 @@
 // their shape, but every style below is a plain Tailwind class. Bootstrap's
 // CSS is not loaded anywhere.
 import { Children, createContext, useContext, useEffect, useRef, useState } from 'react'
+import { isDescribedError } from '../utils/apiError'
 
 const cx = (...parts) => parts.filter(Boolean).join(' ')
 
@@ -315,6 +316,34 @@ const ALERT_VARIANTS = {
   secondary: 'border-line bg-subtle text-body',
 }
 
+// A failed API call described by describeError(): its message, plus the
+// request's reference (X-Request-Id) to quote to support, with a copy button.
+function DescribedError({ error }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard?.writeText(error.requestId).then(() => setCopied(true), () => {})
+  }
+  return (
+    <>
+      <div>{error.message}</div>
+      <div className="mt-1 flex items-center gap-2 text-xs opacity-75">
+        {error.requestId ? (
+          <>
+            <span>
+              Reference: <span className="font-mono">{error.requestId.slice(0, 8)}</span>
+            </span>
+            <button type="button" onClick={copy} className="underline underline-offset-2 hover:opacity-100">
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </>
+        ) : (
+          <span>No reference: the request didn’t reach the server.</span>
+        )}
+      </div>
+    </>
+  )
+}
+
 export function Alert({ variant = 'info', dismissible, onClose, className = '', children }) {
   return (
     <div
@@ -328,7 +357,7 @@ export function Alert({ variant = 'info', dismissible, onClose, className = '', 
         className,
       )}
     >
-      {children}
+      {isDescribedError(children) ? <DescribedError error={children} /> : children}
       {dismissible && (
         <button
           type="button"

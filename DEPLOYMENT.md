@@ -182,6 +182,19 @@ Hotfixes take the same path (main → staging → promote), just faster. Never c
 `config/app_local.php` (git-ignored) overrides the env-driven defaults locally, so
 none of the above affects your XAMPP setup. See `README.md` / `CLAUDE.md`.
 
+## Support: tracing a request
+
+Every error alert in the app shows a **Reference** (the first 8 characters of the request's
+`X-Request-Id`, with a Copy button for the full id). When a user reports one:
+
+1. Search the service's logs in Railway (staging or production) for the reference.
+2. The application line, `info:`/`error: [req:<id>] <status> <method> <path>: <message>`, says
+   what went wrong; refusals (4xx) are one `info` line, real failures an `error` with a trace.
+3. The Apache access line ends with `req:<id>`, so successful requests can be found the same way.
+4. What a request changed is the set of events with that `correlation_id`
+   (`ActivityIndexTable::forCorrelation()`); a Manager-facing view of it comes with the event feed
+   (steps 6-8).
+
 ## Troubleshooting
 
 - **Pages build: `npm ci ... package.json and package-lock.json not in sync`

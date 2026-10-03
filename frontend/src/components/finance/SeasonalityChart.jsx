@@ -4,7 +4,7 @@ import { useTheme } from '../../context/ThemeContext'
 import { seasonality } from '../../api/finance'
 import { formatMoney } from '../../utils/format'
 import { SkeletonTable } from '../Skeleton'
-import { apiErrorMessage } from '../../utils/apiError'
+import { describeError } from '../../utils/apiError'
 
 // ApexCharts is a large dependency (~200KB gzipped) used only by this chart
 // (Finance → Analytics, Manager only) — code-split so every other role, page
@@ -60,7 +60,7 @@ export function SeasonalityChart() {
     Promise.allSettled([seasonality(year), seasonality(year - 1)]).then(([cur, prev]) => {
       if (!active) return
       if (cur.status === 'rejected') {
-        setResult({ year, error: apiErrorMessage(cur.reason) })
+        setResult({ year, error: describeError(cur.reason) })
         return
       }
       setResult({

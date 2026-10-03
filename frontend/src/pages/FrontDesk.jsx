@@ -22,6 +22,7 @@ import {
   postRoomCharge,
   listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
 } from '../api/frontdesk'
+import { describeError } from '../utils/apiError'
 
 // Standard check-in is from noon; arriving earlier in the day is an early check-in.
 const isEarlyCheckInNow = () => new Date().getHours() < 12
@@ -329,7 +330,7 @@ export default function FrontDesk() {
       await transitionReservation(id, transition, data)
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Action failed.')
+      setError(describeError(ex, 'Action failed.'))
     } finally {
       setPending(null)
     }
@@ -369,7 +370,7 @@ export default function FrontDesk() {
       await postRoomCharge(r.id)
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not post the room charge.')
+      setError(describeError(ex, 'Could not post the room charge.'))
     } finally {
       setPending(null)
     }
@@ -383,7 +384,7 @@ export default function FrontDesk() {
       await deleteExtraCharge(charge.id)
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not delete the charge.')
+      setError(describeError(ex, 'Could not delete the charge.'))
     } finally {
       setPending(null)
     }
@@ -397,7 +398,7 @@ export default function FrontDesk() {
       await deletePromoRate(pr.id)
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not delete the promo rate.')
+      setError(describeError(ex, 'Could not delete the promo rate.'))
     } finally {
       setPending(null)
     }
@@ -409,7 +410,7 @@ export default function FrontDesk() {
       await updateRoom(room.id, { room_number: room.room_number, room_type: room.room_type, status })
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Action failed.')
+      setError(describeError(ex, 'Action failed.'))
     } finally {
       setPending(null)
     }
@@ -423,7 +424,7 @@ export default function FrontDesk() {
       await deleteRoom(room.id)
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not delete the room.')
+      setError(describeError(ex, 'Could not delete the room.'))
     } finally {
       setPending(null)
     }
@@ -1105,7 +1106,7 @@ function ReservationModal({
       await deleteReservation(reservation.id)
       onSaved()
     } catch (ex) {
-      setErr(ex?.response?.data?.message ?? 'Delete failed.')
+      setErr(describeError(ex, 'Delete failed.'))
       setDeleting(false)
     }
   }
@@ -1291,7 +1292,7 @@ function ReservationModal({
       await createReservation(buildPayload(), propertyId)
       onSaved()
     } catch (ex) {
-      setErr(ex?.response?.data?.message ?? 'Save failed. Check the fields and try again.')
+      setErr(describeError(ex, 'Save failed. Check the fields and try again.'))
       setBusy(false)
     }
   }

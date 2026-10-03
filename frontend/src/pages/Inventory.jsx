@@ -12,6 +12,7 @@ import {
   listItems, listItemsPage, createItem, updateItem, deleteItem, listMovements, recordMovement,
   listReceiptSeries, createReceiptSeries, updateReceiptSeries, deleteReceiptSeries,
 } from '../api/inventory'
+import { describeError } from '../utils/apiError'
 
 const KINDS = ['food_stock', 'hygiene', 'linen', 'utensil', 'other']
 
@@ -171,7 +172,7 @@ export default function Inventory() {
       await deleteItem(item.id)
       refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not delete the item.')
+      setError(describeError(ex, 'Could not delete the item.'))
     } finally {
       setPending(null)
     }
@@ -534,7 +535,7 @@ function CategoriesModal({ categories, propertyId, onClose, onChanged }) {
       await deleteCategory(c.id)
       await onChanged()
     } catch (ex) {
-      setErr(ex?.response?.data?.message ?? 'Could not delete the category.')
+      setErr(describeError(ex, 'Could not delete the category.'))
     } finally {
       setBusyId(null)
     }
@@ -816,7 +817,7 @@ function ReceiptBooklets({ canManage, propertyId }) {
       await fn()
       await load()
     } catch (ex) {
-      setErr(ex?.response?.data?.message ?? 'Action failed.')
+      setErr(describeError(ex, 'Action failed.'))
     } finally {
       setPending(null)
     }

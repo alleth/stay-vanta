@@ -4,7 +4,7 @@ import { financeSummary } from '../../api/finance'
 import { SkeletonCards } from '../Skeleton'
 import { StatTiles } from '../StatCard'
 import { SeasonalityChart } from './SeasonalityChart'
-import { apiErrorMessage } from '../../utils/apiError'
+import { describeError } from '../../utils/apiError'
 
 function SectionTitle({ children }) {
   return <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted">{children}</h2>
@@ -16,7 +16,7 @@ export function FinanceAnalytics() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    financeSummary().then(setData).catch((err) => setError(apiErrorMessage(err)))
+    financeSummary().then(setData).catch((err) => setError(describeError(err)))
   }, [])
 
   return (

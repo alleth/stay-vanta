@@ -3,6 +3,7 @@ import { Card, Table, Button, Badge, Modal, Form, Alert, Spinner } from '../ui'
 import { formatMoney } from '../../utils/format'
 import { listInvoices, getInvoice, settleInvoice } from '../../api/food'
 import { SkeletonTableRows, Skeleton } from '../Skeleton'
+import { describeError } from '../../utils/apiError'
 
 // The guests' invoices — the list, the folio view and Settle — as one panel,
 // rendered as a tab by Front Desk and Finance. Settling is where
@@ -151,7 +152,7 @@ function InvoiceModal({ id, onClose }) {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    getInvoice(id).then(setInvoice).catch(() => setError('Could not load the invoice.'))
+    getInvoice(id).then(setInvoice).catch((ex) => setError(describeError(ex, 'Could not load the invoice.')))
   }, [id])
 
   // Group lines by source_type so the invoice reads like a folio.
@@ -305,7 +306,7 @@ function SettleModal({ id, onClose, onSettled }) {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    getInvoice(id).then(setInvoice).catch(() => setError('Could not load the invoice.'))
+    getInvoice(id).then(setInvoice).catch((ex) => setError(describeError(ex, 'Could not load the invoice.')))
   }, [id])
 
   async function settle() {
@@ -315,7 +316,7 @@ function SettleModal({ id, onClose, onSettled }) {
       await settleInvoice(id, { use_invoice: useInvoiceDoc, use_or: useOr })
       onSettled()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not settle the invoice.')
+      setError(describeError(ex, 'Could not settle the invoice.'))
       setBusy(false)
     }
   }

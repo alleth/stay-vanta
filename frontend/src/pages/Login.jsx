@@ -4,6 +4,7 @@ import { Card, Form, Button, Alert, Spinner } from '../components/ui'
 import BrandMark from '../components/BrandMark'
 import ThemeToggle from '../components/ThemeToggle'
 import { useAuth } from '../context/AuthContext'
+import { describeError } from '../utils/apiError'
 
 export default function Login() {
   const { login } = useAuth()
@@ -26,7 +27,7 @@ export default function Login() {
       // password is wrong, for fifteen minutes, would be actively misleading.
       // Login answers with {error}; other endpoints use {message}.
       const data = err?.response?.data
-      setError(data?.error ?? data?.message ?? 'Invalid email or password.')
+      setError({ ...describeError(err), message: data?.error ?? data?.message ?? 'Invalid email or password.' })
     } finally {
       setBusy(false)
     }

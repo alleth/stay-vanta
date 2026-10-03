@@ -6,6 +6,7 @@ namespace App\Model\Behavior;
 use App\Event\EventContext;
 use App\Event\ReasonRequiredException;
 use Cake\Datasource\EntityInterface;
+use Cake\Log\Log;
 use Cake\ORM\Behavior;
 use Cake\ORM\TableRegistry;
 use InvalidArgumentException;
@@ -138,12 +139,18 @@ class EventLedgerBehavior extends Behavior
         if (!in_array($type, $this->constantOf($class, 'TYPES'), true)) {
             throw new InvalidArgumentException("'$type' is not a $class event type.");
         }
-        if (
-            $context->reason === null
-            && in_array($type, $this->constantOf($class, 'REQUIRES_REASON'), true)
-            && !in_array($type, $this->constantOf($class, 'REASON_GRACE'), true)
-        ) {
-            throw new ReasonRequiredException();
+        if ($context->reason === null && in_array($type, $this->constantOf($class, 'REQUIRES_REASON'), true)) {
+            if (!in_array($type, $this->constantOf($class, 'REASON_GRACE'), true)) {
+                throw new ReasonRequiredException();
+            }
+            // Accepted only during a compatibility window. Every use is
+            // logged: the window closes once these lines stop appearing.
+            Log::warning(sprintf(
+                'reason grace used: %s %s recorded without a reason (subject %s)',
+                $table->getTable(),
+                $type,
+                (string)$subject->get('id'),
+            ));
         }
 
         $propertyId = (int)$subject->get('property_id');

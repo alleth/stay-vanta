@@ -6,6 +6,7 @@ import { useProperty } from '../context/PropertyContext'
 import { listGuestsPage, guestStats, getGuest, createGuest, updateGuest, matchGuests } from '../api/guests'
 import { SkeletonTable, SkeletonTableRows, Skeleton } from '../components/Skeleton'
 import { StatCard } from '../components/StatCard'
+import { describeError } from '../utils/apiError'
 
 const TYPE_VARIANT = { local: 'info', foreign: 'warning' }
 
@@ -210,7 +211,7 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
       }
       onSaved()
     } catch (ex) {
-      setErr(ex?.response?.data?.message ?? 'Save failed. Check the fields and try again.')
+      setErr(describeError(ex, 'Save failed. Check the fields and try again.'))
       setBusy(false)
     }
   }
@@ -292,7 +293,7 @@ function HistoryModal({ id, onClose }) {
 
   useEffect(() => {
     // setState happens only in the async .then/.catch, so this is a safe effect.
-    getGuest(id).then(setGuest).catch(() => setError('Could not load guest history.'))
+    getGuest(id).then(setGuest).catch((ex) => setError(describeError(ex, 'Could not load guest history.')))
   }, [id])
 
   return (

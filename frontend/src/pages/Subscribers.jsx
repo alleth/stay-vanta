@@ -8,6 +8,7 @@ import {
 } from '../api/platform'
 import { SkeletonTable } from '../components/Skeleton'
 import { formatMoney } from '../utils/format'
+import { describeError } from '../utils/apiError'
 
 const BLANK = {
   name: '',
@@ -80,8 +81,7 @@ export default function Subscribers() {
       await load()
     } catch (err) {
       setFormError(
-        err?.response?.data?.message ||
-          'Could not create the subscriber. Check the fields (email must be unique).'
+        describeError(err, 'Could not create the subscriber. Check the fields (email must be unique).'),
       )
     } finally {
       setSaving(false)

@@ -26,8 +26,9 @@ export const createOrder = (data, propertyId) =>
 export const serveOrder = (id) =>
   client.post(`/food-orders/${id}/serve`).then((r) => r.data.order)
 
-export const cancelOrder = (id) =>
-  client.post(`/food-orders/${id}/cancel`).then((r) => r.data.order)
+// `reason` is asked for when a served, paid sale is cancelled (pos.sale.cancel_paid).
+export const cancelOrder = (id, reason) =>
+  client.post(`/food-orders/${id}/cancel`, reason ? { reason } : {}).then((r) => r.data.order)
 
 // Invoices
 export const listInvoices = (propertyId, params = {}) =>

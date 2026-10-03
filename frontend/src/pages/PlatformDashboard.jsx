@@ -5,7 +5,7 @@ import { platformDashboard } from '../api/platform'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
 import { StatTiles } from '../components/StatCard'
 import { SectionTitle } from '../components/operations/Operations'
-import { apiErrorMessage } from '../utils/apiError'
+import { describeError } from '../utils/apiError'
 
 // The Platform Owner's Dashboard: subscription revenue and subscribers. Hotel
 // staff never see this page; their overview is Operations (pages/Operations.jsx).
@@ -15,7 +15,7 @@ export default function PlatformDashboard() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    platformDashboard().then(setData).catch((err) => setError(apiErrorMessage(err)))
+    platformDashboard().then(setData).catch((err) => setError(describeError(err)))
   }, [])
 
   if (error) return <Alert variant="danger">{error}</Alert>

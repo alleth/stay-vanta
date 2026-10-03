@@ -44,12 +44,22 @@ final class ActivityBackfill
      */
     public function run(?int $propertyId = null): array
     {
-        return [
+        $added = [
             // Orders first: their index rows are made from these events.
             'placed_events' => $this->inBatches('food_orders', $propertyId, $this->placedEventsSql()),
             'order_index' => $this->inBatches('food_order_events', $propertyId, $this->orderIndexSql()),
             'stock_index' => $this->inBatches('stock_movements', $propertyId, $this->stockIndexSql()),
         ];
+        // Auditable: what this run added (anything already recorded was skipped).
+        Log::info(sprintf(
+            'activity backfill run%s: added %d placed events, %d order index rows, %d stock index rows',
+            $propertyId !== null ? " (property $propertyId)" : '',
+            $added['placed_events'],
+            $added['order_index'],
+            $added['stock_index'],
+        ));
+
+        return $added;
     }
 
     /**

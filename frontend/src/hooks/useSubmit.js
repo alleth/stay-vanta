@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { describeError } from '../utils/apiError'
 
 /**
  * Form-submit helper shared by the modal forms. Wraps an async action with
@@ -24,11 +25,8 @@ export function useSubmit(fn) {
   return { run, busy, err, setErr }
 }
 
+// The first field validation error, else the API's message, with the
+// request's reference; <Alert> renders both (utils/apiError.js).
 function extractError(ex) {
-  const data = ex?.response?.data
-  const fieldErrors = data?.errors && Object.values(data.errors)[0]
-  if (fieldErrors && typeof fieldErrors === 'object') {
-    return Object.values(fieldErrors)[0]
-  }
-  return data?.message ?? 'Save failed. Check the fields and try again.'
+  return describeError(ex, 'Save failed. Check the fields and try again.')
 }

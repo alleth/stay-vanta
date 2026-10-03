@@ -7,6 +7,7 @@ import { formatMoney } from '../../utils/format'
 import { staffActivity } from '../../api/operations'
 import { roleLabel } from '../../utils/roles'
 import { SkeletonTable } from '../Skeleton'
+import { describeError } from '../../utils/apiError'
 
 // The Operations page's panels (Manager + Front Desk Staff), drawn from one
 // GET /operations/today payload. Every figure is today's, on the hotel's
@@ -574,7 +575,7 @@ function ActivityModal({ onHide }) {
         setHasMore(r.has_more)
         setError(null)
       })
-      .catch((err) => setError(err?.response?.data?.message ?? 'Could not load the activity.'))
+      .catch((err) => setError(describeError(err, 'Could not load the activity.')))
       .finally(() => setBusy(false))
   }, [])
 

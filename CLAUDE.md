@@ -435,6 +435,14 @@ would make the key attacker-controlled.
   pair. Three places duplicate values and must be kept in sync: `index.html`'s pre-paint script
   (storage key + splash colors), `BrandSplash.jsx`, and `components/finance/SeasonalityChart.jsx`'s `CHART_COLORS`
   (ApexCharts can't read CSS variables). Use the `frontend-design` skill for UI work.
+- **API errors go through `describeError(ex, fallback)`** (`src/utils/apiError.js`): it returns the
+  message (first validation error, else the API's message, else the fallback) and the request's
+  `X-Request-Id` (kept on the error by the `client.js` interceptor). Store that in error state and
+  render it as `<Alert variant="danger">{error}</Alert>`: `Alert` shows the message plus
+  "Reference: 8c2a236e" with a Copy button. Don't read `ex.response.data.message` by hand; if the
+  error goes inside other text, use `error.message`. `useSubmit` already returns one.
+- **Elevated actions ask why with `src/components/ReasonModal.jsx`** (`show`, `title`,
+  `description`, `confirmLabel`, `onConfirm(reason)`, `onHide`) and send `reason` with the request.
 - Initial loads use skeletons from `src/components/Skeleton.jsx`, not spinners (inline action
   buttons keep their small spinner). Stat tiles go through `src/components/StatCard.jsx` — extend
   it rather than hand-rolling a card + number (copies in pages drifted before). When a row of tiles

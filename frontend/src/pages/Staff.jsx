@@ -10,6 +10,7 @@ import {
 } from '../api/staff'
 import { SkeletonTable } from '../components/Skeleton'
 import { roleLabel } from '../utils/roles'
+import { describeError } from '../utils/apiError'
 
 const ROLE_VARIANT = { admin: 'primary', receptionist: 'info' }
 
@@ -51,7 +52,7 @@ export default function Staff() {
       await updateStaff(u.id, { is_active: !u.is_active })
       await refresh()
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Could not update the account.')
+      setError(describeError(ex, 'Could not update the account.'))
     } finally {
       setPending(null)
     }

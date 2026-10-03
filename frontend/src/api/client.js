@@ -26,4 +26,13 @@ client.interceptors.request.use((config) => {
   return config
 })
 
+// Keep each failed request's X-Request-Id on the error (see utils/apiError.js).
+client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    error.requestId = error?.response?.headers?.['x-request-id'] ?? null
+    return Promise.reject(error)
+  },
+)
+
 export default client

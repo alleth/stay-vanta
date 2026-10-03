@@ -7,7 +7,7 @@ import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
 import {
   SectionTitle, TopRow, AttentionPanel, GuestMonitor, PosOverview, InventoryMonitor, StaffMonitor,
 } from '../components/operations/Operations'
-import { apiErrorMessage } from '../utils/apiError'
+import { describeError } from '../utils/apiError'
 
 // Operations: what's happening at the property right now (display only; it
 // owns no process). Money beyond "Collected today" — collections, what's
@@ -41,7 +41,7 @@ export default function Operations() {
     setLoadingNow(true)
     return operationsToday()
       .then((data) => { if (alive.current) setState({ data, error: null, at: new Date() }) })
-      .catch((err) => { if (alive.current) setState((s) => ({ ...s, error: apiErrorMessage(err) })) })
+      .catch((err) => { if (alive.current) setState((s) => ({ ...s, error: describeError(err) })) })
       .finally(() => { if (alive.current) setLoadingNow(false) })
   }, [])
 
@@ -84,7 +84,7 @@ export default function Operations() {
       {data && (
         <>
           {error && (
-            <Alert variant="warning">Couldn’t refresh — showing figures from {at?.toLocaleTimeString()}. {error}</Alert>
+            <Alert variant="warning">Couldn’t refresh — showing figures from {at?.toLocaleTimeString()}. {error.message}</Alert>
           )}
 
           {/* Rooms overview beside Today + POS sales. */}

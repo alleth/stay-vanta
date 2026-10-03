@@ -4,7 +4,7 @@ import { pageReservations } from '../../api/frontdesk'
 import { formatMoney } from '../../utils/format'
 import { SkeletonTable } from '../Skeleton'
 import { SummaryGroup, SummaryRow } from '../StatCard'
-import { apiErrorMessage } from '../../utils/apiError'
+import { describeError } from '../../utils/apiError'
 
 const PER_PAGE = 25
 
@@ -32,7 +32,7 @@ export function Receivables({ propertyId, outstanding, onOpenInvoices }) {
     let active = true
     pageReservations(propertyId, { billing: 'not_billed', limit: PER_PAGE, page })
       .then((r) => { if (active) setResult({ page, data: r }) })
-      .catch((err) => { if (active) setResult({ page, error: apiErrorMessage(err) }) })
+      .catch((err) => { if (active) setResult({ page, error: describeError(err) }) })
     return () => { active = false }
   }, [propertyId, page])
 

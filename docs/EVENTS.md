@@ -66,6 +66,13 @@ A type in `REQUIRES_REASON` can't be recorded without one; the endpoint also che
 lists required types still accepted without a reason during a compatibility window (a released
 frontend can't send one yet). Grace entries are removed in the release that closes the window.
 
+Every use of a grace entry logs a warning (`reason grace used: <table> <type> recorded without a
+reason (subject <id>)`). A window closes only after the frontend that sends a reason has run in
+production for at least one release **and** these lines have stopped appearing in Railway's logs.
+The UI asks with the shared `ReasonModal` (`frontend/src/components/ReasonModal.jsx`): first for
+cancelling a served, paid POS sale; next for invoice reversals and reservation delete, correct and
+backdate.
+
 ## Backfills
 
 Every backfill of history into a ledger or `activity_index` is **idempotent** (re-running adds
@@ -121,8 +128,13 @@ activity subject `inventory_item`. Snapshot: item name, unit, quantity after.
 
 `record()` locks the item row (`FOR UPDATE`) and computes the new quantity from it, so two
 movements of one item can't both start from the same quantity. Creating an item and its opening
-stock are one transaction. Rows from before step 5 have no `correlation_id`/`actor_role`/`source`/
-`occurred_at` (nullable until the cleanup release makes them `NOT NULL`).
+stock are one transaction.
+
+**Intentional exception for history (decided 2026-10-03):** rows from before step 5 have no
+`correlation_id`, `actor_role`, `source` or `occurred_at`, and **keep them NULL for good**. Filling
+them in would mean rewriting ledger rows or inventing facts, both against the accountability model.
+NULL there means "predates step 5". Every new row must have them: `EventLedgerBehavior` stamps them
+on each write, so the columns stay nullable in the schema while new writes can't leave them empty.
 
 ## Planned
 

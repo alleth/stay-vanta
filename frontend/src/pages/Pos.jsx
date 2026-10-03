@@ -16,6 +16,8 @@ import { listItems } from '../api/inventory'
 import { listGuests } from '../api/guests'
 import { listReservations } from '../api/frontdesk'
 import { SkeletonTable, SkeletonTableRows } from '../components/Skeleton'
+import { describeError } from '../utils/apiError'
+import ReasonModal from '../components/ReasonModal'
 
 const PAY_VARIANT = { paid: 'success', charge_to_room: 'warning', unpaid: 'secondary' }
 const PAY_LABEL = { paid: 'Paid', charge_to_room: 'Charged to room', unpaid: 'Unpaid' }
@@ -40,6 +42,8 @@ export default function Pos() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pending, setPending] = useState(null) // key of the in-flight inline action
+  // A served, paid sale being cancelled: asks the Manager why first.
+  const [cancelPaid, setCancelPaid] = useState(null)
   const [modal, setModal] = useState(null) // 'order' | {type:'menu',item?,defaultType?}
 
   // Orders — server-paginated and filtered (a fresh start each day).
@@ -104,7 +108,7 @@ export default function Pos() {
       await fn(...args)
       await Promise.all([loadOrders(), loadBase()])
     } catch (ex) {
-      setError(ex?.response?.data?.message ?? 'Action failed.')
+      setError(describeError(ex, 'Action failed.'))
     } finally {
       setPending(null)
     }
@@ -125,6 +129,22 @@ export default function Pos() {
     <div>
       <h1 className="mb-4 text-2xl font-bold">POS</h1>
       {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
+
+      <ReasonModal
+        show={cancelPaid !== null}
+        title={`Cancel paid order #${cancelPaid?.id ?? ''}`}
+        description={
+          `This order was served and paid (${formatMoney(cancelPaid?.total ?? 0)}). Cancelling it restocks `
+          + 'what it used and is recorded with your name and this reason.'
+        }
+        confirmLabel="Cancel the order"
+        onHide={() => setCancelPaid(null)}
+        onConfirm={async (reason) => {
+          await cancelOrder(cancelPaid.id, reason)
+          setCancelPaid(null)
+          await Promise.all([loadOrders(), loadBase()])
+        }}
+      />
 
       {loading ? (
         <SkeletonTable rows={6} />
@@ -216,7 +236,9 @@ export default function Pos() {
                           && !(!can(P.POS_SALE_CANCEL_PAID) && o.status === 'served' && o.payment_status === 'paid') && (
                           <Button size="sm" variant="outline-danger"
                             disabled={pending !== null}
-                            onClick={() => act(`cancel-${o.id}`, cancelOrder, o.id)}>
+                            onClick={() => (o.status === 'served' && o.payment_status === 'paid'
+                              ? setCancelPaid(o)
+                              : act(`cancel-${o.id}`, cancelOrder, o.id))}>
                             {pending === `cancel-${o.id}` ? <Spinner size="sm" /> : 'Cancel'}
                           </Button>
                         )}

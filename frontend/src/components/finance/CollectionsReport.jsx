@@ -3,7 +3,7 @@ import { Alert, Card, Form } from '../ui'
 import { collections } from '../../api/finance'
 import { SkeletonCards } from '../Skeleton'
 import { StatTiles } from '../StatCard'
-import { apiErrorMessage } from '../../utils/apiError'
+import { describeError } from '../../utils/apiError'
 
 // Today on the device's own clock (the hotel's), not UTC — toISOString() would
 // still say "yesterday" until 8 AM in Manila.
@@ -49,7 +49,7 @@ export function CollectionsReport({ allowMonthly }) {
     let active = true
     collections(params)
       .then((c) => { if (active) setResult({ key, data: c }) })
-      .catch((err) => { if (active) setResult({ key, error: apiErrorMessage(err) }) })
+      .catch((err) => { if (active) setResult({ key, error: describeError(err) }) })
     return () => { active = false }
   }, [params, rangeInvalid, key])
 

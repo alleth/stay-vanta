@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
 
+use Cake\Log\Engine\ArrayLog;
+use Cake\Log\Log;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\TestSuite\IntegrationTestTrait;
 use Cake\TestSuite\TestCase;
@@ -189,12 +191,39 @@ class LedgerWritesApiTest extends TestCase
     {
         [$orderId] = $this->placeSale();
         $this->callAs($this->deskToken, 'POST', "/api/food-orders/$orderId/serve");
-        $this->callAs($this->adminToken, 'POST', "/api/food-orders/$orderId/cancel");
-        $this->assertResponseOk();
+        Log::setConfig('grace_test', ['className' => ArrayLog::class, 'levels' => ['warning']]);
+        try {
+            $this->callAs($this->adminToken, 'POST', "/api/food-orders/$orderId/cancel");
+            $this->assertResponseOk();
+            /** @var \Cake\Log\Engine\ArrayLog $log */
+            $log = Log::engine('grace_test');
+            $lines = $log->read();
+        } finally {
+            Log::drop('grace_test');
+        }
 
         $cancel = $this->getTableLocator()->get('FoodOrderEvents')->find()
             ->where(['food_order_id' => $orderId, 'event_type' => 'cancelled_after_payment'])->firstOrFail();
         $this->assertNull($cancel->reason);
+        // Each use of the grace window is logged: the evidence for closing it.
+        $this->assertCount(1, $lines);
+        $this->assertStringContainsString(
+            "reason grace used: food_order_events cancelled_after_payment recorded without a reason (subject $orderId)",
+            $lines[0],
+        );
+
+        // With a reason, nothing is logged.
+        [$second] = $this->placeSale();
+        $this->callAs($this->deskToken, 'POST', "/api/food-orders/$second/serve");
+        Log::setConfig('grace_test', ['className' => ArrayLog::class, 'levels' => ['warning']]);
+        try {
+            $this->callAs($this->adminToken, 'POST', "/api/food-orders/$second/cancel", ['reason' => 'Wrong table']);
+            /** @var \Cake\Log\Engine\ArrayLog $log */
+            $log = Log::engine('grace_test');
+            $this->assertSame([], $log->read());
+        } finally {
+            Log::drop('grace_test');
+        }
     }
 
     public function testAnOrdinaryCancelIsCancelledAndHappensOnce(): void
