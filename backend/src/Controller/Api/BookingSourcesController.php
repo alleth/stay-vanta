@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
+
 /**
  * BookingSources — read-only endpoint. The list of OTA sources a property
  * books through is created implicitly by typing a new source name into

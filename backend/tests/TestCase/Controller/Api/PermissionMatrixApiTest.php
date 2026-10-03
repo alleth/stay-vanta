@@ -15,9 +15,10 @@ use PHPUnit\Framework\Attributes\DataProvider;
  * role's answer, all derived from the approved catalog (docs/PERMISSIONS.md).
  *
  * For every probe and every role: a role the catalog doesn't grant the
- * permission must get exactly 403; a role it does grant must not be refused
- * (any status but 401/403, so missing ids and validation errors don't make
- * the test brittle). A new route without a probe fails
+ * permission must get exactly 403; a role it does grant must get through
+ * cleanly: not 401/403, and not a server error (a 500 hides whether the gate
+ * works at all). Missing ids (404) and validation errors (400) are fine, so
+ * the probes don't depend on data. A new route without a probe fails
  * testEveryApiRouteHasAProbe, so nothing ships unmapped.
  *
  * Data-dependent rules (cancelling a paid order, renaming a room, backdating,
@@ -207,6 +208,19 @@ class PermissionMatrixApiTest extends TestCase
         return array_map(fn($v) => $v === '{property}' ? $this->propertyId : $v, $body);
     }
 
+    /**
+     * The last response let an authorized caller through: no 401/403, and no
+     * server error.
+     */
+    private function assertAllowed(string $context): void
+    {
+        $status = $this->_response->getStatusCode();
+        $this->assertTrue(
+            !in_array($status, [401, 403], true) && $status < 500,
+            sprintf('%s: expected to get through, got %d: %s', $context, $status, $this->_response->getBody()),
+        );
+    }
+
     #[DataProvider('probeProvider')]
     public function testEachRoleGetsWhatTheCatalogGrants(
         string $method,
@@ -220,15 +234,7 @@ class PermissionMatrixApiTest extends TestCase
             $this->callAs($this->tokens[$role], $method, $url, $this->bodyFor($body));
             $status = $this->_response->getStatusCode();
             if (PermissionCatalog::grants($role, $permission)) {
-                $this->assertNotContains($status, [401, 403], sprintf(
-                    '%s %s: %s holds %s and must not be refused, got %d: %s',
-                    $method,
-                    $url,
-                    $role,
-                    $permission,
-                    $status,
-                    $this->_response->getBody(),
-                ));
+                $this->assertAllowed(sprintf('%s %s: %s holds %s', $method, $url, $role, $permission));
             } else {
                 $this->assertSame(403, $status, sprintf(
                     '%s %s: %s lacks %s and must get 403, got %d: %s',
@@ -340,7 +346,7 @@ class PermissionMatrixApiTest extends TestCase
             );
             $status = $this->_response->getStatusCode();
             if (PermissionCatalog::grants($role, 'pos.sale.cancel_paid')) {
-                $this->assertNotContains($status, [401, 403], "$role cancelling a paid, served order: $status");
+                $this->assertAllowed("$role cancelling a paid, served order");
             } else {
                 $this->assertSame(403, $status, "$role cancelling a paid, served order");
             }
@@ -357,15 +363,13 @@ class PermissionMatrixApiTest extends TestCase
             $url = "/api/rooms/$roomId?property_id={$this->propertyId}";
 
             $this->callAs($this->tokens[$role], 'PATCH', $url, ['status' => 'maintenance']);
-            $status = $this->_response->getStatusCode();
-            $this->assertNotContains($status, [401, 403], "$role changing a room's status: $status");
+            $this->assertAllowed("$role changing a room's status");
 
             $this->callAs($this->tokens[$role], 'PATCH', $url, ['room_number' => "MX-$i-renamed"]);
-            $status = $this->_response->getStatusCode();
             if (PermissionCatalog::grants($role, 'settings.room.manage')) {
-                $this->assertNotContains($status, [401, 403], "$role renaming a room: $status");
+                $this->assertAllowed("$role renaming a room");
             } else {
-                $this->assertSame(403, $status, "$role renaming a room");
+                $this->assertResponseCode(403, "$role renaming a room");
             }
         }
     }
