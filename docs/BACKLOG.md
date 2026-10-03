@@ -23,6 +23,29 @@ Use the terminology change log of the naming release as the source for every ren
 Operations, Finance, POS, Platform Owner / Manager / Front Desk Staff, Collected, Outstanding,
 Receivables, Vacant, Not billed / Billed / Settled, Post room charge.
 
+## Platform Owner access to hotel data
+
+**Ready when:** Permissions Phase 2 (build step 10) introduces memberships and turns the Platform
+Owner into a platform flag. Phase 1 keeps today's behavior unchanged on purpose.
+
+**What:** the Platform Owner (`users.property_id` null) passes every hotel endpoint that has no
+role check, plus every `owner, admin` check on hotel configuration. `scopeToProperty()` applies no
+filter when no `property_id` is passed, so `GET /api/guests` returns every hotel's guests and
+`POST /api/invoices/{id}/settle` reaches any hotel's invoice. The screens show the Platform Owner
+only Dashboard and Subscribers. The `PO†` grants in `docs/PERMISSIONS.md` mark every case.
+
+**Why it's here, not in SECURITY-FINDINGS:** the behavior is intentional (support access by the
+platform operator), not an accident. It's an architectural concern, decided 2026-10-03, and
+unrestricted access must not stay permanent.
+
+Direction:
+- [ ] Platform access is separate from property permissions: the platform flag grants only
+  `platform.*`.
+- [ ] "No property" never means "all properties". A null property id grants nothing outside
+  explicit platform endpoints.
+- [ ] Support access to a hotel is deliberate: started explicitly, scoped to one property, time
+  limited, and recorded with actor, reason and timestamp in `access_events`.
+
 ## Smaller items
 
 - [ ] **phpcs backlog:** about 97 pre-existing style violations in 43 files. Clean them up, then add
