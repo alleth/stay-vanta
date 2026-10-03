@@ -135,8 +135,9 @@ Every module answers **who** did it, **what** changed, **when**, and **why** (wh
 sensitive). This applies to reservations, invoices, POS, inventory, purchasing, maintenance,
 housekeeping, expenses, time keeping and configuration.
 
-**Today:** only inventory meets it (`stock_movements`). Known gaps: settling an invoice records
-when but not who, and invoice lines have no actor; `reservations.receptionist_id` is overwritten on
+**Today:** inventory (`stock_movements`), POS sales (`food_order_events`, step 5) and invoices
+(`invoice_events`, step 6, in production 2026-10-03; history from before is imported with no actor)
+meet it. Known gaps: `reservations.receptionist_id` is overwritten on
 every edit and transition, and reservations are hard-deleted; rate, promo, charge and menu-price
 changes record nobody.
 
