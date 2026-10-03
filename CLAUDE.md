@@ -12,7 +12,7 @@ independently-deployed apps that talk over a JSON API:
   `border-line`, `bg-ink`, `text-accent`… are utilities), and the in-house kit
   `src/components/ui.jsx` provides Button/Badge/Card/Table/Modal/Form/Alert/Tabs/etc. with
   react-bootstrap-style APIs (`variant`, `size`, `show`/`onHide`). The one external UI library is
-  `apexcharts`/`react-apexcharts` for the Revenue page's seasonality chart, loaded via `React.lazy()`
+  `apexcharts`/`react-apexcharts` for Finance → Analytics' seasonality chart, loaded via `React.lazy()`
   (~200KB gzipped) so only an admin who opens that chart pays for it.
 - `backend/` — **CakePHP 5** JSON REST API. **MySQL** (MariaDB via XAMPP locally; MySQL 9 on Railway).
   Full per-endpoint contract: **`backend/API.md`** — update it when you add or change an endpoint.
@@ -173,13 +173,19 @@ changes record nobody.
   endpoint that changes state, as today.
 
 ### Permission strategy
-- **Today:** role checks via `userHasRole()` (37 call sites) and `roles` lists in `nav.js` /
-  `ProtectedRoute`. Every check on the frontend must also exist on the backend.
-- **Phase 1 (build step 4, no DB change):** `App\Auth\Permissions` defines `module.resource.action`
-  constants and a fixed map from each current role to its permissions.
-  `AppController::authorize('finance.invoice.settle')` replaces `userHasRole()` one controller at a
-  time with identical behavior; `/auth/me` adds `permissions`; the frontend gets
-  `useAuth().can()`. From then on, new code calls `authorize()`, never `userHasRole()`.
+- **Phase 1 (build step 4, no DB change) — backend done:** `App\Auth\Permissions` defines the 35
+  `module.resource.action` constants and a fixed map from each role value to its permissions; the
+  approved catalog, design rules and endpoint map are **`docs/PERMISSIONS.md`** (the source of
+  truth; `PermissionsTest` keeps code and document identical). **Every API action calls
+  `$this->authorize(Permissions::X)`** first (after `allowMethod()`); data-dependent checks use
+  `$this->can(Permissions::X)`. Deny by default: a role the map doesn't know holds nothing.
+  `userHasRole()` survives only for the staff hierarchy in `UsersController` (a test forbids it
+  elsewhere). Login and `/auth/me` return `user.permissions`. Still to do: the frontend's
+  `useAuth().can()` replacing `roles` in `nav.js` / `ProtectedRoute` and the `role === …` checks
+  in pages. Every check on the frontend must also exist on the backend.
+- **Adding an endpoint or permission:** add the catalog row and endpoint-map row to
+  `docs/PERMISSIONS.md`, the constant (and grants) to `Permissions`, and a probe to
+  `PermissionMatrixApiTest::PROBES` — `testEveryApiRouteHasAProbe` fails on an unmapped route.
 - **Phase 2 (DB):** `roles`, `role_permissions`, `property_memberships` (user × property × role).
   A migration seeds the three presets and one membership per user; `users.role` and
   `users.property_id` stay as a fallback for one release. The platform owner becomes a platform
@@ -187,8 +193,8 @@ changes record nobody.
 - **Phase 3:** editable roles in Settings (audited), new starter roles (Property Owner,
   Housekeeping, Storekeeper…), multi-property switcher; drop the old user columns.
 - **Rules for code written now:** resolve the property through `effectivePropertyId()` /
-  `scopeToProperty()`, never `currentUser->property_id` directly (`ReportsController`,
-  `UsersController` and `PropertiesController` still do; fixed in step 3). Sensitive actions
+  `scopeToProperty()`, never `currentUser->property_id` directly (only `AppController`'s
+  helpers read it). Sensitive actions
   require a reason. Nobody approves their own expense or purchase order, or corrects their own
   timesheet.
 
@@ -230,14 +236,18 @@ files clean.
 hotel's data:
 - Fixture-free unit tests (entities in memory): `ReservationsTableTest` (`quote()` pricing, incl.
   extras), `FoodOrdersTableTest` (discount/cooking-charge arithmetic), `Auth/LoginThrottleTest`,
-  `Model/BusinessTimeTest` (hotel-day boundaries vs UTC).
-- HTTP suites in `tests/TestCase/Controller/Api/`: `AccessControlApiTest` (sign-in failures, the
-  per-role refusal matrix, staff-management limits), `PropertyIsolationApiTest` (one hotel's staff
+  `Model/BusinessTimeTest` (hotel-day boundaries vs UTC), `Auth/PermissionsTest` (role map ==
+  `docs/PERMISSIONS.md`; no `userHasRole()` outside the staff hierarchy).
+- HTTP suites in `tests/TestCase/Controller/Api/`: **`PermissionMatrixApiTest`** (the access
+  matrix: every API route × every role against the catalog, every route must have a probe, a user
+  with no permissions is refused everywhere), `AccessControlApiTest` (sign-in failures,
+  staff-management limits, refusal messages), `PropertyIsolationApiTest` (one hotel's staff
   can't list, open, change, book against or reference another hotel's data),
   `CollectionFiguresApiTest` (pins collected/outstanding across every report — must stay green
   through the shared finance calculation), `ReservationDiscountsApiTest`,
   `BackdatedReservationsApiTest`.
-- **Every new endpoint gets a row in the access matrix and an isolation check.** New HTTP suites
+- **Every new endpoint gets a probe in the access matrix (`PermissionMatrixApiTest::PROBES`) and
+  an isolation check.** New HTTP suites
   use `ApiScenarioTrait` (`createProperty()`, `makeUser()`, `callAs()`, `insertRow()`,
   `cleanupScenario()` in `tearDown()`). There are no fixtures, and the auth header must be
   re-applied before *every* request (`callAs()` does it; request config doesn't survive a request).
@@ -466,8 +476,8 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   is refused for anyone but `admin` — except a receptionist's walk-in, whose date is simply forced
   to today. Its status follows the dates (ended on/before today → `checked_out`, room untouched;
   still going → `checked_in`, room occupied), and `checked_in_at`/`checked_out_at` are the stay's
-  own dates so it doesn't count toward today's activity. No downpayment; revenue comes from Mark
-  paid as usual. Moving an existing booking's check-in into the past is admin-only too.
+  own dates so it doesn't count toward today's activity. No downpayment; collected once its room
+  charge is posted and the invoice settled, as usual. Moving an existing booking's check-in into the past is admin-only too.
 - **No double-booking**: the `roomAvailable` build rule rejects overlap on `[check_in, check_out)`
   among `HOLDS_ROOM` statuses — plus `checked_out` when a past stay is being entered (check-out
   day is free for a same-day check-in; the Calendar tab derives availability the same way).
@@ -494,8 +504,8 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   (`invoiceForLine('reservation', …)`), so whichever fires first posts it. It posts the offsetting
   `downpayment_credit` in the same call, **only once the charge line exists** (so an unresolvable
   rate can't strand a credit), under a `FOR UPDATE` lock on the reservation. Cancel reverses the
-  room charge, credit and early check-in fee. `payment_status` is an operational flag independent
-  of `status` and of invoice settlement.
+  room charge, credit and early check-in fee. `payment_status` is still written but nothing reads
+  it; billing comes from `billing_state` (see "Reservation billing").
 - **Early check-in**: a built-in, non-deletable `extra_charges` row (`early_check_in`, seeded by
   `ExtraChargesTable::earlyCheckInFor()`). Checking in before noon prompts, then posts
   `early_check_in:true` → fee billed to the invoice. Fee 0 disables it.

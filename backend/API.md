@@ -2,8 +2,11 @@
 
 Every endpoint lives under `/api` (`Api` prefix scope in `config/routes.php`), is served by a
 controller in `src/Controller/Api/`, and requires `Authorization: Bearer <token>` unless noted.
-Errors come back as JSON `{message, code, url}`. "Owner/admin only" is enforced server-side;
-staff (admin/receptionist) are always scoped to their own property, owners pass `property_id`.
+Errors come back as JSON `{message, code, url}`. Every endpoint requires one permission
+(`module.resource.action`); which one, and which roles hold it, is the endpoint map in
+`docs/PERMISSIONS.md`. A caller without it gets 403. The role notes below ("Manager only", "owner/
+admin-only") describe the same grants. Staff (admin/receptionist) are always scoped to their own
+property; owners pass `property_id`.
 
 Domain rules behind these endpoints (pricing, discounts, downpayments, stock ledger) are
 explained in `CLAUDE.md`; this file is the per-endpoint contract.
