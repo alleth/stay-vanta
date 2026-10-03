@@ -174,13 +174,16 @@ changes record nobody.
   (`AppController::eventContext()`), `EventLedgerBehavior` + `AppendOnlyBehavior` /
   `AppendOnlyTableTrait`, `activity_index` (`ActivityIndexTable::forCorrelation()`),
   `food_order_events`, `authorizeElevated()`, and `CorrelationIdMiddleware` (one id per request,
-  **mandatory** on every event, returned as `X-Request-Id`). The event-type catalog is
+  **mandatory** on every event, returned as `X-Request-Id` and prefixed to every server log line as
+  `[req:<id>]`; deployed environments log to stderr). The event-type catalog is
   **`docs/EVENTS.md`** (`EventsCatalogTest` keeps it in step with the code). Not yet wired: stock
   movements and POS still write the old way, and the Operations feed still reads
   `stock_movements` + `food_orders` (parts 2–3). Approved decisions (2026-10-03): hybrid tables,
   POS as the pilot ledger, a reason for `pos.sale.cancel_paid` (accepted-not-required until the
   cleanup release: `REASON_GRACE`), minimal snapshots (guest id + display name only) with one
-  controlled redaction routine, CI gates deployment ("Wait for CI").
+  controlled redaction routine, CI gates deployment ("Wait for CI"). **The activity feed becomes an
+  event feed** (one line per business event, with who did it) when the invoice and reservation
+  ledgers arrive; in step 5 it stays visually identical (`docs/EVENTS.md`).
 - Until a module's ledger is wired, keep stamping the acting user from
   `AppController::$currentUser` on any endpoint that changes state, as today. Tests must clean
   ledger rows through the connection (`ApiScenarioTrait::LEDGER_TABLES`), since the tables refuse

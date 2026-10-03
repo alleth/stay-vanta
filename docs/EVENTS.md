@@ -42,6 +42,18 @@ business action across ledgers: a checkout, a settlement, a correction, a cancel
 payment. Jobs get `system-<job>-<uuid>`; rows backfilled from before step 5 get
 `import-<table>-<id>`.
 
+The same id prefixes every server log line written during the request (`[req:<id>]`,
+`App\Log\RequestIdFormatter`), and deployed environments log to stderr, which Railway keeps. So
+one id links a user's report (the id shown with an error), the server log and the event records.
+
+## The activity feed (decided 2026-10-03)
+
+**Long term, Operations → Activity is an event feed:** one line per business event (placed,
+served, cancelled, settled, checked in, corrected…), each with who did it, rather than one line
+per record showing its current state. In step 5 the feed stays visually identical to today
+(`ActivityFeedApiTest` pins it: an order shows its current status). It moves to event lines when
+the invoice and reservation ledgers arrive (steps 6 and 8), with a test for each new line type.
+
 ## Reasons
 
 A type in `REQUIRES_REASON` can't be recorded without one; the endpoint also checks first with

@@ -3,9 +3,17 @@
 use Cake\Cache\Engine\FileEngine;
 use Cake\Database\Connection;
 use Cake\Database\Driver\Mysql;
+use App\Log\RequestIdFormatter;
+use Cake\Log\Engine\ConsoleLog;
 use Cake\Log\Engine\FileLog;
 use Cake\Mailer\Transport\MailTransport;
 use function Cake\Core\env;
+
+// Railway keeps and shows what the container writes to stdout/stderr; files
+// inside it vanish on every redeploy. So a deployed (non-debug) environment
+// logs to stderr unless LOG_TO_FILES is set; local and CI (debug) keep files.
+$logToStderr = !filter_var(env('DEBUG', false), FILTER_VALIDATE_BOOLEAN)
+    && !filter_var(env('LOG_TO_FILES', false), FILTER_VALIDATE_BOOLEAN);
 
 return [
     /*
@@ -389,22 +397,28 @@ return [
     /*
      * Configures logging options
      */
+    // Every line written during a request starts with [req:<X-Request-Id>]
+    // (RequestIdFormatter), linking user reports, logs and event records.
     'Log' => [
         'debug' => [
-            'className' => FileLog::class,
+            'className' => $logToStderr ? ConsoleLog::class : FileLog::class,
+            'stream' => 'php://stderr',
             'path' => LOGS,
             'file' => 'debug',
             'url' => env('LOG_DEBUG_URL', null),
             'scopes' => null,
             'levels' => ['notice', 'info', 'debug'],
+            'formatter' => ['className' => RequestIdFormatter::class],
         ],
         'error' => [
-            'className' => FileLog::class,
+            'className' => $logToStderr ? ConsoleLog::class : FileLog::class,
+            'stream' => 'php://stderr',
             'path' => LOGS,
             'file' => 'error',
             'url' => env('LOG_ERROR_URL', null),
             'scopes' => null,
             'levels' => ['warning', 'error', 'critical', 'alert', 'emergency'],
+            'formatter' => ['className' => RequestIdFormatter::class],
         ],
         // To enable this dedicated query log, you need to set your datasource's log flag to true
         'queries' => [

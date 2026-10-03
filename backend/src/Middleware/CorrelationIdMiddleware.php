@@ -30,6 +30,12 @@ class CorrelationIdMiddleware implements MiddlewareInterface
     public const HEADER = 'X-Request-Id';
 
     /**
+     * The id of the request in progress (one request per PHP process here),
+     * for log lines; see RequestIdFormatter.
+     */
+    private static ?string $current = null;
+
+    /**
      * Assign the id, run the request, and put the id on the response.
      *
      * @param \Psr\Http\Message\ServerRequestInterface $request The request.
@@ -41,8 +47,22 @@ class CorrelationIdMiddleware implements MiddlewareInterface
         RequestHandlerInterface $handler,
     ): ResponseInterface {
         $id = Text::uuid();
-        $response = $handler->handle($request->withAttribute(self::ATTRIBUTE, $id));
+        self::$current = $id;
+        try {
+            $response = $handler->handle($request->withAttribute(self::ATTRIBUTE, $id));
+        } finally {
+            self::$current = null;
+        }
 
         return $response->withHeader(self::HEADER, $id);
+    }
+
+    /**
+     * The id of the request being handled, or null outside one (CLI, jobs).
+     * Read by the log formatter, which has no access to the request.
+     */
+    public static function current(): ?string
+    {
+        return self::$current;
     }
 }
