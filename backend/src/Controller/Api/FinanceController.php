@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -26,9 +27,7 @@ class FinanceController extends AppController
      */
     public function summary(): void
     {
-        if (!$this->userHasRole('admin')) {
-            throw new ForbiddenException('Only a Manager can view revenue by period.');
-        }
+        $this->authorize(Permissions::FINANCE_ANALYTICS_VIEW, 'Only a Manager can view revenue by period.');
         $propertyId = (int)$this->effectivePropertyId();
 
         $this->set('summary', [
@@ -44,9 +43,7 @@ class FinanceController extends AppController
      */
     public function adminDashboard(): void
     {
-        if (!$this->userHasRole('admin')) {
-            throw new ForbiddenException('Only a Manager can view revenue by period.');
-        }
+        $this->authorize(Permissions::FINANCE_ANALYTICS_VIEW, 'Only a Manager can view revenue by period.');
         $propertyId = (int)$this->effectivePropertyId();
 
         $inventoryItems = $this->fetchTable('InventoryItems')
@@ -128,6 +125,7 @@ class FinanceController extends AppController
      */
     public function collections(): void
     {
+        $this->authorize(Permissions::FINANCE_COLLECTIONS_VIEW);
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
             throw new BadRequestException('property_id is required.');
@@ -139,7 +137,7 @@ class FinanceController extends AppController
         $year = $this->request->getQuery('year');
         $isWideWindow = $rangeFrom !== null || $rangeTo !== null || $month !== null || $year !== null;
 
-        if ($isWideWindow && !$this->userHasRole('owner', 'admin')) {
+        if ($isWideWindow && !$this->can(Permissions::FINANCE_COLLECTIONS_VIEW_RANGE)) {
             throw new ForbiddenException("Front Desk Staff can view one day's collection only.");
         }
 
@@ -269,9 +267,7 @@ class FinanceController extends AppController
      */
     public function seasonality(): void
     {
-        if (!$this->userHasRole('admin')) {
-            throw new ForbiddenException('Only a Manager can view seasonality.');
-        }
+        $this->authorize(Permissions::FINANCE_ANALYTICS_VIEW, 'Only a Manager can view seasonality.');
         $propertyId = (int)$this->effectivePropertyId();
 
         $year = (string)($this->request->getQuery('year') ?: BusinessTime::now()->format('Y'));

@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Inventory items. Quantities are read here but only ever changed through
@@ -37,6 +37,7 @@ class InventoryItemsController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::INVENTORY_ITEM_VIEW);
         $items = $this->fetchTable('InventoryItems');
         $query = $this->scopeToProperty(
             $items->find()
@@ -113,6 +114,7 @@ class InventoryItemsController extends AppController
      */
     public function view(int $id): void
     {
+        $this->authorize(Permissions::INVENTORY_ITEM_VIEW);
         $items = $this->fetchTable('InventoryItems');
         $item = $this->scopeToProperty(
             $items->find()->where(['InventoryItems.id' => $id, 'InventoryItems.deleted_at IS' => null])
@@ -135,9 +137,7 @@ class InventoryItemsController extends AppController
         $this->request->allowMethod('post');
 
         // Receptionists operate the catalogue; only owners/admins define it.
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may add inventory items.');
-        }
+        $this->authorize(Permissions::INVENTORY_ITEM_MANAGE, 'Only Managers may add inventory items.');
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -203,9 +203,7 @@ class InventoryItemsController extends AppController
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may edit inventory items.');
-        }
+        $this->authorize(Permissions::INVENTORY_ITEM_MANAGE, 'Only Managers may edit inventory items.');
 
         $items = $this->fetchTable('InventoryItems');
         $item = $this->scopeToProperty(
@@ -271,9 +269,7 @@ class InventoryItemsController extends AppController
     {
         $this->request->allowMethod(['delete', 'post']);
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may delete inventory items.');
-        }
+        $this->authorize(Permissions::INVENTORY_ITEM_MANAGE, 'Only Managers may delete inventory items.');
 
         $items = $this->fetchTable('InventoryItems');
         $item = $this->scopeToProperty(

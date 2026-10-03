@@ -8,6 +8,8 @@ use App\Auth\PermissionSet;
 use App\Model\Table\UsersTable;
 use App\Test\TestSuite\PermissionCatalog;
 use Cake\TestSuite\TestCase;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 
 /**
  * The permission definitions and the Phase 1 role map.
@@ -65,6 +67,28 @@ class PermissionsTest extends TestCase
         $this->assertSame([], Permissions::forRole('housekeeping')->toArray());
         $this->assertSame([], Permissions::forRole('')->toArray());
         $this->assertSame([], Permissions::forRole(null)->toArray());
+    }
+
+    /**
+     * Access goes through authorize()/can(). userHasRole() survives only for
+     * the staff hierarchy (who may manage whom), which stays a role rule.
+     */
+    public function testRoleChecksAreOnlyUsedForTheStaffHierarchy(): void
+    {
+        $allowed = ['Controller/Api/AppController.php', 'Controller/Api/UsersController.php'];
+        $found = [];
+        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(APP));
+        foreach ($files as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            $relative = str_replace(DS, '/', substr($file->getPathname(), strlen(APP)));
+            $source = (string)file_get_contents($file->getPathname());
+            if (!in_array($relative, $allowed, true) && str_contains($source, 'userHasRole(')) {
+                $found[] = $relative;
+            }
+        }
+        $this->assertSame([], $found, 'Use $this->authorize()/can() with a Permissions constant instead.');
     }
 
     public function testAPermissionSetAnswersOnlyForWhatItHolds(): void

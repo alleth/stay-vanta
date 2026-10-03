@@ -3,9 +3,9 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\Entity\ExtraCharge;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 
 /**
  * ExtraCharges — admin-configurable surcharges (e.g. an early check-in fee).
@@ -21,6 +21,7 @@ class ExtraChargesController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::SETTINGS_CONFIGURATION_VIEW);
         $charges = $this->fetchTable('ExtraCharges');
 
         $propertyId = $this->effectivePropertyId();
@@ -44,7 +45,7 @@ class ExtraChargesController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
-        $this->assertManager();
+        $this->authorize(Permissions::SETTINGS_EXTRA_CHARGE_MANAGE, 'Only Managers may manage extra charges.');
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -78,7 +79,7 @@ class ExtraChargesController extends AppController
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
-        $this->assertManager();
+        $this->authorize(Permissions::SETTINGS_EXTRA_CHARGE_MANAGE, 'Only Managers may manage extra charges.');
 
         $charges = $this->fetchTable('ExtraCharges');
         $charge = $this->scopeToProperty($charges->find()->where(['ExtraCharges.id' => $id]))->firstOrFail();
@@ -110,7 +111,7 @@ class ExtraChargesController extends AppController
     public function delete(int $id): void
     {
         $this->request->allowMethod('delete');
-        $this->assertManager();
+        $this->authorize(Permissions::SETTINGS_EXTRA_CHARGE_MANAGE, 'Only Managers may manage extra charges.');
 
         $charges = $this->fetchTable('ExtraCharges');
         $charge = $this->scopeToProperty($charges->find()->where(['ExtraCharges.id' => $id]))->firstOrFail();
@@ -123,13 +124,6 @@ class ExtraChargesController extends AppController
 
         $this->set('deleted', true);
         $this->viewBuilder()->setOption('serialize', ['deleted']);
-    }
-
-    private function assertManager(): void
-    {
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may manage extra charges.');
-        }
     }
 
     private function validationFailed(array $errors): void

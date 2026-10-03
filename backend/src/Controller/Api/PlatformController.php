@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\BusinessTime;
-use Cake\Http\Exception\ForbiddenException;
 
 /**
  * The platform owner's view: subscription revenue and subscriber counts.
@@ -22,9 +22,10 @@ class PlatformController extends AppController
      */
     public function dashboard(): void
     {
-        if (!$this->userHasRole('owner')) {
-            throw new ForbiddenException('Only the Platform Owner can view the platform dashboard.');
-        }
+        $this->authorize(
+            Permissions::PLATFORM_DASHBOARD_VIEW,
+            'Only the Platform Owner can view the platform dashboard.',
+        );
 
         $properties = $this->fetchTable('Properties')->find()->all();
         $active = 0;

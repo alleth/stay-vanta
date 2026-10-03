@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 use RuntimeException;
 
 /**
@@ -19,6 +19,7 @@ class StockMovementsController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::INVENTORY_ITEM_VIEW);
         $movements = $this->fetchTable('StockMovements');
         $query = $this->scopeToProperty(
             $movements->find()
@@ -54,9 +55,7 @@ class StockMovementsController extends AppController
     {
         $this->request->allowMethod('post');
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may move stock manually.');
-        }
+        $this->authorize(Permissions::INVENTORY_STOCK_ADJUST, 'Only Managers may move stock manually.');
 
         $itemId = (int)$this->request->getData('inventory_item_id');
         $direction = (string)$this->request->getData('direction');

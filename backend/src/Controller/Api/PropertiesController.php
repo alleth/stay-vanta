@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
-use Cake\Http\Exception\ForbiddenException;
+use App\Auth\Permissions;
 
 /**
  * Hotels & resorts. Owners manage these; admins/receptionists can read their
@@ -16,6 +16,7 @@ class PropertiesController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::SETTINGS_PROPERTY_VIEW);
         $properties = $this->fetchTable('Properties');
         $query = $properties->find()->orderBy(['Properties.name' => 'ASC']);
 
@@ -40,9 +41,7 @@ class PropertiesController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
-        if (!$this->userHasRole('owner')) {
-            throw new ForbiddenException('Only the Platform Owner can add properties.');
-        }
+        $this->authorize(Permissions::PLATFORM_PROPERTY_MANAGE, 'Only the Platform Owner can add properties.');
 
         $properties = $this->fetchTable('Properties');
         $property = $properties->newEntity([
@@ -73,9 +72,7 @@ class PropertiesController extends AppController
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put']);
-        if (!$this->userHasRole('owner')) {
-            throw new ForbiddenException('Only the Platform Owner can edit properties.');
-        }
+        $this->authorize(Permissions::PLATFORM_PROPERTY_MANAGE, 'Only the Platform Owner can edit properties.');
 
         $properties = $this->fetchTable('Properties');
         $property = $properties->get($id);

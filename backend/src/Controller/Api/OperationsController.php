@@ -3,10 +3,10 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Operations: what is happening at the property right now (display only).
@@ -48,11 +48,9 @@ class OperationsController extends AppController
      */
     public function today(): void
     {
-        if (!$this->userHasRole('admin', 'receptionist')) {
-            throw new ForbiddenException('Only Managers and Front Desk Staff can view Operations.');
-        }
+        $this->authorize(Permissions::OPERATIONS_TODAY_VIEW, 'Only Managers and Front Desk Staff can view Operations.');
         $propertyId = (int)$this->effectivePropertyId();
-        $isAdmin = $this->userHasRole('admin');
+        $seesStaff = $this->can(Permissions::OPERATIONS_STAFF_VIEW);
         $today = BusinessTime::todayString();
         $dayStart = BusinessTime::startOf($today);
         $dayEnd = BusinessTime::endOf($today);
@@ -87,8 +85,8 @@ class OperationsController extends AppController
                 'pos' => $pos['today']['paid'],
             ],
             'inventory' => $inventory,
-            'staff' => $isAdmin ? $this->staffSummary($propertyId, $dayStart, $dayEnd) : null,
-            'activity' => $isAdmin ? $this->recentActivity($propertyId) : null,
+            'staff' => $seesStaff ? $this->staffSummary($propertyId, $dayStart, $dayEnd) : null,
+            'activity' => $seesStaff ? $this->recentActivity($propertyId) : null,
             // Operational only — unpaid stays and open invoices are the
             // Revenue page's "To collect".
             'attention' => $reservationAttention + [
@@ -547,9 +545,7 @@ class OperationsController extends AppController
      */
     public function activity(): void
     {
-        if (!$this->userHasRole('admin')) {
-            throw new ForbiddenException('Only a Manager can view staff activity.');
-        }
+        $this->authorize(Permissions::OPERATIONS_STAFF_VIEW, 'Only a Manager can view staff activity.');
         $page = (int)($this->request->getQuery('page') ?? 1);
         if ($page < 1 || $page > self::ACTIVITY_MAX_PAGE) {
             throw new BadRequestException(sprintf('page must be 1-%d.', self::ACTIVITY_MAX_PAGE));

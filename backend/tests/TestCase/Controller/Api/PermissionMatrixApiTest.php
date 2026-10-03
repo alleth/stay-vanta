@@ -284,6 +284,30 @@ class PermissionMatrixApiTest extends TestCase
         $this->assertSame([], $unknown);
     }
 
+    /**
+     * Deny by default: a signed-in user whose role grants nothing (a role
+     * value the map doesn't know, standing in for any future role before it's
+     * mapped) is refused by every route except the always-allowed ones.
+     */
+    public function testAUserWithNoPermissionsIsRefusedEverywhere(): void
+    {
+        $token = $this->makeUser($this->propertyId, 'receptionist', 'matrix-none-' . uniqid() . '@example.test');
+        $this->getTableLocator()->get('Users')->updateAll(['role' => 'unmapped'], ['id' => $this->userIdFor($token)]);
+
+        $this->callAs($token, 'GET', '/api/auth/me');
+        $this->assertResponseOk();
+        $this->assertSame([], $this->responseJson()['user']['permissions']);
+
+        $allowed = [];
+        foreach (self::probeProvider() as $label => [$method, $template, , $query, $body]) {
+            $this->callAs($token, $method, $this->urlFor($template, $query), $this->bodyFor($body));
+            if ($this->_response->getStatusCode() !== 403) {
+                $allowed[] = sprintf('%s → %d', $label, $this->_response->getStatusCode());
+            }
+        }
+        $this->assertSame([], $allowed, 'A user without permissions must get 403 here.');
+    }
+
     public function testAuthMeListsWhatEachRoleHolds(): void
     {
         foreach (self::ROLES as $role) {

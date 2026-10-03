@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
@@ -52,6 +53,7 @@ class ReservationsController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_VIEW);
         $reservations = $this->fetchTable('Reservations');
         $query = $this->scopeToProperty(
             $reservations->find()
@@ -148,6 +150,7 @@ class ReservationsController extends AppController
      */
     public function stats(): void
     {
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_VIEW);
         $reservations = $this->fetchTable('Reservations');
         $today = BusinessTime::today()->format('Y-m-d');
         $count = fn(array $where): int => $this->scopeToProperty($reservations->find()->where($where))->count();
@@ -309,6 +312,7 @@ class ReservationsController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -496,6 +500,7 @@ class ReservationsController extends AppController
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -512,7 +517,9 @@ class ReservationsController extends AppController
             );
         }
         $isStay = in_array($reservation->status, ['checked_in', 'checked_out'], true);
-        if ($reservation->status !== 'booked' && !($isStay && $this->userHasRole('admin'))) {
+        // Correcting a stay is a permission; refusing it stays a 400, as before.
+        $mayCorrect = $isStay && $this->can(Permissions::FRONT_DESK_RESERVATION_CORRECT);
+        if ($reservation->status !== 'booked' && !$mayCorrect) {
             throw new BadRequestException("Only a booking that hasn't checked in yet can be edited.");
         }
         if ((float)$reservation->downpayment > 0) {
@@ -544,7 +551,7 @@ class ReservationsController extends AppController
             $newCheckIn !== null
             && $newCheckIn !== $reservation->check_in?->format('Y-m-d')
             && $this->isBeforeToday($newCheckIn)
-            && !$this->userHasRole('admin')
+            && !$this->can(Permissions::FRONT_DESK_RESERVATION_BACKDATE)
         ) {
             throw new ForbiddenException('Only a Manager can move a booking to a date before today.');
         }
@@ -718,9 +725,7 @@ class ReservationsController extends AppController
     {
         $this->request->allowMethod('delete');
 
-        if (!$this->userHasRole('admin')) {
-            throw new ForbiddenException('Only a Manager can delete a reservation.');
-        }
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_DELETE, 'Only a Manager can delete a reservation.');
 
         $reservations = $this->fetchTable('Reservations');
         $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
@@ -818,6 +823,7 @@ class ReservationsController extends AppController
     public function transition(int $id, string $transition): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
 
         if (!isset(self::TRANSITIONS[$transition])) {
             throw new BadRequestException('Unknown transition.');
@@ -942,6 +948,7 @@ class ReservationsController extends AppController
     public function payment(int $id): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
 
         $reservations = $this->fetchTable('Reservations');
         $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
@@ -975,6 +982,7 @@ class ReservationsController extends AppController
     public function postCharge(int $id): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
 
         $reservation = $this->scopeToProperty(
             $this->fetchTable('Reservations')->find()->where(['Reservations.id' => $id]),
@@ -1542,11 +1550,12 @@ class ReservationsController extends AppController
 
     /**
      * Whether a new booking records a stay that started before today — which
-     * only an admin may add (history the desk didn't record at the time). A
-     * receptionist's walk-in isn't one: its date is forced to today whatever
-     * the form sent, so a stale date there is ignored, not refused.
+     * only a holder of front_desk.reservation.backdate may add (history the
+     * desk didn't record at the time). Anyone else's walk-in isn't one: its
+     * date is forced to today whatever the form sent, so a stale date there is
+     * ignored, not refused.
      *
-     * @throws \Cake\Http\Exception\ForbiddenException When a non-admin sends one.
+     * @throws \Cake\Http\Exception\ForbiddenException When someone without the permission sends one.
      */
     private function isBackdated(string $source, mixed $checkIn): bool
     {
@@ -1554,11 +1563,11 @@ class ReservationsController extends AppController
             return false;
         }
 
-        $isAdmin = $this->userHasRole('admin');
-        if ($source === BookingSourcesTable::WALK_IN && !$isAdmin) {
+        $mayBackdate = $this->can(Permissions::FRONT_DESK_RESERVATION_BACKDATE);
+        if ($source === BookingSourcesTable::WALK_IN && !$mayBackdate) {
             return false;
         }
-        if (!$isAdmin) {
+        if (!$mayBackdate) {
             throw new ForbiddenException('Only a Manager can add a booking with a check-in before today.');
         }
 

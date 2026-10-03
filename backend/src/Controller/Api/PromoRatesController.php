@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 use InvalidArgumentException;
 
 /**
@@ -25,6 +25,7 @@ class PromoRatesController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::SETTINGS_CONFIGURATION_VIEW);
         $promoRates = $this->fetchTable('PromoRates');
         $query = $this->scopeToProperty(
             $promoRates->find()->contain(['Rooms'])
@@ -47,9 +48,7 @@ class PromoRatesController extends AppController
     {
         $this->request->allowMethod('post');
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may add promo rates.');
-        }
+        $this->authorize(Permissions::SETTINGS_PROMO_RATE_MANAGE, 'Only Managers may add promo rates.');
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -86,9 +85,7 @@ class PromoRatesController extends AppController
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may edit promo rates.');
-        }
+        $this->authorize(Permissions::SETTINGS_PROMO_RATE_MANAGE, 'Only Managers may edit promo rates.');
 
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $this->scopeToProperty($promoRates->find()->where(['PromoRates.id' => $id]))->firstOrFail();
@@ -121,9 +118,7 @@ class PromoRatesController extends AppController
     {
         $this->request->allowMethod('delete');
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may delete promo rates.');
-        }
+        $this->authorize(Permissions::SETTINGS_PROMO_RATE_MANAGE, 'Only Managers may delete promo rates.');
 
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $this->scopeToProperty($promoRates->find()->where(['PromoRates.id' => $id]))->firstOrFail();

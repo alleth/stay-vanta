@@ -3,11 +3,11 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\Entity\FoodMenuItem;
 use App\Model\Table\FoodMenuItemOptionGroupsTable;
 use App\Model\Table\FoodMenuItemsTable;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 use Cake\I18n\DateTime;
 
 /**
@@ -21,6 +21,7 @@ class FoodMenuItemsController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::POS_SALE_VIEW);
         $menu = $this->fetchTable('FoodMenuItems');
         $query = $this->scopeToProperty(
             $menu->find()
@@ -64,7 +65,7 @@ class FoodMenuItemsController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
-        $this->requireManager();
+        $this->authorize(Permissions::POS_MENU_MANAGE, 'Only Managers can manage the menu.');
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -111,7 +112,7 @@ class FoodMenuItemsController extends AppController
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
-        $this->requireManager();
+        $this->authorize(Permissions::POS_MENU_MANAGE, 'Only Managers can manage the menu.');
 
         $menu = $this->fetchTable('FoodMenuItems');
         $item = $this->scopeToProperty(
@@ -388,7 +389,7 @@ class FoodMenuItemsController extends AppController
     public function delete(int $id): void
     {
         $this->request->allowMethod(['delete', 'post']);
-        $this->requireManager();
+        $this->authorize(Permissions::POS_MENU_MANAGE, 'Only Managers can manage the menu.');
 
         $menu = $this->fetchTable('FoodMenuItems');
         $item = $this->scopeToProperty(
@@ -401,13 +402,6 @@ class FoodMenuItemsController extends AppController
 
         $this->set('ok', true);
         $this->viewBuilder()->setOption('serialize', ['ok']);
-    }
-
-    private function requireManager(): void
-    {
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers can manage the menu.');
-        }
     }
 
     private function validationFailed(array $errors): void

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\Entity\User;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\BadRequestException;
@@ -17,17 +18,29 @@ use Cake\Http\Exception\ForbiddenException;
  * - others : no access.
  *
  * Owners are never created or edited through this controller.
+ *
+ * Access is staff.account.view / staff.account.manage (beforeFilter). Who may
+ * manage whom stays a role rule, deliberately not a permission (see "Rules
+ * that stay outside permissions" in docs/PERMISSIONS.md); these are the only
+ * userHasRole() calls left.
  */
 class UsersController extends AppController
 {
+    /**
+     * Gate the whole controller here, before allowMethod(), as it always has
+     * been: listing staff needs staff.account.view, everything else
+     * staff.account.manage. Who may manage whom is a separate rule below.
+     *
+     * @param \Cake\Event\EventInterface $event The beforeFilter event.
+     */
     public function beforeFilter(EventInterface $event): void
     {
         parent::beforeFilter($event);
 
-        // Auth has run in the parent; now gate the whole controller by role.
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers can manage staff.');
-        }
+        $permission = $this->request->getParam('action') === 'index'
+            ? Permissions::STAFF_ACCOUNT_VIEW
+            : Permissions::STAFF_ACCOUNT_MANAGE;
+        $this->authorize($permission, 'Only Managers can manage staff.');
     }
 
     /**

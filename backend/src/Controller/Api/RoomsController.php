@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 
@@ -16,6 +17,7 @@ class RoomsController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::ROOMS_ROOM_VIEW);
         $rooms = $this->fetchTable('Rooms');
         $query = $this->scopeToProperty(
             $rooms->find()->contain(['RoomRates'])->orderBy(['Rooms.room_number' => 'ASC'])
@@ -38,9 +40,7 @@ class RoomsController extends AppController
         $this->request->allowMethod('post');
 
         // Only owners/admins may add rooms; receptionists manage existing ones.
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may add rooms.');
-        }
+        $this->authorize(Permissions::SETTINGS_ROOM_MANAGE, 'Only Managers may add rooms.');
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -75,6 +75,7 @@ class RoomsController extends AppController
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
+        $this->authorize(Permissions::ROOMS_ROOM_UPDATE_STATUS);
         $rooms = $this->fetchTable('Rooms');
         $room = $this->scopeToProperty($rooms->find()->where(['Rooms.id' => $id]))->firstOrFail();
 
@@ -82,7 +83,7 @@ class RoomsController extends AppController
         $newType = $this->request->getData('room_type');
         $changingDetails = ($newNumber !== null && $newNumber !== $room->room_number)
             || ($newType !== null && $newType !== $room->room_type);
-        if ($changingDetails && !$this->userHasRole('owner', 'admin')) {
+        if ($changingDetails && !$this->can(Permissions::SETTINGS_ROOM_MANAGE)) {
             throw new ForbiddenException('Only Managers may rename or retype a room.');
         }
 
@@ -111,9 +112,7 @@ class RoomsController extends AppController
     {
         $this->request->allowMethod(['delete', 'post']);
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may delete rooms.');
-        }
+        $this->authorize(Permissions::SETTINGS_ROOM_MANAGE, 'Only Managers may delete rooms.');
 
         $rooms = $this->fetchTable('Rooms');
         $room = $this->scopeToProperty($rooms->find()->where(['Rooms.id' => $id]))->firstOrFail();

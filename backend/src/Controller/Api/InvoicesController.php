@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
 use Cake\I18n\DateTime;
@@ -18,6 +19,7 @@ class InvoicesController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::FINANCE_INVOICE_VIEW);
         $invoices = $this->fetchTable('Invoices');
         $query = $this->scopeToProperty(
             $invoices->find()->contain(['Guests', 'InvoiceLines'])->orderBy(['Invoices.created' => 'DESC'])
@@ -57,6 +59,7 @@ class InvoicesController extends AppController
      */
     public function view(int $id): void
     {
+        $this->authorize(Permissions::FINANCE_INVOICE_VIEW);
         $invoices = $this->fetchTable('Invoices');
         $invoice = $this->scopeToProperty($invoices->find()->where(['Invoices.id' => $id]))
             ->contain(['Guests', 'InvoiceLines'])
@@ -77,6 +80,7 @@ class InvoicesController extends AppController
     public function settle(int $id): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::FINANCE_INVOICE_SETTLE);
         $invoices = $this->fetchTable('Invoices');
         $invoice = $this->scopeToProperty($invoices->find()->where(['Invoices.id' => $id]))->firstOrFail();
 

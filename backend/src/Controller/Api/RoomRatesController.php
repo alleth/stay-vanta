@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Room rates. A rate may target a specific room (room_id) or apply
@@ -18,6 +18,7 @@ class RoomRatesController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::SETTINGS_CONFIGURATION_VIEW);
         $rates = $this->fetchTable('RoomRates');
         $query = $this->scopeToProperty(
             $rates->find()->contain(['Rooms'])->orderBy(['RoomRates.id' => 'ASC'])
@@ -39,9 +40,7 @@ class RoomRatesController extends AppController
     {
         $this->request->allowMethod('post');
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may add rates.');
-        }
+        $this->authorize(Permissions::SETTINGS_ROOM_RATE_MANAGE, 'Only Managers may add rates.');
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -76,9 +75,7 @@ class RoomRatesController extends AppController
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may edit rates.');
-        }
+        $this->authorize(Permissions::SETTINGS_ROOM_RATE_MANAGE, 'Only Managers may edit rates.');
 
         $rates = $this->fetchTable('RoomRates');
         $rate = $this->scopeToProperty($rates->find()->where(['RoomRates.id' => $id]))->firstOrFail();

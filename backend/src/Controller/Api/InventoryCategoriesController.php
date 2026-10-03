@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Inventory categories (Food Stocks, Hygiene Kit, Linens, Utensils, ...).
@@ -16,6 +16,7 @@ class InventoryCategoriesController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::INVENTORY_ITEM_VIEW);
         $categories = $this->fetchTable('InventoryCategories');
         $query = $this->scopeToProperty(
             $categories->find()->contain(['ParentCategories'])->orderBy(['InventoryCategories.name' => 'ASC'])
@@ -33,9 +34,7 @@ class InventoryCategoriesController extends AppController
         $this->request->allowMethod('post');
 
         // Receptionists operate the catalogue; only owners/admins define it.
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may add categories.');
-        }
+        $this->authorize(Permissions::INVENTORY_CATEGORY_MANAGE, 'Only Managers may add categories.');
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -88,9 +87,7 @@ class InventoryCategoriesController extends AppController
     {
         $this->request->allowMethod(['delete', 'post']);
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may delete categories.');
-        }
+        $this->authorize(Permissions::INVENTORY_CATEGORY_MANAGE, 'Only Managers may delete categories.');
 
         $categories = $this->fetchTable('InventoryCategories');
         $category = $this->scopeToProperty($categories->find()->where(['InventoryCategories.id' => $id]))

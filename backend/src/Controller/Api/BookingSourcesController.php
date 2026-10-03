@@ -20,6 +20,7 @@ class BookingSourcesController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::SETTINGS_CONFIGURATION_VIEW);
         $sources = $this->fetchTable('BookingSources');
         $query = $this->scopeToProperty($sources->find()->orderBy(['BookingSources.name' => 'ASC']));
 

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
 
@@ -23,6 +24,7 @@ class GuestsController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::GUESTS_GUEST_VIEW);
         $guests = $this->fetchTable('Guests');
         $query = $this->scopeToProperty(
             $guests->find()->orderBy(['Guests.created' => 'DESC']),
@@ -62,6 +64,7 @@ class GuestsController extends AppController
      */
     public function stats(): void
     {
+        $this->authorize(Permissions::GUESTS_GUEST_VIEW);
         $guests = $this->fetchTable('Guests');
         // The hotel's midnight, not UTC's (see BusinessTime).
         $startOfToday = BusinessTime::startOf(BusinessTime::todayString());
@@ -97,6 +100,7 @@ class GuestsController extends AppController
      */
     public function match(): void
     {
+        $this->authorize(Permissions::GUESTS_GUEST_VIEW);
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
             throw new BadRequestException('property_id is required.');
@@ -119,6 +123,7 @@ class GuestsController extends AppController
      */
     public function view(int $id): void
     {
+        $this->authorize(Permissions::GUESTS_GUEST_VIEW);
         $guests = $this->fetchTable('Guests');
         $guest = $this->scopeToProperty($guests->find()->where(['Guests.id' => $id]))
             ->contain(['Reservations' => ['Rooms']])
@@ -134,6 +139,7 @@ class GuestsController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::GUESTS_GUEST_MANAGE);
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -187,6 +193,7 @@ class GuestsController extends AppController
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
+        $this->authorize(Permissions::GUESTS_GUEST_MANAGE);
         $guests = $this->fetchTable('Guests');
         $guest = $this->scopeToProperty($guests->find()->where(['Guests.id' => $id]))->firstOrFail();
 

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -21,6 +22,7 @@ class FoodOrdersController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::POS_SALE_VIEW);
         $orders = $this->fetchTable('FoodOrders');
         $query = $this->scopeToProperty(
             $orders->find()
@@ -71,6 +73,7 @@ class FoodOrdersController extends AppController
      */
     public function view(int $id): void
     {
+        $this->authorize(Permissions::POS_SALE_VIEW);
         $orders = $this->fetchTable('FoodOrders');
         $order = $this->scopeToProperty($orders->find()->where(['FoodOrders.id' => $id]))
             ->contain(['Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems'], 'FoodOrderDiscounts'])
@@ -88,6 +91,7 @@ class FoodOrdersController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::POS_SALE_MANAGE);
 
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -125,6 +129,7 @@ class FoodOrdersController extends AppController
     public function serve(int $id): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::POS_SALE_MANAGE);
         $orders = $this->fetchTable('FoodOrders');
         $order = $this->scopeToProperty($orders->find()->where(['FoodOrders.id' => $id]))->firstOrFail();
 
@@ -144,13 +149,15 @@ class FoodOrdersController extends AppController
     public function cancel(int $id): void
     {
         $this->request->allowMethod('post');
+        $this->authorize(Permissions::POS_SALE_MANAGE);
         $orders = $this->fetchTable('FoodOrders');
         $order = $this->scopeToProperty($orders->find()->where(['FoodOrders.id' => $id]))->firstOrFail();
 
-        // A receptionist can't reverse a settled transaction: an order that has
-        // been both served and paid is closed business. Owners/admins still may.
+        // An order that has been both served and paid is closed business:
+        // reversing it takes pos.sale.cancel_paid (a Manager), not just
+        // pos.sale.manage.
         if (
-            $this->userHasRole('receptionist')
+            !$this->can(Permissions::POS_SALE_CANCEL_PAID)
             && $order->status === 'served'
             && $order->payment_status === 'paid'
         ) {

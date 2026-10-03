@@ -3,9 +3,9 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Permissions;
 use App\Model\Table\ReceiptSeriesTable;
 use Cake\Http\Exception\BadRequestException;
-use Cake\Http\Exception\ForbiddenException;
 
 /**
  * Receipt booklet series — the pre-printed physical Sales Invoice and
@@ -24,6 +24,7 @@ class ReceiptSeriesController extends AppController
      */
     public function index(): void
     {
+        $this->authorize(Permissions::FINANCE_INVOICE_VIEW);
         $table = $this->fetchTable('ReceiptSeries');
         $query = $this->scopeToProperty(
             $table->find()->orderBy(['ReceiptSeries.type' => 'ASC', 'ReceiptSeries.id' => 'ASC']),
@@ -59,9 +60,7 @@ class ReceiptSeriesController extends AppController
     {
         $this->request->allowMethod('post');
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may register receipt series.');
-        }
+        $this->authorize(Permissions::FINANCE_RECEIPT_SERIES_MANAGE, 'Only Managers may register receipt series.');
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
             throw new BadRequestException('property_id is required.');
@@ -103,9 +102,7 @@ class ReceiptSeriesController extends AppController
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may edit receipt series.');
-        }
+        $this->authorize(Permissions::FINANCE_RECEIPT_SERIES_MANAGE, 'Only Managers may edit receipt series.');
 
         $table = $this->fetchTable('ReceiptSeries');
         $series = $this->scopeToProperty($table->find()->where(['ReceiptSeries.id' => $id]))->firstOrFail();
@@ -130,9 +127,7 @@ class ReceiptSeriesController extends AppController
     {
         $this->request->allowMethod(['delete', 'post']);
 
-        if (!$this->userHasRole('owner', 'admin')) {
-            throw new ForbiddenException('Only Managers may delete receipt series.');
-        }
+        $this->authorize(Permissions::FINANCE_RECEIPT_SERIES_MANAGE, 'Only Managers may delete receipt series.');
 
         $table = $this->fetchTable('ReceiptSeries');
         $series = $this->scopeToProperty($table->find()->where(['ReceiptSeries.id' => $id]))->firstOrFail();
