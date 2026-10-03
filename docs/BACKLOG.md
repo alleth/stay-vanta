@@ -80,6 +80,24 @@ commit (left `queued`) and posts the commit status `perceptive-creation - stay-v
 - [ ] Prove the gate with a deliberately failing test on a throwaway branch wired to it: it must not
   deploy. Timing alone isn't proof (see `b68ce2f`).
 
+## Findings from the event foundation (step 5, decided 2026-10-03)
+
+Carry these into steps 6–10:
+
+- [ ] **Backfills report added and skipped counts**, per table and property, in the log line, not
+  only the final check. (`BackfillActivityIndex` discards what `ActivityBackfill::run()` returns,
+  so its additions had to be worked out from the check.)
+- [ ] **An operational workflow for maintenance commands** on Railway. `bin/cake activity_backfill`,
+  later invoice/reservation backfills and privacy redaction need a sanctioned way to run against
+  staging and production (a one-off job, or `railway ssh` with an approved key), not a local run
+  pointed at a Railway database.
+- [ ] **Event feeds keep one business action together:** events that share a correlation id stay
+  grouped and in recorded order (`ActivityIndexTable::forCorrelation()`).
+- [ ] **`occurred_at` is the authoritative time** of an event. The step 5 feed still shows each
+  record's `created` (same second today); the event feed shows `occurred_at`. For a backdated stay
+  that's when it was recorded, not the stay's dates.
+- The staging deployment gate is tracked above ("CI gate on deployment").
+
 ## Smaller items
 
 - [ ] **Staff accounts can name a property that doesn't exist.** `POST /api/users` as the Platform
