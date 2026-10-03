@@ -172,6 +172,49 @@ class BillingStatesApiTest extends TestCase
         $this->assertSame('settled', $this->listed($id)['billing_state']);
     }
 
+    /**
+     * Hotfix (2026-10-03): cancelling a checked-in stay whose invoice is
+     * settled used to delete its lines from that settled invoice and lower
+     * the Collected of the day it was settled.
+     */
+    public function testAStayOnASettledInvoiceCannotBeCancelled(): void
+    {
+        $id = $this->stay();
+        $this->callAs($this->receptionistToken, 'POST', "/api/reservations/$id/post-room-charge");
+        $this->assertResponseOk();
+        $invoices = $this->getTableLocator()->get('Invoices');
+        $invoiceId = (int)$this->getTableLocator()->get('InvoiceLines')->find()
+            ->where(['source_type' => 'reservation', 'source_id' => $id])->firstOrFail()->invoice_id;
+        $this->callAs($this->receptionistToken, 'POST', "/api/invoices/$invoiceId/settle");
+        $this->assertResponseOk();
+        $totalBefore = (float)$invoices->get($invoiceId)->total;
+        $linesBefore = $this->chargeLines($id);
+        $roomBefore = $this->getTableLocator()->get('Rooms')->get($this->pricedRoom)->status;
+
+        foreach ([$this->receptionistToken, $this->adminToken] as $token) {
+            $this->callAs($token, 'POST', "/api/reservations/$id/cancel");
+            $this->assertResponseCode(400);
+            $this->assertStringContainsString('Its invoice is already settled', (string)$this->responseJson()['message']);
+        }
+
+        $this->assertSame($totalBefore, (float)$invoices->get($invoiceId)->total, 'the settled invoice is untouched');
+        $this->assertSame($linesBefore, $this->chargeLines($id));
+        $this->assertSame('checked_in', $this->getTableLocator()->get('Reservations')->get($id)->status);
+        $this->assertSame($roomBefore, $this->getTableLocator()->get('Rooms')->get($this->pricedRoom)->status);
+    }
+
+    public function testAStayOnAnOpenInvoiceCanStillBeCancelled(): void
+    {
+        $id = $this->stay();
+        $this->callAs($this->receptionistToken, 'POST', "/api/reservations/$id/post-room-charge");
+        $this->assertResponseOk();
+
+        $this->callAs($this->receptionistToken, 'POST', "/api/reservations/$id/cancel");
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $this->assertSame('cancelled', $this->getTableLocator()->get('Reservations')->get($id)->status);
+        $this->assertSame('not_billed', $this->listed($id)['billing_state'], 'its charge is reversed off the open invoice');
+    }
+
     public function testAStayWithoutAGuestCannotBePostedAndSaysWhy(): void
     {
         $id = $this->stay(['guest_id' => null]);

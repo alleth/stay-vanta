@@ -843,6 +843,14 @@ class ReservationsController extends AppController
             ));
         }
 
+        // A reservation whose room charge sits on a settled invoice is part of
+        // the books (see isSettled()): cancelling it would remove billed lines
+        // from that invoice and lower the Collected of the day it was settled.
+        if ($transition === 'cancel' && $this->isSettled($reservation)) {
+            throw new BadRequestException(
+                'Its invoice is already settled, so this reservation can no longer be cancelled.',
+            );
+        }
         $fromStatus = $reservation->status;
         $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $rule, $transition, $fromStatus) {
             $reservation->set('status', $rule['to']);
