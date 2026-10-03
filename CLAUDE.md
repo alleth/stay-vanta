@@ -166,6 +166,14 @@ changes record nobody.
   cancelled twice). **Required for** invoice settlement, reservation check-in, check-out and
   correction, expense approvals, purchase order approvals, and every future ledgered action.
   Each gets a test that the second of two identical requests is refused and records nothing.
+- **Backfills (decided 2026-10-03)** that create events or index rows for history must be:
+  **idempotent** (a second run adds nothing: skip what's already recorded, by unique key);
+  **auditable** (rows marked `source = 'import'`, correlation id `import-<table>-<id>`, and a
+  self-check of counts logged per property); **repeatable** (a re-runnable command beside the
+  migration, batched, each batch its own transaction). **Never invent a fact the data didn't
+  record:** no actor where none was stored (`actor_id` NULL, `source = 'import'`), no reason, no
+  event that wasn't observed (e.g. a cancellation whose canceller is unknown isn't backfilled as one
+  by someone).
 - **Append-only:** event tables refuse updates and deletes (`beforeSave`/`beforeDelete`). A mistake
   is corrected by a new event that references the original. No hard deletes of business records:
   soft delete plus a `deleted` event.

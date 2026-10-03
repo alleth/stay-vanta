@@ -66,6 +66,13 @@ A type in `REQUIRES_REASON` can't be recorded without one; the endpoint also che
 lists required types still accepted without a reason during a compatibility window (a released
 frontend can't send one yet). Grace entries are removed in the release that closes the window.
 
+## Backfills
+
+Every backfill of history into a ledger or `activity_index` is **idempotent** (re-running adds
+nothing), **auditable** (`source = 'import'`, `import-<table>-<id>` correlation ids, a per-property
+count check logged) and **repeatable** (a batched command beside the migration). It never invents
+what the data didn't record: no actor, no reason, no unobserved event.
+
 ## Privacy
 
 Snapshots keep the minimum: ids, amounts, states, room numbers and a guest's id and display name.
