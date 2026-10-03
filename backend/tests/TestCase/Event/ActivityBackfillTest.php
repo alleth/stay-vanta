@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Test\TestCase\Event;
 
 use App\Event\ActivityBackfill;
+use App\Event\EventContext;
 use App\Test\TestCase\Controller\Api\ApiScenarioTrait;
 use Cake\Database\Connection;
 use Cake\I18n\DateTime;
@@ -95,8 +96,8 @@ class ActivityBackfillTest extends TestCase
         $this->historicalMovement(new DateTime('2026-08-02 08:00:00'));
         $this->historicalOrder();
 
-        $this->assertSame(['placed_events' => 1, 'order_index' => 1, 'stock_index' => 2], $this->backfill());
-        $this->assertSame(['placed_events' => 0, 'order_index' => 0, 'stock_index' => 0], $this->backfill());
+        $this->assertSame(['placed_events' => 1, 'order_index' => 1, 'stock_index' => 2, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0], $this->backfill());
+        $this->assertSame(['placed_events' => 0, 'order_index' => 0, 'stock_index' => 0, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0], $this->backfill());
 
         $counts = (new ActivityBackfill($this->connection))->check($this->propertyId)[$this->propertyId];
         $this->assertSame(2, $counts['stock_indexed']);
@@ -149,7 +150,7 @@ class ActivityBackfillTest extends TestCase
         $this->assertResponseCode(201);
         $indexed = $this->getTableLocator()->get('ActivityIndex')->find()->where(['property_id' => $this->propertyId])->count();
 
-        $this->assertSame(['placed_events' => 0, 'order_index' => 0, 'stock_index' => 0], $this->backfill());
+        $this->assertSame(['placed_events' => 0, 'order_index' => 0, 'stock_index' => 0, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0], $this->backfill());
         $this->assertSame(
             $indexed,
             $this->getTableLocator()->get('ActivityIndex')->find()->where(['property_id' => $this->propertyId])->count(),
@@ -177,5 +178,75 @@ class ActivityBackfillTest extends TestCase
             0,
             $this->getTableLocator()->get('ActivityIndex')->find()->where(['property_id' => $this->propertyId])->count(),
         );
+    }
+
+    /**
+     * Invoices from before step 6: opened, each line, and the settlement are
+     * recorded at the times history kept, with no actor, no reason, and no
+     * amount or total it can't vouch for.
+     */
+    public function testInvoiceHistoryIsRecordedWithoutInventingAnything(): void
+    {
+        $invoiceId = $this->insertRow('Invoices', [
+            'property_id' => $this->propertyId, 'guest_id' => $this->guestId, 'status' => 'settled', 'total' => 1500,
+            'invoice_number' => 'SI-0007', 'or_number' => 'OR-0003',
+            'created' => new DateTime('2026-08-10 09:00:00'), 'settled_at' => new DateTime('2026-08-11 12:00:00'),
+        ]);
+        $lineId = $this->insertRow('InvoiceLines', [
+            'invoice_id' => $invoiceId, 'description' => 'Room charge', 'amount' => 1500,
+            'source_type' => 'reservation', 'source_id' => 99, 'created' => new DateTime('2026-08-10 09:00:00'),
+        ]);
+        // A line with no recorded time is left out and counted, not given a time.
+        $this->connection->insert('invoice_lines', [
+            'invoice_id' => $invoiceId, 'description' => 'Old fee', 'amount' => 0,
+            'source_type' => 'manual', 'source_id' => 1,
+        ]);
+
+        $added = $this->backfill();
+        $this->assertSame(1, $added['invoice_opened_events']);
+        $this->assertSame(1, $added['invoice_line_events']);
+        $this->assertSame(1, $added['invoice_settled_events']);
+        $this->assertSame(3, $added['invoice_index']);
+
+        $events = $this->getTableLocator()->get('InvoiceEvents')->find()
+            ->where(['invoice_id' => $invoiceId])->orderBy(['id' => 'ASC'])->all()->toList();
+        $this->assertSame(['opened', 'line_added', 'settled'], array_map(fn($e) => $e->event_type, $events));
+        foreach ($events as $e) {
+            $this->assertNull($e->actor_id, 'history never recorded who');
+            $this->assertNull($e->actor_role);
+            $this->assertNull($e->reason);
+            $this->assertSame('import', $e->source);
+            $this->assertStringStartsWith('import-', $e->correlation_id);
+        }
+        [$opened, $line, $settled] = $events;
+        $this->assertSame('2026-08-10 09:00:00', $opened->occurred_at->format('Y-m-d H:i:s'));
+        $this->assertSame($lineId, (int)$line->invoice_line_id);
+        $this->assertSame(1500.0, (float)$line->amount);
+        $this->assertNull($line->total_after, 'a running total history can\'t vouch for');
+        $this->assertSame('2026-08-11 12:00:00', $settled->occurred_at->format('Y-m-d H:i:s'), 'when it was settled');
+        $this->assertSame('SI-0007', $settled->invoice_number);
+        $this->assertSame('OR-0003', $settled->or_number);
+        $this->assertNull($settled->amount, 'the amount then isn\'t known for sure');
+
+        $this->assertSame(0, $this->backfill()['invoice_index'], 'a second run adds nothing');
+        $check = (new ActivityBackfill($this->connection))->check($this->propertyId)[$this->propertyId];
+        $this->assertTrue($check['complete']);
+        $this->assertSame(1, $check['lines_undated']);
+    }
+
+    public function testInvoiceEventsRecordedLiveAreNotDoubled(): void
+    {
+        /** @var \App\Model\Table\InvoicesTable $invoices */
+        $invoices = $this->getTableLocator()->get('Invoices');
+        $context = new EventContext($this->deskId, 'receptionist', $this->propertyId, 'corr-live');
+        $invoice = $invoices->openInvoiceFor($context, $this->propertyId, $this->guestId);
+        $invoices->addLine($context, $invoice, 'Minibar', 250, 'manual', 1);
+        $invoices->settle($context, $invoices->get($invoice->id), false, false);
+
+        $added = $this->backfill();
+        $this->assertSame(0, $added['invoice_opened_events']);
+        $this->assertSame(0, $added['invoice_line_events']);
+        $this->assertSame(0, $added['invoice_settled_events']);
+        $this->assertSame(0, $added['invoice_index']);
     }
 }

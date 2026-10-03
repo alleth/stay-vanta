@@ -59,6 +59,16 @@ per record showing its current state. In step 5 the feed stays visually identica
 (`ActivityFeedApiTest` pins it: an order shows its current status). It moves to event lines when
 the invoice and reservation ledgers arrive (steps 6 and 8), with a test for each new line type.
 
+**Step 6: the first event lines.** Invoice events appear as their own lines (`type: 'invoice'`):
+`settled` (with SI/OR numbers), `settled_on_creation` (downpayment collected), `line_reversed`
+(with the line and reason), `line_reversed_on_cancel` and `refund_recorded`. `opened` and
+`line_added` stay out: every sale and stay posts them and the sale lines already show. These lines
+show the event as it happened, at `occurred_at` with its actor and amount; imported history has
+`actor: null` and `recorded: false` and the screen says "Not recorded". Stock and sale lines are
+unchanged (`FeedEquivalenceApiTest`). At the same instant: stock, then sales, then invoice events.
+Grouping one action's events under its correlation id is for the step 8 feed redesign
+(`docs/BACKLOG.md`).
+
 ## Reasons
 
 A type in `REQUIRES_REASON` can't be recorded without one; the endpoint also checks first with

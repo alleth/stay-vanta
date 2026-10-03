@@ -45,23 +45,27 @@ class ActivityBackfillCommand extends Command
 
         if (!$args->getOption('check-only')) {
             foreach ($backfill->run($propertyId) as $what => $count) {
-                $io->out(sprintf('%-14s %d added', $what, $count));
+                $io->out(sprintf('%-24s %d added', $what, $count));
             }
         }
         $incomplete = 0;
         foreach ($backfill->check($propertyId) as $id => $c) {
-            $ok = $c['stock_indexed'] === $c['stock'] - $c['stock_undated']
-                && $c['placed'] === $c['orders'] - $c['orders_undated']
-                && $c['placed_indexed'] === $c['placed'];
+            $ok = (bool)$c['complete'];
             $incomplete += $ok ? 0 : 1;
             $io->out(sprintf(
-                'property %d: stock %d/%d indexed, orders %d/%d placed and %d indexed%s',
+                'property %d: stock %d/%d indexed, orders %d/%d placed and %d indexed; invoices %d (%d unopened, '
+                . '%d lines unrecorded, %d settled unrecorded, %d events unindexed)%s',
                 $id,
                 $c['stock_indexed'],
                 $c['stock'],
                 $c['placed'],
                 $c['orders'],
                 $c['placed_indexed'],
+                $c['invoices'],
+                $c['invoices_unopened'],
+                $c['lines_unrecorded'],
+                $c['settled_unrecorded'],
+                $c['invoice_unindexed'],
                 $ok ? '' : '  <- INCOMPLETE',
             ));
         }

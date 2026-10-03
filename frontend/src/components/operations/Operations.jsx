@@ -526,7 +526,34 @@ export function InventoryMonitor({ inventory }) {
 
 /* ----------------------------------------------------------------- Staff */
 
+// Invoice events (build step 6) read as what happened to the invoice.
+function invoiceText(e) {
+  const inv = `Invoice #${e.invoice_id}`
+  const guest = e.guest ? ` · ${e.guest}` : ''
+  const amount = e.amount ?? e.total
+  const money = amount != null ? ` · ${formatMoney(amount)}` : ''
+  const why = e.reason ? ` · “${e.reason}”` : ''
+  switch (e.event) {
+    case 'settled': {
+      const numbers = [e.invoice_number && `SI ${e.invoice_number}`, e.or_number && `OR ${e.or_number}`]
+        .filter(Boolean).join(' / ')
+      return `Settled ${inv}${money}${numbers ? ` · ${numbers}` : ''}${guest}`
+    }
+    case 'settled_on_creation':
+      return `Downpayment collected · ${inv}${money}${guest}`
+    case 'line_reversed':
+      return `Reversed “${e.line ?? 'a line'}” on ${inv}${money}${why}`
+    case 'line_reversed_on_cancel':
+      return `Reversed “${e.line ?? 'a line'}” on ${inv} (cancelled)${money}`
+    case 'refund_recorded':
+      return `Downpayment refunded · ${inv}${money}${guest}`
+    default:
+      return `${inv} · ${e.event}`
+  }
+}
+
 function activityText(e) {
+  if (e.type === 'invoice') return invoiceText(e)
   if (e.type === 'stock') {
     const sign = e.direction === 'in' ? '+' : '−'
     return `${sign}${qty(e.quantity)} ${e.unit ?? ''} ${e.item ?? 'item'}${e.reason ? ` · ${e.reason}` : ''}`
@@ -541,7 +568,9 @@ function ActivityItem({ e }) {
   return (
     <ListGroup.Item className="px-4 py-2">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 truncate font-medium">{e.actor ?? 'Unknown'}</span>
+        <span className="min-w-0 truncate font-medium">
+          {e.actor ?? (e.recorded === false ? 'Not recorded' : 'Unknown')}
+        </span>
         <span className="shrink-0 text-xs tabular-nums text-muted">{when(e.at)}</span>
       </div>
       <div className="truncate text-muted" title={activityText(e)}>{activityText(e)}</div>

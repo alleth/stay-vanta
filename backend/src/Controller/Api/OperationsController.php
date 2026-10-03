@@ -6,6 +6,7 @@ namespace App\Controller\Api;
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
+use App\Model\Table\InvoiceEventsTable;
 use Cake\Http\Exception\BadRequestException;
 
 /**
@@ -19,6 +20,19 @@ class OperationsController extends AppController
 {
     /** How many rows each dashboard list shows; the module behind it has the rest. */
     private const LIST_LIMIT = 8;
+
+    /**
+     * Invoice events shown in the activity feed as their own lines (step 6).
+     * `opened` and `line_added` stay out: every sale and stay posts them, and
+     * the sale lines already show.
+     */
+    private const FEED_INVOICE_EVENTS = [
+        InvoiceEventsTable::SETTLED,
+        InvoiceEventsTable::SETTLED_ON_CREATION,
+        InvoiceEventsTable::LINE_REVERSED,
+        InvoiceEventsTable::LINE_REVERSED_ON_CANCEL,
+        InvoiceEventsTable::REFUND_RECORDED,
+    ];
 
     /** The trailing window for the sales trend, top sellers and most-used stock. */
     private const TREND_DAYS = 7;
@@ -584,15 +598,19 @@ class OperationsController extends AppController
                 'OR' => [
                     ['event_table' => 'stock_movements'],
                     ['event_table' => 'food_order_events', 'event_type' => 'placed'],
+                    ['event_table' => 'invoice_events', 'event_type IN' => self::FEED_INVOICE_EVENTS],
                 ],
             ])
             ->orderBy(['occurred_at' => 'DESC'])
-            ->orderBy(fn($exp, $q) => $q->expr("CASE event_table WHEN 'stock_movements' THEN 0 ELSE 1 END"))
+            ->orderBy(fn($exp, $q) => $q->expr(
+                "CASE event_table WHEN 'stock_movements' THEN 0 WHEN 'food_order_events' THEN 1 ELSE 2 END",
+            ))
             // Later movement first, later sale first (by order id: a sale's
             // placed event may be backfilled after a newer sale recorded live).
             ->orderBy(fn($exp, $q) => $q->expr(
                 "CASE event_table WHEN 'stock_movements' THEN event_id ELSE subject_id END DESC",
             ))
+            ->orderBy(['id' => 'DESC'])
             ->limit($limit)
             ->offset($offset)
             ->disableHydration()
@@ -601,13 +619,17 @@ class OperationsController extends AppController
 
         $movementIds = [];
         $orderIds = [];
+        $invoiceEventIds = [];
         foreach ($rows as $row) {
             if ($row['event_table'] === 'stock_movements') {
                 $movementIds[] = (int)$row['event_id'];
+            } elseif ($row['event_table'] === 'invoice_events') {
+                $invoiceEventIds[] = (int)$row['event_id'];
             } else {
                 $orderIds[] = (int)$row['subject_id'];
             }
         }
+        $invoiceLines = $this->invoiceFeedLines($invoiceEventIds);
         $movements = $movementIds === [] ? [] : $this->fetchTable('StockMovements')->find()
             ->contain([
                 'InventoryItems' => ['fields' => ['id', 'name', 'unit']],
@@ -643,6 +665,12 @@ class OperationsController extends AppController
                 }
                 continue;
             }
+            if ($row['event_table'] === 'invoice_events') {
+                if (isset($invoiceLines[(int)$row['event_id']])) {
+                    $events[] = $invoiceLines[(int)$row['event_id']];
+                }
+                continue;
+            }
             $o = $orders[(int)$row['subject_id']] ?? null;
             if ($o !== null) {
                 $events[] = [
@@ -660,5 +688,55 @@ class OperationsController extends AppController
         }
 
         return $events;
+    }
+
+    /**
+     * Feed lines for invoice events (build step 6: the feed starts showing
+     * business events as their own lines). Unlike stock and sale lines, these
+     * show the event as it happened: its time (`occurred_at`), who did it,
+     * its amount, receipt numbers and reason. An event imported from before
+     * step 6 has no recorded actor: `actor` is null and `recorded` false, so
+     * the screen can say so rather than guess. The guest and the invoice's
+     * total are read now.
+     *
+     * @param list<int> $eventIds invoice_events ids on this page.
+     * @return array<int, array<string, mixed>> Feed line per event id.
+     */
+    private function invoiceFeedLines(array $eventIds): array
+    {
+        if ($eventIds === []) {
+            return [];
+        }
+        $events = $this->fetchTable('InvoiceEvents')->find()->where(['id IN' => $eventIds])->all()->toList();
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($e) => $e->actor_id, $events))));
+        $actors = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+        $invoiceIds = array_values(array_unique(array_map(fn($e) => (int)$e->invoice_id, $events)));
+        $invoices = $this->fetchTable('Invoices')->find()
+            ->contain(['Guests' => ['fields' => ['id', 'full_name']]])
+            ->where(['Invoices.id IN' => $invoiceIds])->all()->indexBy('id')->toArray();
+
+        $lines = [];
+        foreach ($events as $e) {
+            $invoice = $invoices[(int)$e->invoice_id] ?? null;
+            $lines[(int)$e->id] = [
+                'type' => 'invoice',
+                'id' => 'invoice-event-' . $e->id,
+                'at' => $e->occurred_at,
+                'actor' => $e->actor_id !== null ? ($actors[$e->actor_id] ?? null) : null,
+                'recorded' => $e->source !== 'import',
+                'event' => $e->event_type,
+                'invoice_id' => (int)$e->invoice_id,
+                'amount' => $e->amount !== null ? round((float)$e->amount, 2) : null,
+                'total' => $invoice !== null ? round((float)$invoice->total, 2) : null,
+                'guest' => $invoice?->guest?->full_name,
+                'invoice_number' => $e->invoice_number,
+                'or_number' => $e->or_number,
+                'line' => $e->changes['reverses']['description'] ?? null,
+                'reason' => $e->reason,
+            ];
+        }
+
+        return $lines;
     }
 }

@@ -40,23 +40,29 @@ final class ActivityBackfill
      * Backfill everything not yet indexed; optionally one property only.
      *
      * @param int|null $propertyId Limit to one property (tests, targeted re-runs).
-     * @return array{placed_events: int, order_index: int, stock_index: int}
+     * @return array<string, int> Rows added per step.
      */
     public function run(?int $propertyId = null): array
     {
         $added = [
-            // Orders first: their index rows are made from these events.
+            // Events first: index rows are made from them.
             'placed_events' => $this->inBatches('food_orders', $propertyId, $this->placedEventsSql()),
             'order_index' => $this->inBatches('food_order_events', $propertyId, $this->orderIndexSql()),
             'stock_index' => $this->inBatches('stock_movements', $propertyId, $this->stockIndexSql()),
+            'invoice_opened_events' => $this->inBatches('invoices', $propertyId, $this->invoiceOpenedSql()),
+            'invoice_line_events' => $this->inBatches('invoice_lines', $propertyId, $this->invoiceLineSql()),
+            'invoice_settled_events' => $this->inBatches('invoices', $propertyId, $this->invoiceSettledSql()),
+            'invoice_index' => $this->inBatches('invoice_events', $propertyId, $this->invoiceIndexSql()),
         ];
         // Auditable: what this run added (anything already recorded was skipped).
+        $parts = [];
+        foreach ($added as $what => $count) {
+            $parts[] = "$what=$count";
+        }
         Log::info(sprintf(
-            'activity backfill run%s: added %d placed events, %d order index rows, %d stock index rows',
+            'activity backfill run%s: added %s',
             $propertyId !== null ? " (property $propertyId)" : '',
-            $added['placed_events'],
-            $added['order_index'],
-            $added['stock_index'],
+            implode(', ', $parts),
         ));
 
         return $added;
@@ -66,7 +72,10 @@ final class ActivityBackfill
      * Compare what exists with what's indexed, per property, and log it:
      * `info` when complete, `warning` when anything is missing.
      *
-     * @return array<int, array<string, int>> Counts per property id.
+     * Rows with no recorded time are left out of the backfill and counted
+     * here as undated, never given an invented time.
+     *
+     * @return array<int, array<string, int|bool>> Counts per property id, plus `complete`.
      */
     public function check(?int $propertyId = null): array
     {
@@ -83,7 +92,26 @@ final class ActivityBackfill
                 (SELECT COUNT(*) FROM food_order_events e WHERE e.property_id = p.id
                     AND e.event_type = 'placed') AS placed,
                 (SELECT COUNT(*) FROM activity_index a WHERE a.property_id = p.id
-                    AND a.event_table = 'food_order_events' AND a.event_type = 'placed') AS placed_indexed
+                    AND a.event_table = 'food_order_events' AND a.event_type = 'placed') AS placed_indexed,
+                (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id) AS invoices,
+                (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.created IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_id = i.id
+                        AND e.event_type = 'opened')) AS invoices_unopened,
+                (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.created IS NULL) AS invoices_undated,
+                (SELECT COUNT(*) FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id
+                    WHERE i.property_id = p.id AND l.reverses_line_id IS NULL AND l.created IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_line_id = l.id)) AS lines_unrecorded,
+                (SELECT COUNT(*) FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id
+                    WHERE i.property_id = p.id AND l.created IS NULL) AS lines_undated,
+                (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.status = 'settled'
+                    AND i.settled_at IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_id = i.id
+                        AND e.event_type IN ('settled', 'settled_on_creation'))) AS settled_unrecorded,
+                (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.status = 'settled'
+                    AND i.settled_at IS NULL) AS settled_undated,
+                (SELECT COUNT(*) FROM invoice_events e WHERE e.property_id = p.id
+                    AND NOT EXISTS (SELECT 1 FROM activity_index a WHERE a.event_table = 'invoice_events'
+                        AND a.event_id = e.id)) AS invoice_unindexed
             FROM properties p $where ORDER BY p.id",
         )->fetchAll('assoc');
 
@@ -92,14 +120,20 @@ final class ActivityBackfill
             $counts = array_map('intval', $row);
             $id = $counts['id'];
             unset($counts['id']);
-            $result[$id] = $counts;
 
             $complete = $counts['stock_indexed'] === $counts['stock'] - $counts['stock_undated']
                 && $counts['placed'] === $counts['orders'] - $counts['orders_undated']
-                && $counts['placed_indexed'] === $counts['placed'];
+                && $counts['placed_indexed'] === $counts['placed']
+                && $counts['invoices_unopened'] === 0
+                && $counts['lines_unrecorded'] === 0
+                && $counts['settled_unrecorded'] === 0
+                && $counts['invoice_unindexed'] === 0;
+            $result[$id] = $counts + ['complete' => $complete];
+
             $line = sprintf(
                 'activity backfill check, property %d: stock %d/%d indexed (%d undated), orders %d/%d placed, '
-                . '%d/%d indexed (%d undated)',
+                . '%d/%d indexed (%d undated); invoices %d: %d unopened, %d lines unrecorded, '
+                . '%d settled unrecorded, %d events unindexed (undated: %d invoices, %d lines, %d settlements)',
                 $id,
                 $counts['stock_indexed'],
                 $counts['stock'],
@@ -109,6 +143,14 @@ final class ActivityBackfill
                 $counts['placed_indexed'],
                 $counts['placed'],
                 $counts['orders_undated'],
+                $counts['invoices'],
+                $counts['invoices_unopened'],
+                $counts['lines_unrecorded'],
+                $counts['settled_unrecorded'],
+                $counts['invoice_unindexed'],
+                $counts['invoices_undated'],
+                $counts['lines_undated'],
+                $counts['settled_undated'],
             );
             $complete ? Log::info($line) : Log::warning($line . ' — INCOMPLETE');
         }
@@ -213,6 +255,96 @@ final class ActivityBackfill
                 AND COALESCE(m.occurred_at, m.created) IS NOT NULL
                 AND NOT EXISTS (
                     SELECT 1 FROM activity_index a WHERE a.event_table = 'stock_movements' AND a.event_id = m.id
+                )";
+    }
+
+    /**
+     * An `opened` event for every invoice without one, at its `created`. Who
+     * opened it was never recorded: no actor.
+     */
+    private function invoiceOpenedSql(): string
+    {
+        return "INSERT INTO invoice_events
+                (property_id, invoice_id, event_type, actor_id, actor_role, source, reason, changes, snapshot,
+                 correlation_id, occurred_at, corrects_event_id, amount, total_after, invoice_line_id,
+                 invoice_number, or_number, created)
+            SELECT i.property_id, i.id, 'opened', NULL, NULL, 'import', NULL, NULL,
+                JSON_OBJECT('guest_id', i.guest_id, 'guest_name', g.full_name, 'reservation_id', i.reservation_id),
+                CONCAT('import-invoices-', i.id), i.created, NULL, NULL, NULL, NULL, NULL, NULL, UTC_TIMESTAMP()
+            FROM invoices i
+            LEFT JOIN guests g ON g.id = i.guest_id
+            WHERE i.id BETWEEN :from AND :to
+                i__PROPERTY__
+                AND i.created IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_id = i.id AND e.event_type = 'opened')";
+    }
+
+    /**
+     * A `line_added` event for every original line without an event, at the
+     * line's `created`, with its amount. The total after it isn't recorded
+     * (lines deleted before step 6 make any running sum unreliable): NULL.
+     */
+    private function invoiceLineSql(): string
+    {
+        return "INSERT INTO invoice_events
+                (property_id, invoice_id, event_type, actor_id, actor_role, source, reason, changes, snapshot,
+                 correlation_id, occurred_at, corrects_event_id, amount, total_after, invoice_line_id,
+                 invoice_number, or_number, created)
+            SELECT i.property_id, l.invoice_id, 'line_added', NULL, NULL, 'import', NULL,
+                JSON_OBJECT('line', JSON_OBJECT('description', l.description,
+                    'source', CONCAT(COALESCE(l.source_type, ''), ':', COALESCE(l.source_id, '')))),
+                NULL, CONCAT('import-invoice_lines-', l.id), l.created, NULL, l.amount, NULL, l.id,
+                NULL, NULL, UTC_TIMESTAMP()
+            FROM invoice_lines l
+            JOIN invoices i ON i.id = l.invoice_id
+            WHERE l.id BETWEEN :from AND :to
+                i__PROPERTY__
+                AND l.created IS NOT NULL
+                AND l.reverses_line_id IS NULL
+                AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_line_id = l.id)";
+    }
+
+    /**
+     * A `settled` event for every settled invoice without one, at its
+     * `settled_at`, with its receipt numbers. The amount at that moment isn't
+     * known for sure (lines could change a settled invoice before step 6): NULL.
+     */
+    private function invoiceSettledSql(): string
+    {
+        return "INSERT INTO invoice_events
+                (property_id, invoice_id, event_type, actor_id, actor_role, source, reason, changes, snapshot,
+                 correlation_id, occurred_at, corrects_event_id, amount, total_after, invoice_line_id,
+                 invoice_number, or_number, created)
+            SELECT i.property_id, i.id, 'settled', NULL, NULL, 'import', NULL,
+                JSON_OBJECT('status', JSON_ARRAY('open', 'settled')),
+                JSON_OBJECT('guest_id', i.guest_id, 'guest_name', g.full_name, 'reservation_id', i.reservation_id),
+                CONCAT('import-invoices-', i.id, '-settled'), i.settled_at, NULL, NULL, NULL, NULL,
+                i.invoice_number, i.or_number, UTC_TIMESTAMP()
+            FROM invoices i
+            LEFT JOIN guests g ON g.id = i.guest_id
+            WHERE i.id BETWEEN :from AND :to
+                i__PROPERTY__
+                AND i.status = 'settled'
+                AND i.settled_at IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_id = i.id
+                    AND e.event_type IN ('settled', 'settled_on_creation'))";
+    }
+
+    /**
+     * An index row for every invoice event without one.
+     */
+    private function invoiceIndexSql(): string
+    {
+        return "INSERT INTO activity_index
+                (property_id, occurred_at, actor_id, subject_type, subject_id, event_table, event_id,
+                 event_type, correlation_id, summary, created)
+            SELECT e.property_id, e.occurred_at, e.actor_id, 'invoice', e.invoice_id,
+                'invoice_events', e.id, e.event_type, e.correlation_id, e.snapshot, UTC_TIMESTAMP()
+            FROM invoice_events e
+            WHERE e.id BETWEEN :from AND :to
+                e__PROPERTY__
+                AND NOT EXISTS (
+                    SELECT 1 FROM activity_index a WHERE a.event_table = 'invoice_events' AND a.event_id = e.id
                 )";
     }
 }
