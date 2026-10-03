@@ -541,6 +541,21 @@ class FoodOrdersTable extends Table
                 }
                 $afterPayment = $locked->status === 'served' && $locked->payment_status === 'paid';
 
+                // A sale charged to a room sits on the guest's invoice. Once
+                // that invoice is settled it's final (its SI/OR may be printed
+                // and it counts as collected on its day), so the sale can no
+                // longer be cancelled: removing its line would rewrite a
+                // settled invoice and lower that day's Collected.
+                if ($locked->payment_status === 'charge_to_room') {
+                    $invoice = TableRegistry::getTableLocator()->get('Invoices')
+                        ->invoiceForLine('food_order', (int)$locked->id);
+                    if ($invoice !== null && $invoice->status === 'settled') {
+                        throw new RuntimeException(
+                            'This sale is on a settled invoice, so it can no longer be cancelled.',
+                        );
+                    }
+                }
+
                 $orderItems = TableRegistry::getTableLocator()->get('FoodOrderItems');
                 $stock = TableRegistry::getTableLocator()->get('StockMovements');
                 $inventory = TableRegistry::getTableLocator()->get('InventoryItems');

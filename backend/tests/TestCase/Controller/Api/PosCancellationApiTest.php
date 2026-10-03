@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
 
+use Cake\I18n\DateTime;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\TestSuite\IntegrationTestTrait;
 use Cake\TestSuite\TestCase;
@@ -95,5 +96,66 @@ class PosCancellationApiTest extends TestCase
         $id = $this->order('cancelled', 'unpaid');
         $this->callAs($this->tokens['admin'], 'POST', "/api/food-orders/$id/cancel");
         $this->assertResponseCode(400);
+    }
+
+    /**
+     * Hotfix (2026-10-03): a sale charged to a room whose invoice is settled
+     * can't be cancelled. Before, cancelling it deleted the line from the
+     * settled invoice and lowered its total, rewriting that day's Collected.
+     */
+    public function testASaleOnASettledInvoiceCannotBeCancelled(): void
+    {
+        $guestId = $this->insertRow('Guests', [
+            'property_id' => $this->propertyId, 'full_name' => 'Cora Lim', 'guest_type' => 'local',
+        ]);
+        $orderId = $this->insertRow('FoodOrders', [
+            'property_id' => $this->propertyId, 'receptionist_id' => $this->userIdFor($this->tokens['admin']),
+            'guest_id' => $guestId, 'status' => 'served', 'payment_status' => 'charge_to_room',
+            'total' => 300, 'total_diners' => 1,
+        ]);
+        $invoiceId = $this->insertRow('Invoices', [
+            'property_id' => $this->propertyId, 'guest_id' => $guestId, 'status' => 'settled',
+            'total' => 300, 'settled_at' => new DateTime('2026-09-30 10:00:00'),
+        ]);
+        $this->insertRow('InvoiceLines', [
+            'invoice_id' => $invoiceId, 'description' => "Food order #$orderId", 'amount' => 300,
+            'source_type' => 'food_order', 'source_id' => $orderId,
+        ]);
+
+        foreach (['receptionist', 'admin'] as $role) {
+            $this->callAs($this->tokens[$role], 'POST', "/api/food-orders/$orderId/cancel", ['reason' => 'test']);
+            $this->assertResponseCode(400, $role);
+            $this->assertStringContainsString('settled invoice', (string)$this->responseJson()['message']);
+        }
+
+        $invoice = $this->getTableLocator()->get('Invoices')->get($invoiceId);
+        $this->assertSame(300.0, (float)$invoice->total, 'the settled invoice is untouched');
+        $this->assertSame(1, $this->getTableLocator()->get('InvoiceLines')->find()->where(['invoice_id' => $invoiceId])->count());
+        $this->assertSame('served', $this->getTableLocator()->get('FoodOrders')->get($orderId)->status);
+        $this->assertSame(0, $this->getTableLocator()->get('FoodOrderEvents')->find()
+            ->where(['food_order_id' => $orderId, 'event_type IN' => ['cancelled', 'cancelled_after_payment']])->count());
+    }
+
+    public function testASaleOnAnOpenInvoiceCanStillBeCancelled(): void
+    {
+        $guestId = $this->insertRow('Guests', [
+            'property_id' => $this->propertyId, 'full_name' => 'Dan Uy', 'guest_type' => 'local',
+        ]);
+        $orderId = $this->insertRow('FoodOrders', [
+            'property_id' => $this->propertyId, 'receptionist_id' => $this->userIdFor($this->tokens['admin']),
+            'guest_id' => $guestId, 'status' => 'served', 'payment_status' => 'charge_to_room',
+            'total' => 120, 'total_diners' => 1,
+        ]);
+        $invoiceId = $this->insertRow('Invoices', [
+            'property_id' => $this->propertyId, 'guest_id' => $guestId, 'status' => 'open', 'total' => 120,
+        ]);
+        $this->insertRow('InvoiceLines', [
+            'invoice_id' => $invoiceId, 'description' => "Food order #$orderId", 'amount' => 120,
+            'source_type' => 'food_order', 'source_id' => $orderId,
+        ]);
+
+        $this->callAs($this->tokens['receptionist'], 'POST', "/api/food-orders/$orderId/cancel");
+        $this->assertResponseOk();
+        $this->assertSame(0.0, (float)$this->getTableLocator()->get('Invoices')->get($invoiceId)->total);
     }
 }
