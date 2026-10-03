@@ -44,15 +44,22 @@ final class ActivityBackfill
      */
     public function run(?int $propertyId = null): array
     {
+        // Invoice steps only once invoice_events exists: on a fresh database
+        // the step 5 migration runs this before step 6 creates that table.
+        $invoices = $this->hasInvoiceEvents();
         $added = [
             // Events first: index rows are made from them.
             'placed_events' => $this->inBatches('food_orders', $propertyId, $this->placedEventsSql()),
             'order_index' => $this->inBatches('food_order_events', $propertyId, $this->orderIndexSql()),
             'stock_index' => $this->inBatches('stock_movements', $propertyId, $this->stockIndexSql()),
-            'invoice_opened_events' => $this->inBatches('invoices', $propertyId, $this->invoiceOpenedSql()),
-            'invoice_line_events' => $this->inBatches('invoice_lines', $propertyId, $this->invoiceLineSql()),
-            'invoice_settled_events' => $this->inBatches('invoices', $propertyId, $this->invoiceSettledSql()),
-            'invoice_index' => $this->inBatches('invoice_events', $propertyId, $this->invoiceIndexSql()),
+            'invoice_opened_events' => $invoices
+                ? $this->inBatches('invoices', $propertyId, $this->invoiceOpenedSql()) : 0,
+            'invoice_line_events' => $invoices
+                ? $this->inBatches('invoice_lines', $propertyId, $this->invoiceLineSql()) : 0,
+            'invoice_settled_events' => $invoices
+                ? $this->inBatches('invoices', $propertyId, $this->invoiceSettledSql()) : 0,
+            'invoice_index' => $invoices
+                ? $this->inBatches('invoice_events', $propertyId, $this->invoiceIndexSql()) : 0,
         ];
         // Auditable: what this run added (anything already recorded was skipped).
         $parts = [];
@@ -80,6 +87,23 @@ final class ActivityBackfill
     public function check(?int $propertyId = null): array
     {
         $where = $propertyId !== null ? 'WHERE p.id = ' . $propertyId : '';
+        // Before step 6's tables exist (a fresh database mid-migration) the
+        // invoice ledger counts are zero by definition.
+        $invoiceLedger = $this->hasInvoiceEvents()
+            ? "(SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.created IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_id = i.id
+                        AND e.event_type = 'opened')) AS invoices_unopened,
+                (SELECT COUNT(*) FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id
+                    WHERE i.property_id = p.id AND l.reverses_line_id IS NULL AND l.created IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_line_id = l.id)) AS lines_unrecorded,
+                (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.status = 'settled'
+                    AND i.settled_at IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_id = i.id
+                        AND e.event_type IN ('settled', 'settled_on_creation'))) AS settled_unrecorded,
+                (SELECT COUNT(*) FROM invoice_events e WHERE e.property_id = p.id
+                    AND NOT EXISTS (SELECT 1 FROM activity_index a WHERE a.event_table = 'invoice_events'
+                        AND a.event_id = e.id)) AS invoice_unindexed"
+            : '0 AS invoices_unopened, 0 AS lines_unrecorded, 0 AS settled_unrecorded, 0 AS invoice_unindexed';
         $rows = $this->connection->execute(
             "SELECT p.id,
                 (SELECT COUNT(*) FROM stock_movements m WHERE m.property_id = p.id) AS stock,
@@ -94,24 +118,12 @@ final class ActivityBackfill
                 (SELECT COUNT(*) FROM activity_index a WHERE a.property_id = p.id
                     AND a.event_table = 'food_order_events' AND a.event_type = 'placed') AS placed_indexed,
                 (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id) AS invoices,
-                (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.created IS NOT NULL
-                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_id = i.id
-                        AND e.event_type = 'opened')) AS invoices_unopened,
                 (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.created IS NULL) AS invoices_undated,
-                (SELECT COUNT(*) FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id
-                    WHERE i.property_id = p.id AND l.reverses_line_id IS NULL AND l.created IS NOT NULL
-                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_line_id = l.id)) AS lines_unrecorded,
                 (SELECT COUNT(*) FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id
                     WHERE i.property_id = p.id AND l.created IS NULL) AS lines_undated,
                 (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.status = 'settled'
-                    AND i.settled_at IS NOT NULL
-                    AND NOT EXISTS (SELECT 1 FROM invoice_events e WHERE e.invoice_id = i.id
-                        AND e.event_type IN ('settled', 'settled_on_creation'))) AS settled_unrecorded,
-                (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.status = 'settled'
                     AND i.settled_at IS NULL) AS settled_undated,
-                (SELECT COUNT(*) FROM invoice_events e WHERE e.property_id = p.id
-                    AND NOT EXISTS (SELECT 1 FROM activity_index a WHERE a.event_table = 'invoice_events'
-                        AND a.event_id = e.id)) AS invoice_unindexed
+                $invoiceLedger
             FROM properties p $where ORDER BY p.id",
         )->fetchAll('assoc');
 
@@ -256,6 +268,17 @@ final class ActivityBackfill
                 AND NOT EXISTS (
                     SELECT 1 FROM activity_index a WHERE a.event_table = 'stock_movements' AND a.event_id = m.id
                 )";
+    }
+
+    /**
+     * Whether step 6's invoice ledger exists yet. A fresh database runs the
+     * step 5 backfill migration before step 6 creates it, so the routine must
+     * work without it: migrations that share code have to stay valid in any
+     * order a new environment applies them.
+     */
+    private function hasInvoiceEvents(): bool
+    {
+        return in_array('invoice_events', $this->connection->getSchemaCollection()->listTables(), true);
     }
 
     /**

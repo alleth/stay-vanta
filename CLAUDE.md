@@ -267,7 +267,9 @@ exploited); agreed follow-ups not on the build order live in `docs/BACKLOG.md`.
   the base schema. `schema-dump-default.lock` is the regenerated dump: CI makes it from the
   migrated MySQL 9 test database (the `schema-dump` artifact of a run); download and commit it when
   a migration changes the schema. Migrations must work with the previous code (new columns
-  nullable first, tightened a release later).
+  nullable first, tightened a release later), **and on a fresh database in order**: a data migration
+  that calls shared code (e.g. `ActivityBackfill`) must not depend on tables a later migration
+  creates — guard on the table existing (CI builds a fresh database every run and caught this).
 - Seed a user: `php bin/cake.php create_user --name N --email E --password P --role owner|admin|receptionist [--property-id N]`
 - Tests: `vendor/bin/phpunit` — single file: `vendor/bin/phpunit tests/TestCase/Path/ThingTest.php`;
   single test: add `--filter testName`. `composer check` = `phpunit` + `phpcs`.
