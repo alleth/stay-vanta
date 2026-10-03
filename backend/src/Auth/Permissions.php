@@ -33,6 +33,7 @@ final class Permissions
     public const FINANCE_ANALYTICS_VIEW = 'finance.analytics.view';
     public const FINANCE_INVOICE_VIEW = 'finance.invoice.view';
     public const FINANCE_INVOICE_SETTLE = 'finance.invoice.settle';
+    public const FINANCE_INVOICE_REVERSE = 'finance.invoice.reverse';
     public const FINANCE_RECEIPT_SERIES_MANAGE = 'finance.receipt_series.manage';
 
     // Front Desk
@@ -87,6 +88,7 @@ final class Permissions
         self::FINANCE_ANALYTICS_VIEW,
         self::FINANCE_INVOICE_VIEW,
         self::FINANCE_INVOICE_SETTLE,
+        self::FINANCE_INVOICE_REVERSE,
         self::FINANCE_RECEIPT_SERIES_MANAGE,
         self::FRONT_DESK_RESERVATION_VIEW,
         self::FRONT_DESK_RESERVATION_MANAGE,
@@ -120,6 +122,7 @@ final class Permissions
      * one will require a reason; for now this is only the flag.
      */
     public const ELEVATED = [
+        self::FINANCE_INVOICE_REVERSE,
         self::FRONT_DESK_RESERVATION_BACKDATE,
         self::FRONT_DESK_RESERVATION_CORRECT,
         self::FRONT_DESK_RESERVATION_DELETE,
@@ -201,6 +204,7 @@ final class Permissions
             self::OPERATIONS_TODAY_VIEW,
             self::OPERATIONS_STAFF_VIEW,
             self::FINANCE_ANALYTICS_VIEW,
+            self::FINANCE_INVOICE_REVERSE,
             self::FRONT_DESK_RESERVATION_BACKDATE,
             self::FRONT_DESK_RESERVATION_CORRECT,
             self::FRONT_DESK_RESERVATION_DELETE,

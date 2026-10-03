@@ -490,9 +490,16 @@ would make the key attacker-controlled.
   `APP_BUSINESS_TIMEZONE`, default Asia/Manila): `startOf()`/`endOf()` for datetime bounds,
   `today()` for comparing date columns. Never `Date::today()`/`date('Y-m-d')` for business dates.
   The frontend's `todayStr()` uses `toLocaleDateString('en-CA')` (local), never `toISOString()`.
-- Invoice lines go through `InvoicesTable` (`openInvoiceFor()`, `addLine()`, `invoiceForLine()`,
-  `removeLinesFor()` — which recomputes the total from remaining lines, so multi-line reversals are
-  order-independent). **Discounts are always itemized as their own negative lines** naming who got
+- **Invoices change only through `InvoicesTable`** (build step 6), every method taking the request's
+  `EventContext` and recording to `invoice_events` under a `FOR UPDATE` lock: `openInvoiceFor()`,
+  `addLine()`, `reverseLinesFor()` / `reverseLine()`, `settle()`, `settledInvoiceWith()`,
+  `recordRefund()`. **Lines are never deleted**: a cancelled line gets a negative line with
+  `reverses_line_id`, and the total is the sum of all lines. "Is it posted?" checks
+  (`invoiceForLine()`, not-billed, billing state) use `InvoiceLinesTable::find('active')`.
+  **Settled invoices never change** (refused with a 400), except `recordRefund()` for a downpayment
+  refund (on step 7's agenda). Settling is idempotent. Manual reversal:
+  `POST /invoices/{id}/lines/{lineId}/reverse` (`finance.invoice.reverse`, Manager, reason).
+  Catalog: `docs/EVENTS.md`. **Discounts are always itemized as their own negative lines** naming who got
   them, never folded into a net figure. VAT (12%, already included in prices) is derived for
   display only in `Pos.jsx`'s `vatBreakdown()`; the stored total is unchanged.
 - **Receipt series** (`receipt_series`, managed on Inventory → Receipt Booklets) register

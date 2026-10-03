@@ -70,6 +70,7 @@ class PermissionMatrixApiTest extends TestCase
         ['GET', '/api/invoices/{id}', 'finance.invoice.view'],
         ['GET', '/api/receipt-series', 'finance.invoice.view'],
         ['POST', '/api/invoices/{id}/settle', 'finance.invoice.settle'],
+        ['POST', '/api/invoices/{id}/lines/{lineId}/reverse', 'finance.invoice.reverse', '', ['reason' => 'Matrix probe']],
         ['POST', '/api/receipt-series', 'finance.receipt_series.manage'],
         ['PATCH', '/api/receipt-series/{id}', 'finance.receipt_series.manage'],
         ['PUT', '/api/receipt-series/{id}', 'finance.receipt_series.manage'],
@@ -193,7 +194,7 @@ class PermissionMatrixApiTest extends TestCase
      */
     private function urlFor(string $template, string $query): string
     {
-        $path = strtr($template, ['{id}' => self::MISSING_ID, '{transition}' => 'check-in']);
+        $path = strtr($template, ['{id}' => self::MISSING_ID, '{lineId}' => self::MISSING_ID, '{transition}' => 'check-in']);
         $params = 'property_id=' . $this->propertyId . ($query !== '' ? '&' . $query : '');
 
         return "$path?$params";

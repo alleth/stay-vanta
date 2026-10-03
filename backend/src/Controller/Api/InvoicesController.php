@@ -5,8 +5,9 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
+use App\Model\Table\InvoiceEventsTable;
+use Cake\Database\Expression\QueryExpression;
 use Cake\Http\Exception\BadRequestException;
-use Cake\I18n\DateTime;
 use RuntimeException;
 
 /**
@@ -22,7 +23,7 @@ class InvoicesController extends AppController
         $this->authorize(Permissions::FINANCE_INVOICE_VIEW);
         $invoices = $this->fetchTable('Invoices');
         $query = $this->scopeToProperty(
-            $invoices->find()->contain(['Guests', 'InvoiceLines'])->orderBy(['Invoices.created' => 'DESC'])
+            $invoices->find()->contain(['Guests', 'InvoiceLines'])->orderBy(['Invoices.created' => 'DESC']),
         );
 
         if (($guestId = $this->request->getQuery('guest_id')) !== null) {
@@ -39,7 +40,7 @@ class InvoicesController extends AppController
             // The hotel's day, not UTC's (see BusinessTime).
             $from = BusinessTime::startOf($date);
             $to = BusinessTime::endOf($date);
-            $query->where(function (\Cake\Database\Expression\QueryExpression $exp) use ($from, $to) {
+            $query->where(function (QueryExpression $exp) use ($from, $to) {
                 return $exp->or([
                     'Invoices.status' => 'open',
                     $exp->and([
@@ -81,37 +82,56 @@ class InvoicesController extends AppController
     {
         $this->request->allowMethod('post');
         $this->authorize(Permissions::FINANCE_INVOICE_SETTLE);
+        /** @var \App\Model\Table\InvoicesTable $invoices */
         $invoices = $this->fetchTable('Invoices');
         $invoice = $this->scopeToProperty($invoices->find()->where(['Invoices.id' => $id]))->firstOrFail();
 
-        if ($invoice->status !== 'open') {
-            throw new BadRequestException('Invoice is not open.');
-        }
-
-        $useInvoice = (bool)$this->request->getData('use_invoice');
-        $useOr = (bool)$this->request->getData('use_or');
-        $series = $this->fetchTable('ReceiptSeries');
-
+        // Locked, checked, settled and recorded (who, numbers) in one
+        // transaction; a second settle is refused and takes no number.
         try {
-            $invoices->getConnection()->transactional(
-                function () use ($invoices, $invoice, $series, $useInvoice, $useOr): void {
-                    if ($useInvoice) {
-                        $invoice->set('invoice_number', $series->assignNext((int)$invoice->property_id, 'invoice'));
-                    }
-                    if ($useOr) {
-                        $invoice->set('or_number', $series->assignNext((int)$invoice->property_id, 'official_receipt'));
-                    }
-                    $invoice->set('status', 'settled');
-                    $invoice->set('settled_at', DateTime::now());
-                    $invoices->saveOrFail($invoice);
-                },
+            $invoice = $invoices->settle(
+                $this->eventContext(),
+                $invoice,
+                (bool)$this->request->getData('use_invoice'),
+                (bool)$this->request->getData('use_or'),
             );
         } catch (RuntimeException $e) {
-            // e.g. no active series / booklet exhausted.
+            // Already settled, or no active booklet / booklet exhausted.
             throw new BadRequestException($e->getMessage());
         }
 
         $this->set('invoice', $invoice);
+        $this->viewBuilder()->setOption('serialize', ['invoice']);
+    }
+
+    /**
+     * POST /api/invoices/{id}/lines/{lineId}/reverse  { reason }
+     *
+     * Reverse a line on an open invoice (finance.invoice.reverse, a Manager,
+     * with a reason): a negative line pointing at it is added, the total
+     * recomputed, and the reversal recorded with who and why. Lines are never
+     * deleted. Refused on a settled invoice, on a line already reversed and
+     * on a reversal itself.
+     */
+    public function reverseLine(int $id, int $lineId): void
+    {
+        $this->request->allowMethod('post');
+        $this->authorizeElevated(Permissions::FINANCE_INVOICE_REVERSE, 'Only a Manager can reverse an invoice line.');
+        /** @var \App\Model\Table\InvoicesTable $invoices */
+        $invoices = $this->fetchTable('Invoices');
+        $invoice = $this->scopeToProperty($invoices->find()->where(['Invoices.id' => $id]))->firstOrFail();
+        /** @var \App\Model\Entity\InvoiceLine $line */
+        $line = $invoices->InvoiceLines->find()
+            ->where(['InvoiceLines.id' => $lineId, 'InvoiceLines.invoice_id' => $invoice->id])
+            ->firstOrFail();
+
+        try {
+            $invoices->reverseLine($this->eventContext(), $line, InvoiceEventsTable::LINE_REVERSED);
+        } catch (RuntimeException $e) {
+            throw new BadRequestException($e->getMessage());
+        }
+
+        $this->set('invoice', $invoices->get($invoice->id, contain: ['Guests', 'InvoiceLines']));
         $this->viewBuilder()->setOption('serialize', ['invoice']);
     }
 }

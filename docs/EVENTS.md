@@ -136,11 +136,39 @@ them in would mean rewriting ledger rows or inventing facts, both against the ac
 NULL there means "predates step 5". Every new row must have them: `EventLedgerBehavior` stamps them
 on each write, so the columns stay nullable in the schema while new writes can't leave them empty.
 
+### invoice_events (`InvoiceEvents`)
+
+Finance: invoices (build step 6). Subject `invoice_id`; activity subject `invoice`. Typed columns:
+`amount`, `total_after`, `invoice_line_id`, `invoice_number`, `or_number`. Snapshot: guest id and
+display name, reservation, status, total. Recorded only by `InvoicesTable`, each change locked
+(`FOR UPDATE`), checked, made and recorded in one transaction.
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `opened` | | | A guest's invoice is opened (`openInvoiceFor()`, the guest row locked so there's one) |
+| `line_added` | | | A charge, discount, credit or extra is posted (`addLine()`; refused on a settled invoice) |
+| `line_reversed` | yes | | A Manager reverses a line by hand (`finance.invoice.reverse`, `POST /invoices/{id}/lines/{lineId}/reverse`) |
+| `line_reversed_on_cancel` | | | A line's source was cancelled (a sale, a reservation's charges) |
+| `settled` | | | An invoice is settled, once; carries the SI/OR numbers |
+| `settled_on_creation` | | | An invoice created settled (an advance booking's downpayment) |
+| `refund_recorded` | | | The one permitted change to a settled invoice: a downpayment refund on cancellation |
+
+Rules (decided 2026-10-03):
+- **Lines are never deleted.** A reversed line stays, answered by a negative line with
+  `reverses_line_id`; the total is the sum of all lines (floored at zero after a reversal, as
+  removing lines always was). "Is this charge posted?" checks use `InvoiceLinesTable::find('active')`,
+  which ignores both; the reservation delete guard still counts them, as history.
+- **Settled invoices are immutable**, except `refund_recorded`: cancelling an advance booking adds
+  its 90% refund to the downpayment's settled invoice, so the refund lowers Collected on the
+  downpayment's day. Kept as is in step 6; refunds, credit notes and what Collected means are on
+  step 7's agenda (`docs/BACKLOG.md`).
+- **Settlement is idempotent:** a second settle is refused, consumes no receipt number, records no
+  event and changes no figure (`SettlementApiTest`).
+
 ## Planned
 
 | Ledger | Build step |
 |---|---|
-| `invoice_events` | 6 |
 | `reservation_events` | 8 |
 | `config_changes` (ConfigAuditBehavior) | 9 |
 | `access_events` | 10 |

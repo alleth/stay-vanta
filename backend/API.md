@@ -270,4 +270,10 @@ its first 8 characters as the **Reference** on error alerts.
 - `POST /api/invoices/{id}/settle` — stamps `settled_at`; optional `{use_invoice, use_or}` each
   consume the next number from the property's active receipt series of that type
   (`ReceiptSeriesTable::assignNext()`) onto `invoice_number`/`or_number`; 400 if no active series
-  has numbers left.
+  has numbers left. **Idempotent:** a second settle is 400 ("Invoice is not open."), takes no
+  number and records nothing. Recorded as `settled` in `invoice_events` (who, numbers, amount).
+- `POST /api/invoices/{id}/lines/{lineId}/reverse` `{reason}` — **Manager only**
+  (`finance.invoice.reverse`, elevated: 400 without a reason). Adds a negative line pointing at the
+  line (`reverses_line_id`), recomputes the total, records `line_reversed`; returns the invoice with
+  its lines. 400 on a settled invoice, a line already reversed, or a reversal line. Lines are never
+  deleted: folios now show reversals (`Reversed: …`, negative) where lines used to disappear.

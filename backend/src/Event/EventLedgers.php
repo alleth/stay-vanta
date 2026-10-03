@@ -13,5 +13,6 @@ final class EventLedgers
     public const TABLES = [
         'FoodOrderEvents' => 'food_order',
         'StockMovements' => 'inventory_item',
+        'InvoiceEvents' => 'invoice',
     ];
 }

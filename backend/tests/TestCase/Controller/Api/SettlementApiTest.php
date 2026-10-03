@@ -112,6 +112,18 @@ class SettlementApiTest extends TestCase
         $this->assertSame(2, $this->nextNumber($this->siSeries), 'no receipt number consumed twice');
         $this->assertSame(2, $this->nextNumber($this->orSeries));
         $this->assertSame([$collected, $outstanding], $this->figures(), 'revenue unchanged by repeats');
+
+        // Step 6: the settlement is recorded once, with who did it and the numbers.
+        $settledEvents = $this->getTableLocator()->get('InvoiceEvents')->find()
+            ->where(['invoice_id' => $invoiceId, 'event_type' => 'settled'])->all()->toList();
+        $this->assertCount(1, $settledEvents, 'the settled event is recorded once');
+        $event = $settledEvents[0];
+        $this->assertSame($this->userIdFor($this->deskToken), (int)$event->actor_id);
+        $this->assertSame('receptionist', $event->actor_role);
+        $this->assertSame('SI-0001', $event->invoice_number);
+        $this->assertSame('OR-0001', $event->or_number);
+        $this->assertSame(2500.0, (float)$event->amount);
+        $this->assertSame(2500.0, (float)$event->total_after);
     }
 
     public function testAnExhaustedBookletLeavesTheInvoiceOpenAndConsumesNothing(): void

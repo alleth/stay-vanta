@@ -80,6 +80,22 @@ commit (left `queued`) and posts the commit status `perceptive-creation - stay-v
 - [ ] Prove the gate with a deliberately failing test on a throwaway branch wired to it: it must not
   deploy. Timing alone isn't proof (see `b68ce2f`).
 
+## Step 7 agenda: refunds, credit notes, adjustments and what "Collected" means
+
+**Ready when:** step 7 (the shared collections calculation) starts. Not before: finance semantics
+don't change during step 6 (decided 2026-10-03).
+
+**Why:** settled invoices are immutable from step 6, with **one documented exception**: the
+downpayment refund on cancelling an advance booking adds a negative line to the downpayment's
+settled invoice (recorded as `refund_recorded` in `invoice_events`). Its effect is that the refund
+lowers Collected on the day the downpayment was collected, not the day the money went back.
+
+Evaluate together, with updated pinned figures (`CollectionFiguresApiTest`):
+- [ ] Refunds as money out on the day they happen (a refund record instead of a line on the
+  settled invoice), ending the exception.
+- [ ] Credit notes and adjustments after settlement (BIR rules, SI/OR booklets).
+- [ ] What "Collected" means for each, and how Finance reports show them.
+
 ## Findings from the event foundation (step 5, decided 2026-10-03)
 
 Carry these into steps 6–10:

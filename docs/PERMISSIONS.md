@@ -60,6 +60,7 @@ several properties.
 | `finance.analytics.view` | M | Manager, Accountant, Property Owner | | Finance |
 | `finance.invoice.view` | PO†, M, FD | Manager, Front Desk, Accountant, Property Owner | | Finance |
 | `finance.invoice.settle` | PO†, M, FD | Manager, Front Desk, Accountant | | Finance |
+| `finance.invoice.reverse` | M | Manager, Accountant | yes | Finance |
 | `finance.receipt_series.manage` | PO†, M | Manager, Accountant | | Finance |
 | `front_desk.reservation.view` | PO†, M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Front Desk |
 | `front_desk.reservation.manage` | PO†, M, FD | Manager, Front Desk | | Front Desk |
@@ -87,7 +88,7 @@ several properties.
 | `staff.account.view` | PO, M | Manager, Property Owner | | Staff |
 | `staff.account.manage` | PO, M | Manager | | Staff |
 
-35 permissions: 2 platform, 33 property.
+36 permissions: 2 platform, 34 property.
 
 ## Endpoint map
 
@@ -101,7 +102,8 @@ several properties.
 | `GET /finance/collections`, `GET /reports/daily-collection` | `finance.collections.view` | A month or date range also needs `finance.collections.view_range` |
 | `GET /finance/summary`, `GET /reports/admin-dashboard`, `GET /finance/seasonality`, `GET /reports/monthly-summary` | `finance.analytics.view` | |
 | `GET /invoices`, `GET /invoices/{id}`, `GET /receipt-series` | `finance.invoice.view` | Booklets are listed to settle against |
-| `POST /invoices/{id}/settle` | `finance.invoice.settle` | |
+| `POST /invoices/{id}/settle` | `finance.invoice.settle` | Locked, recorded once; a second settle is 400 |
+| `POST /invoices/{id}/lines/{lineId}/reverse` | `finance.invoice.reverse` | Needs `reason`; open invoices only (build step 6) |
 | `POST/PATCH/PUT/DELETE /receipt-series…` | `finance.receipt_series.manage` | |
 | `GET /reservations`, `GET /reservations/stats` | `front_desk.reservation.view` | |
 | `POST /reservations`, `PATCH/PUT /reservations/{id}` (a booking), `POST /reservations/{id}/{transition}`, `POST /reservations/{id}/post-room-charge`, `POST /reservations/{id}/payment` (legacy) | `front_desk.reservation.manage` | |

@@ -370,6 +370,7 @@ class FoodOrdersTable extends Table
                 if ($paymentStatus === 'charge_to_room') {
                     $invoices = TableRegistry::getTableLocator()->get('Invoices');
                     $invoice = $invoices->openInvoiceFor(
+                        $context,
                         $propertyId,
                         (int)$guestId,
                         $payload['reservation_id'] ?? null,
@@ -378,10 +379,11 @@ class FoodOrdersTable extends Table
                     // discount as its own negative line, so the folio shows
                     // exactly what was charged and what was taken off for
                     // whom — not a single net figure.
-                    $invoices->addLine($invoice, 'Food order #' . $order->id, $subtotal, 'food_order', (int)$order->id);
+                    $invoices->addLine($context, $invoice, 'Food order #' . $order->id, $subtotal, 'food_order', (int)$order->id);
                     foreach ($savedDiscounts as $d) {
                         $label = StatutoryDiscount::label($d->discount_type);
                         $invoices->addLine(
+                            $context,
                             $invoice,
                             sprintf(
                                 '%s discount (20%%, 1 of %d diner%s) — %s, ID %s',
@@ -398,6 +400,7 @@ class FoodOrdersTable extends Table
                     }
                     if ($cookingCharge > 0) {
                         $invoices->addLine(
+                            $context,
                             $invoice,
                             'Cooking charge — food order #' . $order->id,
                             $cookingCharge,
@@ -601,7 +604,7 @@ class FoodOrdersTable extends Table
                 }
 
                 if ($locked->payment_status === 'charge_to_room') {
-                    TableRegistry::getTableLocator()->get('Invoices')->removeLinesFor('food_order', (int)$order->id);
+                    TableRegistry::getTableLocator()->get('Invoices')->reverseLinesFor($context, 'food_order', (int)$order->id);
                 }
 
                 $previous = $locked->status;

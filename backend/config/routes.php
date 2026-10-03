@@ -222,6 +222,8 @@ return function (RouteBuilder $routes): void {
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post('/invoices/{id}/settle', ['controller' => 'Invoices', 'action' => 'settle'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post('/invoices/{id}/lines/{lineId}/reverse', ['controller' => 'Invoices', 'action' => 'reverseLine'])
+            ->setPatterns(['id' => '\d+', 'lineId' => '\d+'])->setPass(['id', 'lineId']);
 
         $builder->fallbacks();
     });

@@ -16,6 +16,7 @@ use Cake\Http\Exception\ForbiddenException;
 use Cake\I18n\Date;
 use Cake\I18n\DateTime;
 use Cake\ORM\Query\SelectQuery;
+use RuntimeException;
 
 /**
  * Reservations — bookings plus the check-in/out/cancel lifecycle.
@@ -207,7 +208,8 @@ class ReservationsController extends AppController
      */
     private function notBilled(SelectQuery $query): SelectQuery
     {
-        $chargeLines = $this->fetchTable('InvoiceLines')->find()
+        // A reversed charge (its stay cancelled) doesn't count as billed.
+        $chargeLines = $this->fetchTable('InvoiceLines')->find('active')
             ->select(['InvoiceLines.id'])
             ->where([
                 'InvoiceLines.source_type' => 'reservation',
@@ -234,7 +236,7 @@ class ReservationsController extends AppController
             return [];
         }
 
-        $rows = $this->fetchTable('InvoiceLines')->find()
+        $rows = $this->fetchTable('InvoiceLines')->find('active')
             ->select(['source_id', 'status' => 'Invoices.status'])
             ->innerJoinWith('Invoices')
             ->where(['InvoiceLines.source_type' => 'reservation', 'InvoiceLines.source_id IN' => $ids])
@@ -852,88 +854,97 @@ class ReservationsController extends AppController
             );
         }
         $fromStatus = $reservation->status;
-        $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $rule, $transition, $fromStatus) {
-            $reservation->set('status', $rule['to']);
-            // Re-stamp: this receptionist is now the last to act on the booking.
-            $reservation->set('receptionist_id', (int)$this->currentUser->id);
-            // Log when the check-in/out *event* actually happened (distinct from
-            // the planned check_in/check_out dates) for the Front Desk audit log.
-            if ($transition === 'check-in') {
-                $reservation->set('checked_in_at', new DateTime());
-            } elseif ($transition === 'check-out') {
-                $reservation->set('checked_out_at', new DateTime());
-            } elseif ($transition === 'cancel') {
-                $reservation->set('cancelled_at', new DateTime());
-            }
-            $reservations->saveOrFail($reservation);
-
-            if ($reservation->room_id) {
-                $rooms = $this->fetchTable('Rooms');
-                $room = $rooms->get($reservation->room_id);
-                $room->set('status', $rule['room']);
-                $rooms->saveOrFail($room);
-            }
-
-            // The room charge is usually already posted from Mark paid
-            // (Front Desk) — postRoomCharge() is a no-op then. It still runs
-            // here as a fallback for a reservation checked out without ever
-            // being marked paid, so room revenue is always persisted by
-            // check-out.
-            if ($transition === 'check-out' && $reservation->guest_id) {
-                $this->postRoomCharge($reservation);
-            }
-
-            // Early check-in: the receptionist confirmed an early arrival, so
-            // bill the configured fee to the guest's invoice.
-            if (
-                $transition === 'check-in'
-                && $this->request->getData('early_check_in')
-                && $reservation->guest_id
-            ) {
-                $extraCharges = $this->fetchTable('ExtraCharges');
-                $charge = $extraCharges->earlyCheckInFor((int)$reservation->property_id);
-                $fee = $charge->is_active ? (float)$charge->amount : 0.0;
-                if ($fee > 0) {
-                    $invoices = $this->fetchTable('Invoices');
-                    $invoice = $invoices->openInvoiceFor(
-                        (int)$reservation->property_id,
-                        (int)$reservation->guest_id,
-                        (int)$reservation->id,
-                    );
-                    $invoices->addLine($invoice, 'Early check-in', $fee, 'early_check_in', (int)$reservation->id);
+        // An invoice change the ledger refuses (e.g. a line on a settled
+        // invoice) rolls the whole transition back and answers 400.
+        try {
+            $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $rule, $transition, $fromStatus) {
+                $reservation->set('status', $rule['to']);
+                // Re-stamp: this receptionist is now the last to act on the booking.
+                $reservation->set('receptionist_id', (int)$this->currentUser->id);
+                // Log when the check-in/out *event* actually happened (distinct from
+                // the planned check_in/check_out dates) for the Front Desk audit log.
+                if ($transition === 'check-in') {
+                    $reservation->set('checked_in_at', new DateTime());
+                } elseif ($transition === 'check-out') {
+                    $reservation->set('checked_out_at', new DateTime());
+                } elseif ($transition === 'cancel') {
+                    $reservation->set('cancelled_at', new DateTime());
                 }
-            }
+                $reservations->saveOrFail($reservation);
 
-            // Cancelling reverses any early check-in fee, room charge, and
-            // downpayment credit already posted from Mark paid ahead of
-            // check-out (a cancelled booking shouldn't leave any of those on
-            // the guest's tab).
-            if ($transition === 'cancel') {
-                $invoices = $this->fetchTable('Invoices');
-                $invoices->removeLinesFor('early_check_in', (int)$reservation->id);
-                $invoices->removeLinesFor('reservation', (int)$reservation->id);
-                $invoices->removeLinesFor('downpayment_credit', (int)$reservation->id);
+                if ($reservation->room_id) {
+                    $rooms = $this->fetchTable('Rooms');
+                    $room = $rooms->get($reservation->room_id);
+                    $room->set('status', $rule['room']);
+                    $rooms->saveOrFail($room);
+                }
 
-                // A cancelled advance booking doesn't get the downpayment back
-                // in full: 10% is retained, 90% is refunded onto the settled
-                // downpayment invoice (its total drops to the retained share,
-                // which is what stays in collections).
-                $downpayment = (float)$reservation->downpayment;
-                if ($fromStatus === 'booked' && $downpayment > 0) {
-                    $invoice = $invoices->invoiceForLine('downpayment', (int)$reservation->id);
-                    if ($invoice !== null) {
-                        $refund = round($downpayment * (1 - self::CANCELLATION_RETENTION), 2);
-                        $invoices->addLine(
-                            $invoice,
-                            'Downpayment refund on cancellation (10% retained)',
-                            -$refund,
-                            'downpayment_refund',
+                // The room charge is usually already posted from Mark paid
+                // (Front Desk) — postRoomCharge() is a no-op then. It still runs
+                // here as a fallback for a reservation checked out without ever
+                // being marked paid, so room revenue is always persisted by
+                // check-out.
+                if ($transition === 'check-out' && $reservation->guest_id) {
+                    $this->postRoomCharge($reservation);
+                }
+
+                // Early check-in: the receptionist confirmed an early arrival, so
+                // bill the configured fee to the guest's invoice.
+                if (
+                    $transition === 'check-in'
+                    && $this->request->getData('early_check_in')
+                    && $reservation->guest_id
+                ) {
+                    $extraCharges = $this->fetchTable('ExtraCharges');
+                    $charge = $extraCharges->earlyCheckInFor((int)$reservation->property_id);
+                    $fee = $charge->is_active ? (float)$charge->amount : 0.0;
+                    if ($fee > 0) {
+                        $invoices = $this->fetchTable('Invoices');
+                        $invoice = $invoices->openInvoiceFor(
+                            $this->eventContext(),
+                            (int)$reservation->property_id,
+                            (int)$reservation->guest_id,
                             (int)$reservation->id,
                         );
+                        $invoices->addLine($this->eventContext(), $invoice, 'Early check-in', $fee, 'early_check_in', (int)$reservation->id);
                     }
                 }
-            }
-        });
+
+                // Cancelling reverses any early check-in fee, room charge, and
+                // downpayment credit already posted from Mark paid ahead of
+                // check-out (a cancelled booking shouldn't leave any of those on
+                // the guest's tab).
+                if ($transition === 'cancel') {
+                    $invoices = $this->fetchTable('Invoices');
+                    $invoices->reverseLinesFor($this->eventContext(), 'early_check_in', (int)$reservation->id);
+                    $invoices->reverseLinesFor($this->eventContext(), 'reservation', (int)$reservation->id);
+                    $invoices->reverseLinesFor($this->eventContext(), 'downpayment_credit', (int)$reservation->id);
+
+                    // A cancelled advance booking doesn't get the downpayment back
+                    // in full: 10% is retained, 90% is refunded onto the settled
+                    // downpayment invoice (its total drops to the retained share,
+                    // which is what stays in collections).
+                    $downpayment = (float)$reservation->downpayment;
+                    if ($fromStatus === 'booked' && $downpayment > 0) {
+                        $invoice = $invoices->invoiceForLine('downpayment', (int)$reservation->id);
+                        if ($invoice !== null) {
+                            $refund = round($downpayment * (1 - self::CANCELLATION_RETENTION), 2);
+                            // The one permitted change to a settled invoice
+                            // (docs/EVENTS.md), recorded as refund_recorded.
+                            $invoices->recordRefund(
+                                $this->eventContext(),
+                                $invoice,
+                                'Downpayment refund on cancellation (10% retained)',
+                                -$refund,
+                                (int)$reservation->id,
+                            );
+                        }
+                    }
+                }
+            });
+        } catch (RuntimeException $e) {
+            throw new BadRequestException($e->getMessage());
+        }
 
         $this->respondWithReservation($reservation, 200);
     }
@@ -1022,6 +1033,7 @@ class ReservationsController extends AppController
             $reservations->saveOrFail($reservation);
 
             $invoices->openInvoiceFor(
+                $this->eventContext(),
                 (int)$reservation->property_id,
                 (int)$reservation->guest_id,
                 (int)$reservation->id,
@@ -1082,6 +1094,7 @@ class ReservationsController extends AppController
 
             if ($quote['subtotal'] > 0) {
                 $invoice = $invoices->openInvoiceFor(
+                    $this->eventContext(),
                     (int)$reservation->property_id,
                     (int)$reservation->guest_id,
                     (int)$reservation->id,
@@ -1103,6 +1116,7 @@ class ReservationsController extends AppController
                     $rateNote,
                 );
                 $invoices->addLine(
+                    $this->eventContext(),
                     $invoice,
                     $description,
                     (float)$quote['subtotal'],
@@ -1114,6 +1128,7 @@ class ReservationsController extends AppController
                 // the guest was billed the price the OTA sold them.
                 if ($quote['channel_discount'] > 0) {
                     $invoices->addLine(
+                        $this->eventContext(),
                         $invoice,
                         sprintf(
                             '%s discount%s',
@@ -1144,6 +1159,7 @@ class ReservationsController extends AppController
                         continue;
                     }
                     $invoices->addLine(
+                        $this->eventContext(),
                         $invoice,
                         sprintf(
                             '%s discount (20%%, 1 of %d guest%s) — %s, ID %s',
@@ -1160,6 +1176,7 @@ class ReservationsController extends AppController
                 }
                 if ($quote['referral_discount'] > 0) {
                     $invoices->addLine(
+                        $this->eventContext(),
                         $invoice,
                         'Referral discount',
                         -(float)$quote['referral_discount'],
@@ -1172,6 +1189,7 @@ class ReservationsController extends AppController
                 // above, cancel's reversal and delete's guard all cover them.
                 foreach ($this->fetchTable('Reservations')->extrasFor($reservation) as $extra) {
                     $invoices->addLine(
+                        $this->eventContext(),
                         $invoice,
                         sprintf('%s × %d', $extra->name, (int)$extra->quantity),
                         round((float)$extra->amount * (int)$extra->quantity, 2),
@@ -1196,6 +1214,7 @@ class ReservationsController extends AppController
             && $invoices->invoiceForLine('downpayment_credit', (int)$reservation->id) === null
         ) {
             $invoice ??= $invoices->openInvoiceFor(
+                $this->eventContext(),
                 (int)$reservation->property_id,
                 (int)$reservation->guest_id,
                 (int)$reservation->id,
@@ -1204,6 +1223,7 @@ class ReservationsController extends AppController
             // settled invoice) — credit it here so the open tab only ever
             // carries the balance.
             $invoices->addLine(
+                $this->eventContext(),
                 $invoice,
                 'Less: downpayment already collected',
                 -$downpayment,
@@ -1621,6 +1641,7 @@ class ReservationsController extends AppController
         $reservation->set('downpayment', $downpayment);
         $reservations->saveOrFail($reservation);
         $this->fetchTable('Invoices')->settledInvoiceWith(
+            $this->eventContext(),
             $propertyId,
             $guestId,
             (int)$reservation->id,
