@@ -85,8 +85,15 @@ on settled invoices (`finance.invoice.refund`) approved as S1.
 - [x] 7a: one shared calculation (`App\Model\Finance\Collections`), figures unchanged.
 - [x] 7c-1: `method` columns, the cash-movement calculation beside today's, the restatement list
   logged on deploy (`bin/cake cash_restatement`). No figure changes.
-- [ ] 7c-2: the switch (refund events, UI, reports), `APP_COLLECTED_MODEL=cash|historical` for
-  one release.
+- [x] 7c-2: the switch (refund events, UI, reports), `APP_COLLECTED_MODEL=cash|historical` for
+  one release. In production 2026-10-04 (`385b5b0`); restatement at the switch: nothing moved.
+- [ ] Cleanup release: remove `APP_COLLECTED_MODEL` / `Collections::historical()` and the two
+  log-only restatement migrations' command once production has run a release on `cash` without
+  a rollback (keep the pre-7c `downpayment_refund` line handling: that history stays).
+- [ ] Settlement and downpayment collection record no payment method (refunds do): add
+  `method` to `settled` / `settled_on_creation` so cash in can be reconciled by method too.
+- [ ] A mistaken refund can't be corrected yet: needs a `refund_corrected` event referencing the
+  original (append-only), Manager + reason.
 - [ ] Deferred: credit notes (need a credit-memo booklet series) and voids (not built).
 
 ## Findings from the event foundation (step 5, decided 2026-10-03)
