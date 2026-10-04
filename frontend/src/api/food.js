@@ -13,8 +13,8 @@ export const createMenuItem = (data, propertyId) =>
 export const updateMenuItem = (id, data) =>
   client.patch(`/food-menu-items/${id}`, data).then((r) => r.data.menuItem)
 
-export const deleteMenuItem = (id) =>
-  client.delete(`/food-menu-items/${id}`).then((r) => r.data)
+export const deleteMenuItem = (id, reason) =>
+  client.delete(`/food-menu-items/${id}`, { data: { reason } }).then((r) => r.data)
 
 // Orders — returns { orders, total, page, limit } for pagination.
 export const listOrders = (propertyId, params = {}) =>

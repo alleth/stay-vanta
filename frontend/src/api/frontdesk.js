@@ -13,8 +13,9 @@ export const createRoom = (data, propertyId) =>
 export const updateRoom = (id, data) =>
   client.patch(`/rooms/${id}`, data).then((r) => r.data.room)
 
-export const deleteRoom = (id) =>
-  client.delete(`/rooms/${id}`).then((r) => r.data)
+// Deleting configuration needs a reason (step 9): it's kept with the change.
+export const deleteRoom = (id, reason) =>
+  client.delete(`/rooms/${id}`, { data: { reason } }).then((r) => r.data)
 
 // Room rates
 export const listRoomRates = (propertyId) =>
@@ -44,8 +45,8 @@ export const createPromoRate = (data, propertyId) =>
 export const updatePromoRate = (id, data) =>
   client.patch(`/promo-rates/${id}`, data).then((r) => r.data.promoRate)
 
-export const deletePromoRate = (id) =>
-  client.delete(`/promo-rates/${id}`).then((r) => r.data)
+export const deletePromoRate = (id, reason) =>
+  client.delete(`/promo-rates/${id}`, { data: { reason } }).then((r) => r.data)
 
 // Reservations
 export const listReservations = (propertyId, params = {}) =>
@@ -77,6 +78,12 @@ export const deleteReservation = (id, reason) =>
 
 // The reservation's timeline (build step 8): its own events and the invoice
 // events of its money, oldest first → {reservation_id, deleted, history}.
+// Where a booking's price comes from (step 9): { basis, rate_source, current,
+// history, config_changes, shows_actors, posted, notes }. Who changed the
+// configuration is filled in only for a Manager (shows_actors).
+export const reservationPrice = (id) =>
+  client.get(`/reservations/${id}/price`).then((r) => r.data)
+
 export const reservationHistory = (id) =>
   client.get(`/reservations/${id}/history`).then((r) => r.data)
 
@@ -107,5 +114,5 @@ export const createExtraCharge = (data, propertyId) =>
 export const updateExtraCharge = (id, data) =>
   client.patch(`/extra-charges/${id}`, data).then((r) => r.data.extraCharge)
 
-export const deleteExtraCharge = (id) =>
-  client.delete(`/extra-charges/${id}`).then((r) => r.data)
+export const deleteExtraCharge = (id, reason) =>
+  client.delete(`/extra-charges/${id}`, { data: { reason } }).then((r) => r.data)

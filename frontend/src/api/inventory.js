@@ -17,8 +17,8 @@ export const listCategories = (propertyId) =>
 export const createCategory = (data, propertyId) =>
   client.post('/inventory-categories', withProp(data, propertyId)).then((r) => r.data.category)
 
-export const deleteCategory = (id) =>
-  client.delete(`/inventory-categories/${id}`).then((r) => r.data)
+export const deleteCategory = (id, reason) =>
+  client.delete(`/inventory-categories/${id}`, { data: { reason } }).then((r) => r.data)
 
 export const listItems = (propertyId, params = {}) =>
   client.get('/inventory-items', { params: withProp(params, propertyId) }).then((r) => r.data.items)
@@ -50,17 +50,3 @@ export const listMovements = (propertyId, params = {}) =>
 export const recordMovement = (data, propertyId) =>
   client.post('/stock-movements', withProp(data, propertyId)).then((r) => r.data)
 
-// Receipt booklet series (physical sales invoice / official receipt
-// numbers). Paginated + searchable (by prefix) like the other Inventory
-// tables: returns { series, total, page, limit }.
-export const listReceiptSeries = (propertyId, params = {}) =>
-  client.get('/receipt-series', { params: withProp(params, propertyId) }).then((r) => r.data)
-
-export const createReceiptSeries = (data, propertyId) =>
-  client.post('/receipt-series', withProp(data, propertyId)).then((r) => r.data.series)
-
-export const updateReceiptSeries = (id, data) =>
-  client.patch(`/receipt-series/${id}`, data).then((r) => r.data.series)
-
-export const deleteReceiptSeries = (id) =>
-  client.delete(`/receipt-series/${id}`).then((r) => r.data)

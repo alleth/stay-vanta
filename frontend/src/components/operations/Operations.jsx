@@ -9,6 +9,7 @@ import { roleLabel } from '../../utils/roles'
 import { SkeletonTable } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
 import { refundMethodLabel } from '../../utils/refunds'
+import { eventLabel, fieldLabel, formatValue, subjectText } from '../../utils/configChanges'
 
 // The Operations page's panels (Manager + Front Desk Staff), drawn from one
 // GET /operations/today payload. Every figure is today's, on the hotel's
@@ -595,7 +596,18 @@ function reservationText(e) {
   return `${RESERVATION_TEXT[e.event] ?? e.event} · ${guest}${room}${dates}${after}${why}`
 }
 
+// Configuration lines (build step 9): price changes and deletions only —
+// "Changed Room rate “Standard” · Nightly rate: ₱1,000.00 → ₱1,200.00 ·
+// “Peak season”". Every other change is in Settings → Change log.
+function configText(e) {
+  const fields = Object.entries(e.fields ?? {})
+    .map(([field, c]) => `${fieldLabel(field)}: ${formatValue(field, c.before)} → ${formatValue(field, c.after)}`)
+  const why = e.reason ? ` · “${e.reason}”` : ''
+  return [`${eventLabel(e.event)} ${subjectText(e)}`, ...fields].join(' · ') + why
+}
+
 function activityText(e) {
+  if (e.type === 'config') return configText(e)
   if (e.type === 'invoice') return invoiceText(e)
   if (e.type === 'reservation') return reservationText(e)
   if (e.type === 'sale_refund') {
@@ -672,7 +684,10 @@ function ActivityModal({ onHide }) {
     <Modal show onHide={onHide} size="lg">
       <Modal.Header closeButton>
         <Modal.Title>Staff activity</Modal.Title>
-        <p className="mb-0 text-xs text-muted">Stock movements and food orders, with who recorded each.</p>
+        <p className="mb-0 text-xs text-muted">
+          Sales, stock, invoices, reservations and price changes, with who did each. Every setting change is in
+          Settings → Change log.
+        </p>
       </Modal.Header>
       <div className="max-h-[65vh] overflow-y-auto">
         {error && <div className="p-4"><Alert variant="danger" className="mb-0">{error}</Alert></div>}

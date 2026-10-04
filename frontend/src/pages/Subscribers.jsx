@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Card, Table, Badge, Button, Spinner, Alert, Form } from '../components/ui'
+import { Card, Table, Badge, Button, Spinner, Alert, Form, Modal } from '../components/ui'
 import {
   listSubscribers,
   createSubscriber,
   createSubscriberManager,
   updateProperty,
+  propertyChanges,
 } from '../api/platform'
+import ConfigHistory from '../components/settings/ConfigHistory'
 import { SkeletonTable } from '../components/Skeleton'
 import { formatMoney } from '../utils/format'
 import { describeError } from '../utils/apiError'
@@ -24,6 +26,8 @@ export default function Subscribers() {
   const [rows, setRows] = useState(null)
   const [error, setError] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  // The property whose change history is open (fee, subscription, name; step 9).
+  const [history, setHistory] = useState(null)
 
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(BLANK)
@@ -211,7 +215,10 @@ export default function Subscribers() {
                   </td>
                   <td className="text-right">{formatMoney(p.subscription_fee)}</td>
                   <td className="text-muted">{p.subscription_expires_at ?? '—'}</td>
-                  <td className="text-right">
+                  <td className="whitespace-nowrap text-right">
+                    <Button size="sm" variant="outline-secondary" className="mr-1" onClick={() => setHistory(p)}>
+                      History
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline-secondary"
@@ -233,6 +240,19 @@ export default function Subscribers() {
           </tbody>
         </Table>
       </Card>
+
+      {history && (
+        <Modal show onHide={() => setHistory(null)} centered>
+          <Modal.Header closeButton><Modal.Title>{history.name}</Modal.Title></Modal.Header>
+          <Modal.Body className="pt-0">
+            <ConfigHistory entityType="property" entityId={history.id}
+              load={(page) => propertyChanges(history.id, page)} />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setHistory(null)}>Close</Button>
+          </Modal.Footer>
+        </Modal>
+      )}
     </div>
   )
 }

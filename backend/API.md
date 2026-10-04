@@ -33,7 +33,10 @@ Reading it:
   (`settings.change_log.view`): the property's change log, newest first, 50 a page →
   `{changes, page, has_more}`; each `{id, at, actor, recorded (false = imported baseline),
   source, property_id, entity_type, entity_id, label, event, impact, reason, changes,
-  correlation_id}`. Property records are left out.
+  correlation_id}`. Property records are left out. `latest=1` (needs `entity_type`) keeps only each
+  row's most recent change matching the other filters: `entity_type=room_rate&impact=price&latest=1`
+  is where each current rate came from (Settings shows it beside each price); 400 without
+  `entity_type`.
 - `GET /api/platform/property-changes[?property_id=]` — **Platform Owner**
   (`platform.property.manage`): changes to property records (fee, subscription, name).
 - Operations → Activity lines of `type: config`: price changes to existing rows and deletions (`entity_type`,
@@ -268,8 +271,12 @@ Reading it:
 - `GET /api/reservations/{id}/price` (step 9) → `{reservation_id, basis (promo|locked|live),
   rate_source, current (the quote now), history (each price-setting event's price, who, why),
   config_changes (changes to its room rates, promo rates and extra charges since it was made:
-  who, why, before/after, `moved_this_price`, `why`), posted (its invoice lines), notes}`.
-  Managers may open a deleted reservation's.
+  who, why, before/after, `moved_this_price`, `why`), shows_actors, posted (its invoice lines),
+  notes}`. Managers may open a deleted reservation's. **Who changed the configuration**
+  (`config_changes[].actor`) is filled in only for a holder of `settings.change_log.view`
+  (`shows_actors: true`, a Manager); Front Desk Staff get `null` there but the change, its reason
+  and its effect (decided 2026-10-05). The booking's own `history[].actor` is shown to both, as in
+  `/history`.
 - `GET /api/reservations?deleted=only` — **Manager only** (403 otherwise): the read-only list of
   soft-deleted reservations.
 - Embedded staff (`receptionist`, `last_receptionist`) carry `{id, name}` only (step 8). Each listed

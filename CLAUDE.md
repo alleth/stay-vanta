@@ -56,9 +56,9 @@ signed-in person (`nav.js`, `canOpen()`); empty groups are hidden.
 | GUEST SERVICES | **Guests** | Guest identity and history | `/guests` |
 | GUEST SERVICES | **POS** | Sales: food, linens, charges to rooms | `/pos`, `pages/Pos.jsx`; API stays `/api/food-orders`, `/api/food-menu-items` |
 | PROPERTY | **Rooms** (future) | The physical room: status, housekeeping, maintenance | today: Front Desk → Rooms tab |
-| PROPERTY | **Inventory** | Stock and (future) purchasing | `/inventory` (receipt booklets move to Finance in step 9) |
+| PROPERTY | **Inventory** | Stock and (future) purchasing | `/inventory` (receipt booklets are in Finance since step 9) |
 | TEAM | **Staff** | Accounts, roles, (future) time keeping | `/staff` |
-| SETTINGS | **Settings** (future, admin-only) | Property configuration; never ships without the configuration audit log | today: Front Desk tabs and Inventory |
+| SETTINGS | **Settings** (Manager, step 9) | Property configuration: rooms, room rates, promo rates, extra charges, booking sources, and the change log it never ships without | `/settings`, `pages/Settings.jsx`, `components/settings/`; log `GET /api/config-changes` |
 
 The platform owner has a separate, ungrouped Hub: **Dashboard** (platform overview) and
 Subscribers.
@@ -73,7 +73,7 @@ Subscribers.
 | Sales | POS | |
 | Invoices, settlement, receipt numbers | Finance | Front Desk embeds the Invoices panel for checkout; POS will stop embedding it |
 | Stock levels | Inventory | Only via `StockMovementsTable::record()` |
-| Prices, rates, charges, discount rules | Settings (future) | Applied by `quote()` / `StatutoryDiscount`; the menu stays in POS |
+| Prices, rates, charges, discount rules | Settings | Applied by `quote()` / `StatutoryDiscount`; the menu stays in POS |
 | Accounts and role assignment | Staff | Role definitions move to Settings in Permissions Phase 3 |
 
 ### Terminology (use these words on screens, in docs and in comments)
@@ -460,6 +460,17 @@ would make the key attacker-controlled.
   form when the save needs one (a correction, a stay before today, a referral discount).
 - **Elevated actions ask why with `src/components/ReasonModal.jsx`** (`show`, `title`,
   `description`, `confirmLabel`, `onConfirm(reason)`, `onHide`) and send `reason` with the request.
+- **Configuration screens (step 9).** Deleting a configuration row asks why (`ReasonModal`); a
+  price change asks why inside its form (`PriceReasonField`, shown when a price field differs from
+  the saved one or the API asked: `asksForReason()`). Each edit dialog ends with
+  `components/settings/ConfigHistory.jsx` (the row's changes; Managers only), and every change is
+  worded by `utils/configChanges.js` (Settings → Change log, histories, the price view, Activity).
+  A reservation's **Price** section is `src/components/ReservationPrice.jsx`
+  (`GET /reservations/{id}/price`). **Front Desk sees guest-facing explanations, Managers see
+  accountability** (decided 2026-10-05): the price view shows Front Desk Staff the price, its
+  provenance and each change's reason, but the API leaves out who changed the configuration
+  (`shows_actors`), and the change log is Manager-only. Front Desk keeps only room *status*;
+  rooms, rates, promo rates and extra charges are set up in Settings.
 - Initial loads use skeletons from `src/components/Skeleton.jsx`, not spinners (inline action
   buttons keep their small spinner). Stat tiles go through `src/components/StatCard.jsx` — extend
   it rather than hand-rolling a card + number (copies in pages drifted before). When a row of tiles
@@ -533,7 +544,7 @@ would make the key attacker-controlled.
   Catalog: `docs/EVENTS.md`. **Discounts are always itemized as their own negative lines** naming who got
   them, never folded into a net figure. VAT (12%, already included in prices) is derived for
   display only in `Pos.jsx`'s `vatBreakdown()`; the stored total is unchanged.
-- **Receipt series** (`receipt_series`, managed on Inventory → Receipt Booklets) register
+- **Receipt series** (`receipt_series`, managed on Finance → Receipt booklets since step 9) register
   pre-printed Sales Invoice / Official Receipt booklets. `ReceiptSeriesTable::assignNext()`
   consumes the next number from the oldest active, non-exhausted series (`FOR UPDATE`), padded to
   `pad_length`. A series that has issued a number can be deactivated, not deleted.

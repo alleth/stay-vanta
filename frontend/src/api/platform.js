@@ -15,6 +15,12 @@ export const createSubscriber = (data) =>
 export const createSubscriberManager = (propertyId, data) =>
   client.post('/users', { ...data, role: 'admin', property_id: propertyId }).then((r) => r.data.user)
 
-// Flip a subscription active/inactive, or edit its fee. Platform Owner only.
+// Changes to property records (fee, subscription, name), newest first →
+// { changes, page, has_more }. Platform Owner only.
+export const propertyChanges = (propertyId, page = 1) =>
+  client.get('/platform/property-changes', { params: { property_id: propertyId, page } }).then((r) => r.data)
+
+// Flip a subscription active/inactive, or edit its fee (a fee change needs a
+// reason, step 9). Platform Owner only.
 export const updateProperty = (id, data) =>
   client.patch(`/properties/${id}`, data).then((r) => r.data.property)

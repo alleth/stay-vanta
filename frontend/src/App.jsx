@@ -15,6 +15,7 @@ import Pos from './pages/Pos'
 import Finance from './pages/Finance'
 import Subscribers from './pages/Subscribers'
 import Staff from './pages/Staff'
+import Settings from './pages/Settings'
 import PrivacyPolicy from './pages/PrivacyPolicy'
 import TermsOfService from './pages/TermsOfService'
 
@@ -130,6 +131,14 @@ export default function App() {
           element={
             <ProtectedRoute module="/staff">
               <Staff />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <ProtectedRoute module="/settings">
+              <Settings />
             </ProtectedRoute>
           }
         />

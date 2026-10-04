@@ -8,10 +8,12 @@ import { CollectionsReport } from '../components/finance/CollectionsReport'
 import { Receivables } from '../components/finance/Receivables'
 import { InvoicesPanel } from '../components/finance/InvoicesPanel'
 import { FinanceAnalytics } from '../components/finance/FinanceAnalytics'
+import { ReceiptBooklets } from '../components/finance/ReceiptBooklets'
 
 // Finance: the property's money — what was collected (Collections), what's
 // owed (Receivables), the invoices themselves (Invoices — the same panel Front
-// Desk embeds for checkout) and, for a Manager, Analytics. Front Desk Staff
+// Desk embeds for checkout), the receipt booklets settling draws numbers from
+// (moved from Inventory in step 9) and, for a Manager, Analytics. Front Desk Staff
 // get the single-day collection report only; the backend enforces the same.
 export default function Finance() {
   const { can } = useAuth()
@@ -46,6 +48,10 @@ export default function Finance() {
         </Tab>
         <Tab eventKey="invoices" title="Invoices">
           <InvoicesPanel propertyId={propertyId} onSettled={() => setSettledAt(Date.now())} />
+        </Tab>
+        <Tab eventKey="booklets" title="Receipt booklets">
+          <ReceiptBooklets propertyId={propertyId} canManage={can(P.FINANCE_RECEIPT_SERIES_MANAGE)}
+            canSeeHistory={can(P.SETTINGS_CHANGE_LOG_VIEW)} />
         </Tab>
         {can(P.FINANCE_ANALYTICS_VIEW) && (
           <Tab eventKey="analytics" title="Analytics">

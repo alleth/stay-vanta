@@ -123,6 +123,35 @@ class PriceProvenanceApiTest extends TestCase
         $this->assertEquals(2000, $price['posted'][0]['amount']);
     }
 
+    /**
+     * Decided 2026-10-05: Front Desk sees the guest-facing explanation (the
+     * change, its reason, whether it moved the price) but not who made it;
+     * the Manager sees who.
+     */
+    public function testFrontDeskSeesWhyButNotWhoChangedTheRate(): void
+    {
+        $this->callAs($this->deskToken, 'POST', '/api/reservations', [
+            'room_id' => $this->roomB, 'source' => 'walk_in', 'guest_name' => 'Visible Guest', 'check_out' => $this->day(1),
+        ]);
+        $this->assertResponseCode(201, (string)$this->_response->getBody());
+        $id = (int)$this->responseJson()['reservation']['id'];
+        $this->raisePropertyRate(1300, 'New season');
+
+        $this->callAs($this->deskToken, 'GET', "/api/reservations/$id/price");
+        $this->assertResponseOk();
+        $desk = $this->responseJson();
+        $this->assertFalse($desk['shows_actors']);
+        $this->assertSame('New season', $desk['config_changes'][0]['reason']);
+        $this->assertEquals(['before' => 1000, 'after' => 1300], $desk['config_changes'][0]['changes']['base_rate']);
+        $this->assertNull($desk['config_changes'][0]['actor'], 'the Manager’s name stays with Managers');
+        $this->assertStringNotContainsString('price-admin', (string)$this->_response->getBody());
+        $this->assertStringContainsString('price-desk', (string)$desk['history'][0]['actor'], 'their own booking events still say who');
+
+        $manager = $this->price($id);
+        $this->assertTrue($manager['shows_actors']);
+        $this->assertStringContainsString('price-admin', (string)$manager['config_changes'][0]['actor']);
+    }
+
     public function testABookingFromBeforeStep9StillReadsTheLiveRateAndSaysWhy(): void
     {
         $id = $this->insertRow('Reservations', [

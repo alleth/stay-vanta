@@ -80,6 +80,15 @@ class ConfigChangeLogApiTest extends TestCase
         $this->assertStringContainsString('log-admin', (string)$log[1]['actor']);
         $this->assertTrue($log[1]['recorded']);
 
+        // Where the current price came from: the latest price change, not the later rename.
+        $this->callAs($this->adminToken, 'GET', '/api/config-changes?entity_type=room_rate&impact=price&latest=1');
+        $this->assertResponseOk();
+        $latest = array_values(array_filter($this->responseJson()['changes'], fn($c) => $c['entity_id'] === $rateId));
+        $this->assertCount(1, $latest);
+        $this->assertSame('Peak season', $latest[0]['reason']);
+        $this->callAs($this->adminToken, 'GET', '/api/config-changes?latest=1');
+        $this->assertResponseCode(400);
+
         $this->callAs($this->adminToken, 'GET', '/api/config-changes?impact=price');
         $this->assertResponseOk();
         foreach ($this->responseJson()['changes'] as $change) {

@@ -133,7 +133,7 @@ several properties.
 | `POST/PATCH/PUT/DELETE /extra-charges…` | `settings.extra_charge.manage` | |
 | `GET /config-changes` | `settings.change_log.view` | The configuration change log (step 9): the property's changes, property records excepted |
 | `GET /platform/property-changes` | `platform.property.manage` | Changes to property records (fee, subscription, name), step 9 |
-| `GET /reservations/{id}/price` | `front_desk.reservation.view` | Where a booking's price comes from (step 9) |
+| `GET /reservations/{id}/price` | `front_desk.reservation.view` | Where a booking's price comes from (step 9); who changed the configuration is named only with `settings.change_log.view` |
 | `GET /users` | `staff.account.view` | |
 | `POST /users`, `PATCH/PUT /users/{id}`, `POST /users/{id}/reset-password` | `staff.account.manage` | Rules kept: who may manage whom (below) |
 

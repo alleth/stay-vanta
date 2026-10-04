@@ -13,7 +13,9 @@ use Cake\ORM\Query\SelectQuery;
  *
  * - GET /api/config-changes (settings.change_log.view, a Manager): the
  *   property's changes, property records excepted; filter by `entity_type`,
- *   `entity_id` (one row's history), `impact`, `event`.
+ *   `entity_id` (one row's history), `impact`, `event`; `latest=1` (with
+ *   `entity_type`) keeps only each row's most recent matching change, e.g.
+ *   `impact=price&latest=1`: where each current price came from.
  * - GET /api/platform/property-changes (platform.property.manage, the
  *   Platform Owner): changes to property records (fee, subscription, name),
  *   optionally one property's (`property_id`).
@@ -66,6 +68,26 @@ class ConfigChangesController extends AppController
         $entityId = $this->request->getQuery('entity_id');
         if ($entityId !== null && $entityId !== '') {
             $query->where(['entity_id' => (int)$entityId]);
+        }
+        if ($this->request->getQuery('latest')) {
+            $entityType = (string)$this->request->getQuery('entity_type');
+            if ($entityType === '') {
+                throw new BadRequestException('latest needs entity_type.');
+            }
+            // No later change of the same row matching the same filters.
+            $later = $query->getConnection()->selectQuery('1', ['later' => 'config_changes'])
+                ->where([
+                    'later.entity_type = ConfigChanges.entity_type',
+                    'later.entity_id = ConfigChanges.entity_id',
+                    'later.id > ConfigChanges.id',
+                ]);
+            foreach (['impact' => 'impact', 'event' => 'event_type'] as $param => $column) {
+                $value = $this->request->getQuery($param);
+                if ($value !== null && $value !== '') {
+                    $later->where(["later.$column" => (string)$value]);
+                }
+            }
+            $query->where(fn($exp) => $exp->notExists($later));
         }
 
         return $query->orderBy(['occurred_at' => 'DESC', 'id' => 'DESC']);

@@ -10,9 +10,9 @@ import { SkeletonTable, SkeletonTableRows } from '../components/Skeleton'
 import {
   listCategories, createCategory, deleteCategory,
   listItems, listItemsPage, createItem, updateItem, deleteItem, listMovements, recordMovement,
-  listReceiptSeries, createReceiptSeries, updateReceiptSeries, deleteReceiptSeries,
 } from '../api/inventory'
 import { describeError } from '../utils/apiError'
+import ReasonModal from '../components/ReasonModal'
 
 const KINDS = ['food_stock', 'hygiene', 'linen', 'utensil', 'other']
 
@@ -50,7 +50,7 @@ export default function Inventory() {
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [view, setView] = useState('consumable') // consumable | reusable | receipts
+  const [view, setView] = useState('consumable') // consumable | reusable
   const [expanded, setExpanded] = useState(() => new Set()) // parent items with sub-items open
 
   // The Consumables/Reusables table is server-paginated and searchable (the
@@ -87,7 +87,7 @@ export default function Inventory() {
   }, [propertyId])
 
   const loadItems = useCallback(async () => {
-    if (!propertyId || view === 'receipts') return
+    if (!propertyId) return
     setItemsLoading(true)
     try {
       const params = { tracking_type: view, page: itemsPage, limit: ITEMS_PER_PAGE }
@@ -214,7 +214,7 @@ export default function Inventory() {
       {error && <Alert variant="danger">{error}</Alert>}
 
       <ButtonGroup className="mb-4">
-        {[['consumable', 'Consumables'], ['reusable', 'Reusables'], ['receipts', 'Receipt Booklets']].map(([val, label]) => (
+        {[['consumable', 'Consumables'], ['reusable', 'Reusables']].map(([val, label]) => (
           <Button
             key={val}
             variant={view === val ? 'primary' : 'outline-secondary'}
@@ -225,9 +225,7 @@ export default function Inventory() {
         ))}
       </ButtonGroup>
 
-      {view === 'receipts' ? (
-        <ReceiptBooklets canManage={can(P.FINANCE_RECEIPT_SERIES_MANAGE)} propertyId={propertyId} />
-      ) : loading ? (
+      {loading ? (
         <SkeletonTable rows={6} />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
@@ -502,8 +500,6 @@ function CategoryModal({ propertyId, onClose, onSaved }) {
 }
 
 function CategoriesModal({ categories, propertyId, onClose, onChanged }) {
-  const [busyId, setBusyId] = useState(null)
-  const [err, setErr] = useState(null)
   // Per-category item counts: fetched once when the modal opens (rather than
   // kept loaded on every Inventory page view) since the catalogue can grow
   // large. Capped at the same generous, effectively-unpaginated window
@@ -527,25 +523,14 @@ function CategoriesModal({ categories, propertyId, onClose, onChanged }) {
 
   const countFor = (id) => itemCounts[id] ?? 0
 
-  async function remove(c) {
-    if (!window.confirm(`Delete category "${c.name}"?`)) return
-    setBusyId(c.id)
-    setErr(null)
-    try {
-      await deleteCategory(c.id)
-      await onChanged()
-    } catch (ex) {
-      setErr(describeError(ex, 'Could not delete the category.'))
-    } finally {
-      setBusyId(null)
-    }
-  }
+  // Deleting a category asks why (step 9); the change log keeps its values.
+  const [deleting, setDeleting] = useState(null)
 
   return (
-    <Modal show onHide={onClose} centered>
+    <>
+    <Modal show={deleting === null} onHide={onClose} centered>
       <Modal.Header closeButton><Modal.Title>Manage categories</Modal.Title></Modal.Header>
       <Modal.Body>
-        {err && <Alert variant="danger">{err}</Alert>}
         {categories.length === 0 ? (
           <p className="mb-0 text-muted">No categories yet.</p>
         ) : (
@@ -559,10 +544,10 @@ function CategoriesModal({ categories, propertyId, onClose, onChanged }) {
                     <span className="ml-2 text-sm text-muted">{c.kind?.replace('_', ' ')}</span>
                     {!countsLoading && used > 0 && <span className="ml-2 text-sm text-muted">· {used} item(s)</span>}
                   </span>
-                  <Button size="sm" variant="outline-danger" disabled={busyId !== null || countsLoading || used > 0}
+                  <Button size="sm" variant="outline-danger" disabled={countsLoading || used > 0}
                     title={used > 0 ? 'Move or delete its items first' : 'Delete category'}
-                    onClick={() => remove(c)}>
-                    {busyId === c.id ? <Spinner size="sm" /> : 'Delete'}
+                    onClick={() => setDeleting(c)}>
+                    Delete
                   </Button>
                 </li>
               )
@@ -574,6 +559,17 @@ function CategoriesModal({ categories, propertyId, onClose, onChanged }) {
         <Button variant="secondary" onClick={onClose}>Close</Button>
       </Modal.Footer>
     </Modal>
+    <ReasonModal show={deleting !== null}
+      title={deleting ? `Delete category “${deleting.name}”` : ''}
+      description="It leaves the category lists; the change log keeps its values."
+      confirmLabel="Delete"
+      onHide={() => setDeleting(null)}
+      onConfirm={async (reason) => {
+        await deleteCategory(deleting.id, reason)
+        setDeleting(null)
+        await onChanged()
+      }} />
+    </>
   )
 }
 
@@ -756,231 +752,6 @@ function MoveModal({ propertyId, target, onClose, onSaved }) {
           <Button type="submit" variant={a.direction === 'in' ? 'success' : 'danger'} disabled={busy}>
             {busy ? <Spinner size="sm" /> : a.label}
           </Button>
-        </Modal.Footer>
-      </Form>
-    </Modal>
-  )
-}
-
-/* ---- Receipt booklets: registered physical invoice / OR number series ---- */
-
-const SERIES_TYPE_LABEL = { invoice: 'Physical Invoice', official_receipt: 'Official Receipt' }
-const SERIES_PER_PAGE = 10
-
-// A number the way it reads on the physical page (prefix + zero-padded digits).
-const seriesNumber = (s, n) => `${s.prefix ?? ''}${String(n).padStart(s.pad_length ?? 0, '0')}`
-
-function ReceiptBooklets({ canManage, propertyId }) {
-  const [modal, setModal] = useState(false)
-  const [pending, setPending] = useState(null)
-  const [err, setErr] = useState(null)
-
-  // Server-paginated and searchable (by prefix), like the other Inventory tables.
-  const [series, setSeries] = useState([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [q, setQ] = useState('')
-
-  useEffect(() => {
-    const t = setTimeout(() => { setQ(search.trim()); setPage(1) }, 300)
-    return () => clearTimeout(t)
-  }, [search])
-
-  const load = useCallback(async () => {
-    if (!propertyId) return
-    setLoading(true)
-    try {
-      const params = { page, limit: SERIES_PER_PAGE }
-      if (q) params.q = q
-      const data = await listReceiptSeries(propertyId, params)
-      setSeries(data.series ?? [])
-      setTotal(data.total ?? 0)
-      setErr(null)
-    } catch {
-      setErr('Could not load receipt booklets.')
-    } finally {
-      setLoading(false)
-    }
-  }, [propertyId, page, q])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load()
-  }, [load])
-
-  async function act(key, fn) {
-    setPending(key)
-    setErr(null)
-    try {
-      await fn()
-      await load()
-    } catch (ex) {
-      setErr(describeError(ex, 'Action failed.'))
-    } finally {
-      setPending(null)
-    }
-  }
-
-  const totalPages = Math.max(1, Math.ceil(total / SERIES_PER_PAGE))
-
-  return (
-    <div>
-      {err && <Alert variant="danger">{err}</Alert>}
-      <Card>
-        <Card.Header className="flex flex-wrap items-center gap-2 px-4 py-3">
-          <span>Receipt booklets</span>
-          <InputGroup style={{ maxWidth: 220 }}>
-            <InputGroup.Text>Search</InputGroup.Text>
-            <Form.Control value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Prefix" />
-          </InputGroup>
-          <span className="text-sm font-normal text-muted">{total} series</span>
-          {canManage && (
-            <Button size="sm" className="ml-auto" onClick={() => setModal(true)}>Register series</Button>
-          )}
-        </Card.Header>
-        <Table hover>
-          <thead>
-            <tr>
-              <th>Type</th><th>Series</th><th>Next number</th>
-              <th className="text-right">Remaining</th><th>Status</th>
-              {canManage && <th className="text-right">Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <SkeletonTableRows rows={4} cols={canManage ? 6 : 5} />}
-            {!loading && series.length === 0 && (
-              <tr>
-                <td colSpan={canManage ? 6 : 5} className="py-6 text-center text-muted">
-                  {q ? 'No booklet series match your search.' : 'No booklet series registered yet.'}
-                </td>
-              </tr>
-            )}
-            {!loading && series.map((s) => {
-              const remaining = Math.max(0, s.end_number - s.next_number + 1)
-              const exhausted = remaining === 0
-              return (
-                <tr key={s.id}>
-                  <td className="font-semibold">{SERIES_TYPE_LABEL[s.type] ?? s.type}</td>
-                  <td className="whitespace-nowrap">
-                    {seriesNumber(s, s.start_number)} – {seriesNumber(s, s.end_number)}
-                  </td>
-                  <td className="whitespace-nowrap">
-                    {exhausted
-                      ? <span className="text-muted">— exhausted —</span>
-                      : seriesNumber(s, s.next_number)}
-                  </td>
-                  <td className="text-right">{remaining}</td>
-                  <td>
-                    <Badge bg={s.is_active && !exhausted ? 'success' : 'secondary'}>
-                      {exhausted ? 'used up' : s.is_active ? 'active' : 'inactive'}
-                    </Badge>
-                  </td>
-                  {canManage && (
-                    <td className="whitespace-nowrap text-right">
-                      <Button size="sm" variant="outline-secondary" className="mr-1"
-                        disabled={pending !== null}
-                        onClick={() => act(`toggle-${s.id}`, () => updateReceiptSeries(s.id, { is_active: !s.is_active }))}>
-                        {pending === `toggle-${s.id}` ? <Spinner size="sm" /> : s.is_active ? 'Deactivate' : 'Activate'}
-                      </Button>
-                      <Button size="sm" variant="outline-danger"
-                        disabled={pending !== null}
-                        onClick={() => {
-                          if (window.confirm('Delete this unused series?')) {
-                            act(`del-${s.id}`, () => deleteReceiptSeries(s.id))
-                          }
-                        }}>
-                        {pending === `del-${s.id}` ? <Spinner size="sm" /> : 'Delete'}
-                      </Button>
-                    </td>
-                  )}
-                </tr>
-              )
-            })}
-          </tbody>
-        </Table>
-        {totalPages > 1 && (
-          <Card.Footer className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-muted">Page {page} of {totalPages} · {total} series</span>
-            <Pagination>
-              <Pagination.Prev disabled={page <= 1 || loading}
-                onClick={() => setPage((p) => Math.max(1, p - 1))} />
-              <Pagination.Next disabled={page >= totalPages || loading}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))} />
-            </Pagination>
-          </Card.Footer>
-        )}
-      </Card>
-      <p className="mt-2 mb-0 text-sm text-muted">
-        Register your pre-printed <strong>Sales Invoice</strong> and <strong>Official Receipt</strong> booklets
-        here. When an invoice is settled (Front Desk or Finance → Invoices), staff mark which document was
-        issued and the system stamps the next number from the active series onto the record. A series with
-        issued numbers can be deactivated but not deleted.
-      </p>
-
-      {modal && (
-        <SeriesModal
-          propertyId={propertyId}
-          onClose={() => setModal(false)}
-          onSaved={async () => { setModal(false); await load() }}
-        />
-      )}
-    </div>
-  )
-}
-
-function SeriesModal({ propertyId, onClose, onSaved }) {
-  const [form, setForm] = useState({ type: 'invoice', prefix: '', start_number: '', end_number: '' })
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
-  const { run, busy, err } = useSubmit(async () => {
-    await createReceiptSeries(form, propertyId)
-    onSaved()
-  })
-
-  const preview = form.start_number
-    ? `${form.prefix}${form.start_number}`
-    : null
-
-  return (
-    <Modal show onHide={onClose} centered>
-      <Form onSubmit={run}>
-        <Modal.Header closeButton><Modal.Title>Register booklet series</Modal.Title></Modal.Header>
-        <Modal.Body>
-          {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-4">
-            <Form.Label>Type</Form.Label>
-            <Form.Select value={form.type} onChange={set('type')} autoFocus>
-              <option value="invoice">Physical Invoice (Sales Invoice)</option>
-              <option value="official_receipt">Official Receipt</option>
-            </Form.Select>
-          </Form.Group>
-          <Form.Group className="mb-4">
-            <Form.Label>Prefix <span className="font-normal text-muted">(optional, e.g. &quot;OR-&quot;)</span></Form.Label>
-            <Form.Control value={form.prefix} onChange={set('prefix')} placeholder="e.g. OR-" />
-          </Form.Group>
-          <div className="grid grid-cols-2 gap-x-6">
-            <Form.Group className="mb-4">
-              <Form.Label>Start number</Form.Label>
-              <Form.Control value={form.start_number} onChange={set('start_number')}
-                required inputMode="numeric" pattern="\d+" placeholder="e.g. 0001" />
-              <Form.Text muted>Type it with leading zeros to keep the padding.</Form.Text>
-            </Form.Group>
-            <Form.Group className="mb-4">
-              <Form.Label>End number</Form.Label>
-              <Form.Control type="number" min={0} value={form.end_number} onChange={set('end_number')}
-                required placeholder="e.g. 500" />
-            </Form.Group>
-          </div>
-          {preview && (
-            <p className="mb-0 text-sm text-muted">
-              First number to be issued: <strong className="text-body">{preview}</strong>
-            </p>
-          )}
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : 'Register'}</Button>
         </Modal.Footer>
       </Form>
     </Modal>

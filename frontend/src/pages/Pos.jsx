@@ -18,6 +18,9 @@ import { listReservations } from '../api/frontdesk'
 import { SkeletonTable, SkeletonTableRows } from '../components/Skeleton'
 import { describeError } from '../utils/apiError'
 import ReasonModal from '../components/ReasonModal'
+import PriceReasonField from '../components/PriceReasonField'
+import ConfigHistory from '../components/settings/ConfigHistory'
+import { asksForReason } from '../utils/configChanges'
 import RefundMethodSelect from '../components/RefundMethodSelect'
 import { newRefundKey } from '../utils/refunds'
 
@@ -59,6 +62,7 @@ export default function Pos() {
     setOrder(order)
   }
   const [modal, setModal] = useState(null) // 'order' | {type:'menu',item?,defaultType?}
+  const [removingMenu, setRemovingMenu] = useState(null) // a menu item being deleted (asks why)
 
   // Orders — server-paginated and filtered (a fresh start each day).
   const [orders, setOrders] = useState([])
@@ -332,7 +336,7 @@ export default function Pos() {
               menuType="food" items={foodMenu} canManageMenu={canManageMenu} pending={pending}
               onAdd={() => setModal({ type: 'menu', defaultType: 'food' })}
               onEdit={(m) => setModal({ type: 'menu', item: m })}
-              onDelete={(m) => act(`del-menu-${m.id}`, deleteMenuItem, m.id)}
+              onDelete={setRemovingMenu}
             />
           </Tab>
 
@@ -342,7 +346,7 @@ export default function Pos() {
               menuType="linen" items={linenMenu} canManageMenu={canManageMenu} pending={pending}
               onAdd={() => setModal({ type: 'menu', defaultType: 'linen' })}
               onEdit={(m) => setModal({ type: 'menu', item: m })}
-              onDelete={(m) => act(`del-menu-${m.id}`, deleteMenuItem, m.id)}
+              onDelete={setRemovingMenu}
             />
           </Tab>
 
@@ -356,8 +360,19 @@ export default function Pos() {
       )}
       {modal?.type === 'menu' && (
         <MenuModal item={modal.item} defaultType={modal.defaultType} inventory={inventory} propertyId={propertyId}
+          canSeeHistory={can(P.SETTINGS_CHANGE_LOG_VIEW)}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); loadBase() }} />
       )}
+      <ReasonModal show={removingMenu !== null}
+        title={removingMenu ? `Delete “${removingMenu.name}”` : ''}
+        description="It leaves the menu. Past orders keep their record, and the change log keeps its values."
+        confirmLabel="Delete"
+        onHide={() => setRemovingMenu(null)}
+        onConfirm={async (reason) => {
+          await deleteMenuItem(removingMenu.id, reason)
+          setRemovingMenu(null)
+          await loadBase()
+        }} />
     </div>
   )
 }
@@ -474,8 +489,8 @@ function MenuCatalog({ menuType, items, canManageMenu, pending, onAdd, onEdit, o
                           onClick={() => onEdit(m)}>Edit</Button>
                         <Button size="sm" variant="outline-danger"
                           disabled={pending !== null}
-                          onClick={() => { if (window.confirm(`Remove "${m.name}"? Past orders keep their record.`)) onDelete(m) }}>
-                          {pending === `del-menu-${m.id}` ? <Spinner size="sm" /> : 'Delete'}
+                          onClick={() => onDelete(m)}>
+                          Delete
                         </Button>
                       </td>
                     )}
@@ -1065,7 +1080,13 @@ const newOptionGroupKey = () => `grp-${++optionGroupKeySeq}`
 let optionRowKeySeq = 0
 const newOptionRowKey = () => `opt-${++optionRowKeySeq}`
 
-function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved }) {
+// The options' prices as the server compares them (group, label, price, in
+// order): adding, removing or repricing an option is a price change.
+const optionPriceKey = (groups) => JSON.stringify(groups
+  .filter((g) => g.name.trim() && g.options.length)
+  .flatMap((g) => g.options.filter((o) => o.label.trim()).map((o) => [g.name, o.label, Number(o.price_delta) || 0])))
+
+function MenuModal({ item, defaultType, inventory, propertyId, canSeeHistory, onClose, onSaved }) {
   const editing = Boolean(item)
   // The type is fixed by which tab (Food/Linens) this modal was opened from —
   // not user-selectable, since that's the whole point of separating the tabs.
@@ -1135,6 +1156,14 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
       : g)))
   }
 
+  // A price change (the item's or any option's, as the server compares them)
+  // asks why (step 9): sales already made keep their price.
+  const [reason, setReason] = useState('')
+  const [originalOptionPrices] = useState(() => optionPriceKey(optionGroups))
+  const priceChanged = editing && (
+    Number(form.price) !== Number(item.price) || optionPriceKey(optionGroups) !== originalOptionPrices
+  )
+
   const stockOptions = useMemo(
     () => inventory.filter((i) => i.inventory_category?.kind === STOCK_KIND_FOR_TYPE[menuType]),
     [inventory, menuType],
@@ -1166,6 +1195,7 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
       inventory_item_id: form.inventory_item_id || null,
       ingredients: validIngredients,
       option_groups: validOptionGroups,
+      ...(reason.trim() ? { reason: reason.trim() } : {}),
     }
     if (editing) await updateMenuItem(item.id, payload)
     else await createMenuItem(payload, propertyId)
@@ -1293,6 +1323,9 @@ function MenuModal({ item, defaultType, inventory, propertyId, onClose, onSaved 
               + Add option group
             </Button>
           </Form.Group>
+          <PriceReasonField show={priceChanged || (editing && asksForReason(err))} value={reason}
+            onChange={setReason} note="Orders already placed keep the price they were sold at." />
+          {editing && canSeeHistory && <ConfigHistory entityType="menu_item" entityId={item.id} propertyId={propertyId} />}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>

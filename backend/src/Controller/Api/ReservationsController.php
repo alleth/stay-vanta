@@ -1318,6 +1318,10 @@ class ReservationsController extends AppController
      * room rate, its channel's promo rate, its extra charges) with who, why,
      * and whether it moved this booking's price; and what was billed. A
      * Manager may open a deleted reservation's.
+     *
+     * Who changed the configuration is shown only to someone who may read
+     * the change log (decided 2026-10-05: Front Desk sees the guest-facing
+     * explanation, the price and the reason; Managers see who).
      */
     public function price(int $id): void
     {
@@ -1373,7 +1377,8 @@ class ReservationsController extends AppController
         }
 
         $basis = $current['basis'];
-        $changes = array_map(function ($c) use ($who, $basis, $postedAt): array {
+        $showsActors = $this->can(Permissions::SETTINGS_CHANGE_LOG_VIEW);
+        $changes = array_map(function ($c) use ($who, $basis, $postedAt, $showsActors): array {
             $afterBilling = $postedAt !== null && $c->occurred_at > $postedAt;
             $rateInput = in_array($c->entity_type, ['room_rate', 'promo_rate'], true);
             $moved = $rateInput && $basis === 'live' && !$afterBilling && $c->impact === 'price';
@@ -1381,7 +1386,7 @@ class ReservationsController extends AppController
             return [
                 'id' => (int)$c->id,
                 'at' => $c->occurred_at,
-                'actor' => $who($c),
+                'actor' => $showsActors ? $who($c) : null,
                 'recorded' => $c->source !== 'import',
                 'entity_type' => $c->entity_type,
                 'entity_id' => (int)$c->entity_id,
@@ -1409,6 +1414,7 @@ class ReservationsController extends AppController
             'current' => $current,
             'history' => $history,
             'config_changes' => $changes,
+            'shows_actors' => $showsActors,
             'posted' => $posted,
             'notes' => array_values(array_filter([
                 $history === [] ? 'This booking was made before prices were recorded with each change.' : null,
@@ -1419,7 +1425,10 @@ class ReservationsController extends AppController
         ]);
         $this->viewBuilder()->setOption(
             'serialize',
-            ['reservation_id', 'basis', 'rate_source', 'current', 'history', 'config_changes', 'posted', 'notes'],
+            [
+                'reservation_id', 'basis', 'rate_source', 'current', 'history', 'config_changes', 'shows_actors',
+                'posted', 'notes',
+            ],
         );
     }
 

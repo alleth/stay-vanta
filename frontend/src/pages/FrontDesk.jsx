@@ -5,7 +5,6 @@ import {
 import { useProperty } from '../context/PropertyContext'
 import { useAuth } from '../context/AuthContext'
 import { P } from '../auth/permissions'
-import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
 import { matchGuests, listGuests } from '../api/guests'
 import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
@@ -13,19 +12,18 @@ import { SummaryGroup, SummaryRow } from '../components/StatCard'
 import { InvoicesPanel } from '../components/finance/InvoicesPanel'
 import { BILLING_STATE, roomStatusLabel } from '../utils/roles'
 import {
-  listRooms, createRoom, updateRoom, deleteRoom,
-  listRoomRates, createRoomRate, updateRoomRate,
-  listBookingSources,
-  listPromoRates, createPromoRate, updatePromoRate, deletePromoRate,
+  listRooms, updateRoom, listRoomRates, listBookingSources, listPromoRates,
   listReservations, pageReservations, reservationStats,
   createReservation, updateReservation, deleteReservation, transitionReservation,
   postRoomCharge, reverseRoomCharge,
-  listExtraCharges, createExtraCharge, updateExtraCharge, deleteExtraCharge,
+  listExtraCharges,
 } from '../api/frontdesk'
 import { describeError } from '../utils/apiError'
 import ReasonModal from '../components/ReasonModal'
 import RefundMethodSelect from '../components/RefundMethodSelect'
 import ReservationHistory from '../components/ReservationHistory'
+import ReservationPrice from '../components/ReservationPrice'
+import { WALK_IN, sourceLabel } from '../utils/bookingLabels'
 
 // Standard check-in is from noon; arriving earlier in the day is an early check-in.
 const isEarlyCheckInNow = () => new Date().getHours() < 12
@@ -43,9 +41,8 @@ const RESERVATIONS_PER_PAGE = 25
 
 // 'walk_in' is fixed — always available, never admin-managed, never eligible
 // for a promo rate. Every other source comes from the property's own
-// `booking_sources` (admin-managed on this tab), replacing what used to be a
+// `booking_sources` (created by promo-rate saves in Settings), replacing what used to be a
 // hardcoded OTA list.
-const WALK_IN = 'walk_in'
 const ONLINE = 'online'
 
 // The two ways a booking reaches the desk. An online one carries the
@@ -55,8 +52,6 @@ const BOOKING_TYPES = [
   { id: WALK_IN, label: 'Walk-in', hint: 'Guest is here now' },
   { id: ONLINE, label: 'Online booking', hint: 'Agoda, Cocotel, …' },
 ]
-const sourceLabel = (bookingSources, code) =>
-  (code === WALK_IN ? 'Walk-in' : bookingSources.find((s) => s.code === code)?.name ?? code)
 
 // The promo multiplier that applies to a source + room: the admin's
 // room-specific row wins over a property-wide one; null when none is
@@ -77,7 +72,6 @@ function resolveBaseRate(rates, roomId) {
   return specific ?? cheapest(rates.filter((rt) => rt.room_id === null)) ?? 0
 }
 
-const roomLabel = (r) => `Room ${r.room_number} — ${r.room_type ?? 'Room'}`
 const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning' }
 const RES_VARIANT = { booked: 'secondary', checked_in: 'primary', checked_out: 'success', cancelled: 'dark' }
 
@@ -195,10 +189,8 @@ function statusOptions(status) {
 export default function FrontDesk() {
   const { propertyId } = useProperty()
   const { can } = useAuth()
-  const canManageRooms = can(P.SETTINGS_ROOM_MANAGE)
-  const canManageRates = can(P.SETTINGS_ROOM_RATE_MANAGE)
-  const canManagePromos = can(P.SETTINGS_PROMO_RATE_MANAGE)
-  const canManageCharges = can(P.SETTINGS_EXTRA_CHARGE_MANAGE)
+  // Rooms, rates, promo rates and extra charges are set up in Settings (step 9).
+  const canSetUpRooms = can(P.SETTINGS_ROOM_MANAGE)
   // Anyone can fix a booking before check-in; a Manager can also correct (or
   // delete) a stay that's under way or over — the backend decides the rest.
   const canCorrect = can(P.FRONT_DESK_RESERVATION_CORRECT)
@@ -222,7 +214,7 @@ export default function FrontDesk() {
   const [extraCharges, setExtraCharges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [modal, setModal] = useState(null) // { type:'reservation'|'room'|'rate'|'charge', ... }
+  const [modal, setModal] = useState(null) // { type: 'reservation', reservation? }
   const [reservationRoomId, setReservationRoomId] = useState(null)
   const [reservationDate, setReservationDate] = useState(null)
   const [calDate, setCalDate] = useState(todayStr)
@@ -392,34 +384,6 @@ export default function FrontDesk() {
     }
   }
 
-  async function doDeleteCharge(charge) {
-    if (!window.confirm(`Delete the "${charge.name}" charge?`)) return
-    setPending(`charge-${charge.id}`)
-    setError(null)
-    try {
-      await deleteExtraCharge(charge.id)
-      await refresh()
-    } catch (ex) {
-      setError(describeError(ex, 'Could not delete the charge.'))
-    } finally {
-      setPending(null)
-    }
-  }
-
-  async function doDeletePromoRate(pr) {
-    if (!window.confirm(`Delete the ${sourceLabel(bookingSources, pr.source)} promo rate?`)) return
-    setPending(`promo-${pr.id}`)
-    setError(null)
-    try {
-      await deletePromoRate(pr.id)
-      await refresh()
-    } catch (ex) {
-      setError(describeError(ex, 'Could not delete the promo rate.'))
-    } finally {
-      setPending(null)
-    }
-  }
-
   async function changeRoomStatus(room, status) {
     setPending(`room-${room.id}`)
     try {
@@ -427,20 +391,6 @@ export default function FrontDesk() {
       await refresh()
     } catch (ex) {
       setError(describeError(ex, 'Action failed.'))
-    } finally {
-      setPending(null)
-    }
-  }
-
-  async function doDeleteRoom(room) {
-    if (!window.confirm(`Delete room ${room.room_number}? This can't be undone.`)) return
-    setPending(`room-${room.id}`)
-    setError(null)
-    try {
-      await deleteRoom(room.id)
-      await refresh()
-    } catch (ex) {
-      setError(describeError(ex, 'Could not delete the room.'))
     } finally {
       setPending(null)
     }
@@ -702,10 +652,10 @@ export default function FrontDesk() {
 
           {/* ---- Rooms ---- */}
           <Tab eventKey="rooms" title={`Rooms (${rooms.length})`}>
-            {canManageRooms && (
-              <div className="mb-2 flex justify-end">
-                <Button onClick={() => setModal({ type: 'room' })}>Add room</Button>
-              </div>
+            {canSetUpRooms && (
+              <p className="mb-3 text-sm text-muted">
+                Rooms, rates, promo rates and extra charges are set up in Settings (from Home).
+              </p>
             )}
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
               {rooms.length === 0 && <p className="text-muted">No rooms yet.</p>}
@@ -725,113 +675,10 @@ export default function FrontDesk() {
                         </option>
                       ))}
                     </Form.Select>
-                    {canManageRooms && (
-                      <div className="mt-2 flex gap-1">
-                        <Button size="sm" variant="outline-secondary" className="flex-1"
-                          disabled={pending !== null}
-                          onClick={() => setModal({ type: 'room', room })}>
-                          Edit
-                        </Button>
-                        <Button size="sm" variant="outline-danger" className="flex-1"
-                          disabled={pending !== null}
-                          onClick={() => doDeleteRoom(room)}>
-                          {pending === `room-${room.id}` ? <Spinner size="sm" /> : 'Delete'}
-                        </Button>
-                      </div>
-                    )}
                   </Card.Body>
                 </Card>
               ))}
             </div>
-          </Tab>
-
-          {/* ---- Rates ---- */}
-          <Tab eventKey="rates" title={`Rates (${rates.length})`}>
-            {canManageRates && (
-              <div className="mb-2 flex justify-end">
-                <Button onClick={() => setModal({ type: 'rate' })}>Add rate</Button>
-              </div>
-            )}
-            <Card>
-              <Table hover>
-                <thead>
-                  <tr>
-                    <th>Applies to</th><th>Amenities &amp; bed</th>
-                    <th className="text-right">Nightly rate</th>
-                    {canManageRates && <th className="text-right">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rates.length === 0 && (
-                    <tr><td colSpan={canManageRates ? 4 : 3} className="py-6 text-center text-muted">No rates yet.</td></tr>
-                  )}
-                  {rates.map((rt) => (
-                    <tr key={rt.id}>
-                      <td className="font-semibold">{rt.room ? `Room ${rt.room.room_number}` : 'All rooms'}</td>
-                      <td className="max-w-[320px] text-xs text-muted">{rt.description || '—'}</td>
-                      <td className="text-right">{formatMoney(rt.base_rate)}</td>
-                      {canManageRates && (
-                        <td className="text-right">
-                          <Button size="sm" variant="outline-primary"
-                            onClick={() => setModal({ type: 'rate', rate: rt })}>Edit</Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </Card>
-          </Tab>
-
-          {/* ---- Promo Rates (OTA nightly prices; auto-fill the booking form) ---- */}
-          <Tab eventKey="promo-rates" title={`Promo Rates (${promoRates.length})`}>
-            {canManagePromos && (
-              <div className="mb-2 flex justify-end">
-                <Button onClick={() => setModal({ type: 'promo' })}>Add promo rate</Button>
-              </div>
-            )}
-            <Card>
-              <Table hover>
-                <thead>
-                  <tr>
-                    <th>Source</th><th>Applies to</th><th className="text-right">Rate multiplier</th>
-                    {canManagePromos && <th className="text-right">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {promoRates.length === 0 && (
-                    <tr><td colSpan={canManagePromos ? 4 : 3} className="py-6 text-center text-muted">No promo rates yet.</td></tr>
-                  )}
-                  {promoRates.map((pr) => (
-                    <tr key={pr.id}>
-                      <td className="font-semibold">{sourceLabel(bookingSources, pr.source)}</td>
-                      <td>{pr.room ? roomLabel(pr.room) : 'All rooms'}</td>
-                      <td className="text-right">×{Number(pr.multiplier)}</td>
-                      {canManagePromos && (
-                        <td className="whitespace-nowrap text-right">
-                          <Button size="sm" variant="outline-primary" className="mr-1"
-                            disabled={pending !== null}
-                            onClick={() => setModal({ type: 'promo', promoRate: pr })}>Edit</Button>
-                          <Button size="sm" variant="outline-danger"
-                            disabled={pending !== null}
-                            onClick={() => doDeletePromoRate(pr)}>
-                            {pending === `promo-${pr.id}` ? <Spinner size="sm" /> : 'Delete'}
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </Card>
-            <p className="mt-2 mb-0 text-sm text-muted">
-              A promo rate is a <strong>multiple of the room&apos;s original rate</strong> — e.g. ×2
-              doubles the nightly price for that OTA. Typing a new booking source&apos;s name when adding
-              a promo rate adds it to the <strong>Source</strong> dropdown on New Reservation automatically
-              — there&apos;s nothing to set up separately. When a reservation&apos;s Source is an OTA, the
-              booking form computes original rate × multiplier automatically (a room-specific multiplier
-              wins over an &quot;All rooms&quot; one). Front Desk Staff can&apos;t type promo prices by hand.
-            </p>
           </Tab>
 
           {/* ---- Calendar / availability by date ---- */}
@@ -898,59 +745,6 @@ export default function FrontDesk() {
             </div>
           </Tab>
 
-          {/* ---- Extra Charges (admin/owner only) ---- */}
-          {canManageCharges && (
-            <Tab eventKey="charges" title="Extra Charges">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="mb-0 text-sm text-muted">
-                  Active charges (e.g. Extra bed) can be added to a reservation under Pricing.
-                  Early check-in is billed when the guest checks in.
-                </p>
-                <Button className="shrink-0" onClick={() => setModal({ type: 'charge' })}>Add charge</Button>
-              </div>
-              <Card>
-                <Table hover>
-                  <thead>
-                    <tr>
-                      <th>Charge</th><th className="text-right">Amount</th><th>Status</th>
-                      <th className="text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {extraCharges.length === 0 && (
-                      <tr><td colSpan={4} className="py-6 text-center text-muted">No extra charges yet.</td></tr>
-                    )}
-                    {extraCharges.map((c) => (
-                      <tr key={c.id}>
-                        <td className="font-semibold">
-                          {c.name}
-                          {c.code && <Badge bg="info" className="ml-2 font-normal">built-in</Badge>}
-                        </td>
-                        <td className="text-right">{formatMoney(c.amount)}</td>
-                        <td><Badge bg={c.is_active ? 'success' : 'secondary'}>{c.is_active ? 'active' : 'inactive'}</Badge></td>
-                        <td className="whitespace-nowrap text-right">
-                          <Button size="sm" variant="outline-primary" className="mr-1"
-                            disabled={pending !== null}
-                            onClick={() => setModal({ type: 'charge', charge: c })}>Edit</Button>
-                          {!c.code && (
-                            <Button size="sm" variant="outline-danger"
-                              disabled={pending !== null}
-                              onClick={() => doDeleteCharge(c)}>
-                              {pending === `charge-${c.id}` ? <Spinner size="sm" /> : 'Delete'}
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              </Card>
-              <p className="mt-2 mb-0 text-sm text-muted">
-                The <strong>Early check-in</strong> fee is billed automatically to the guest&apos;s invoice
-                when a receptionist checks them in before noon. Set it to 0 to disable.
-              </p>
-            </Tab>
-          )}
         </Tabs>
         </>
       )}
@@ -1021,23 +815,6 @@ export default function FrontDesk() {
           extraCharges={extraCharges}
           propertyId={propertyId} defaultRoomId={reservationRoomId} defaultCheckIn={reservationDate}
           reservation={modal.reservation}
-          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
-      )}
-      {modal?.type === 'room' && (
-        <RoomModal propertyId={propertyId} room={modal.room}
-          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
-      )}
-      {modal?.type === 'rate' && (
-        <RateModal rooms={rooms} propertyId={propertyId} rate={modal.rate}
-          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
-      )}
-      {modal?.type === 'promo' && (
-        <PromoRateModal rooms={rooms} bookingSources={bookingSources} propertyId={propertyId}
-          promoRate={modal.promoRate}
-          onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
-      )}
-      {modal?.type === 'charge' && (
-        <ChargeModal charge={modal.charge} propertyId={propertyId}
           onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh() }} />
       )}
 
@@ -1848,6 +1625,7 @@ function ReservationModal({
             </Form.Group>
           )}
          </fieldset>
+          {editing && <ReservationPrice reservationId={reservation.id} rooms={rooms} rates={rates} />}
           {editing && <ReservationHistory reservationId={reservation.id} rooms={rooms} />}
         </Modal.Body>
         <Modal.Footer>
@@ -1884,211 +1662,3 @@ function ReservationModal({
   )
 }
 
-function RoomModal({ propertyId, room, onClose, onSaved }) {
-  const editing = Boolean(room)
-  const [form, setForm] = useState({
-    room_number: room?.room_number ?? '',
-    room_type: room?.room_type ?? '',
-    status: room?.status ?? 'available',
-  })
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
-  const { run, busy, err } = useSubmit(async () => {
-    if (editing) await updateRoom(room.id, form)
-    else await createRoom(form, propertyId)
-    onSaved()
-  })
-  return (
-    <Modal show onHide={onClose} centered>
-      <Form onSubmit={run}>
-        <Modal.Header closeButton><Modal.Title>{editing ? 'Edit room' : 'Add room'}</Modal.Title></Modal.Header>
-        <Modal.Body>
-          {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-4">
-            <Form.Label>Room number</Form.Label>
-            <Form.Control value={form.room_number} onChange={set('room_number')} required autoFocus />
-          </Form.Group>
-          <Form.Group>
-            <Form.Label>Room type</Form.Label>
-            <Form.Control value={form.room_type} onChange={set('room_type')} placeholder="e.g. Deluxe" />
-          </Form.Group>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
-        </Modal.Footer>
-      </Form>
-    </Modal>
-  )
-}
-
-function RateModal({ rooms, propertyId, rate, onClose, onSaved }) {
-  const editing = Boolean(rate)
-  const [form, setForm] = useState({
-    description: rate?.description ?? '',
-    base_rate: rate?.base_rate ?? '',
-    room_id: rate?.room_id ?? '',
-  })
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
-  const { run, busy, err } = useSubmit(async () => {
-    const payload = {
-      description: form.description,
-      base_rate: form.base_rate, room_id: form.room_id || null,
-    }
-    if (editing) await updateRoomRate(rate.id, payload)
-    else await createRoomRate(payload, propertyId)
-    onSaved()
-  })
-  return (
-    <Modal show onHide={onClose} centered>
-      <Form onSubmit={run}>
-        <Modal.Header closeButton><Modal.Title>{editing ? 'Edit rate' : 'Add rate'}</Modal.Title></Modal.Header>
-        <Modal.Body>
-          {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-4">
-            <Form.Label>Amenities &amp; bed type</Form.Label>
-            <Form.Control as="textarea" rows={2} maxLength={255} autoFocus
-              value={form.description} onChange={set('description')}
-              placeholder="What the guest gets — e.g. Queen bed, A/C, hot shower, free breakfast for 2" />
-          </Form.Group>
-          <Form.Group className="mb-4">
-            <Form.Label>Nightly rate</Form.Label>
-            <Form.Control type="number" min={0} step="0.01" value={form.base_rate} onChange={set('base_rate')} required />
-          </Form.Group>
-          <Form.Group>
-            <Form.Label>Applies to</Form.Label>
-            <Form.Select value={form.room_id} onChange={set('room_id')}>
-              <option value="">All rooms (property-wide)</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>Room {r.room_number}</option>)}
-            </Form.Select>
-          </Form.Group>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
-        </Modal.Footer>
-      </Form>
-    </Modal>
-  )
-}
-
-function PromoRateModal({ rooms, bookingSources, propertyId, promoRate, onClose, onSaved }) {
-  const editing = Boolean(promoRate)
-  // Booking source is a free-text field, not a fixed picker: typing an
-  // existing source's name reuses it, typing a new one creates it — the
-  // backend resolves/creates by name (BookingSourcesTable::slugFor), so
-  // there's no separate "add a source first" step.
-  const [form, setForm] = useState({
-    sourceName: promoRate ? sourceLabel(bookingSources, promoRate.source) : '',
-    multiplier: promoRate?.multiplier ?? '',
-    room_id: promoRate?.room_id ?? '',
-  })
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
-  const { run, busy, err } = useSubmit(async () => {
-    const payload = {
-      source_name: form.sourceName,
-      multiplier: form.multiplier,
-      room_id: form.room_id || null,
-    }
-    if (editing) await updatePromoRate(promoRate.id, payload)
-    else await createPromoRate(payload, propertyId)
-    onSaved()
-  })
-  return (
-    <Modal show onHide={onClose} centered>
-      <Form onSubmit={run}>
-        <Modal.Header closeButton>
-          <Modal.Title>{editing ? 'Edit promo rate' : 'Add promo rate'}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-4">
-            <Form.Label>Booking source</Form.Label>
-            <Form.Control list="booking-source-suggestions" value={form.sourceName} onChange={set('sourceName')}
-              placeholder="e.g. Cocotel, Agoda, Booking.com" required autoFocus />
-            <datalist id="booking-source-suggestions">
-              {bookingSources.map((bs) => <option key={bs.id} value={bs.name} />)}
-            </datalist>
-            <Form.Text muted>
-              Pick an existing source or type a new one — new sources are added automatically and
-              immediately show up on the New Reservation form&apos;s Source dropdown.
-            </Form.Text>
-          </Form.Group>
-          <Form.Group className="mb-4">
-            <Form.Label>Rate multiplier</Form.Label>
-            <Form.Control type="number" min={1} step="0.1" value={form.multiplier}
-              onChange={set('multiplier')} required placeholder="e.g. 2 = ×2 the room's original rate" />
-            <Form.Text muted>
-              The promo price is the room&apos;s original rate × this — e.g. ×2 makes a ₱1,500 room ₱3,000.
-            </Form.Text>
-          </Form.Group>
-          <Form.Group>
-            <Form.Label>Applies to</Form.Label>
-            <Form.Select value={form.room_id} onChange={set('room_id')}>
-              <option value="">All rooms (property-wide)</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
-            </Form.Select>
-          </Form.Group>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
-        </Modal.Footer>
-      </Form>
-    </Modal>
-  )
-}
-
-function ChargeModal({ charge, propertyId, onClose, onSaved }) {
-  const editing = Boolean(charge)
-  const builtIn = Boolean(charge?.code) // early check-in: name & code are fixed
-  const [form, setForm] = useState({
-    name: charge?.name ?? '',
-    amount: charge?.amount ?? '',
-    is_active: charge?.is_active ?? true,
-  })
-  const { run, busy, err } = useSubmit(async () => {
-    const payload = { name: form.name, amount: form.amount === '' ? 0 : form.amount, is_active: form.is_active }
-    if (editing) await updateExtraCharge(charge.id, payload)
-    else await createExtraCharge(payload, propertyId)
-    onSaved()
-  })
-
-  return (
-    <Modal show onHide={onClose} centered>
-      <Form onSubmit={run}>
-        <Modal.Header closeButton>
-          <Modal.Title>{editing ? `Edit ${builtIn ? 'fee' : 'charge'}` : 'Add charge'}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-4">
-            <Form.Label>Name</Form.Label>
-            <Form.Control value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required autoFocus={!builtIn} disabled={builtIn}
-              placeholder="e.g. Late check-out, Extra towel" />
-            {builtIn && <Form.Text muted>This is a built-in charge; its name is fixed.</Form.Text>}
-          </Form.Group>
-          <div className="grid grid-cols-2 gap-x-6">
-            <Form.Group className="mb-4">
-              <Form.Label>Amount</Form.Label>
-              <Form.Control type="number" min={0} step="0.01" value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })} required autoFocus={builtIn} />
-            </Form.Group>
-            <Form.Group className="mb-4">
-              <Form.Label>Status</Form.Label>
-              <Form.Select value={form.is_active ? '1' : '0'}
-                onChange={(e) => setForm({ ...form, is_active: e.target.value === '1' })}>
-                <option value="1">Active</option>
-                <option value="0">Inactive</option>
-              </Form.Select>
-            </Form.Group>
-          </div>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? <Spinner size="sm" /> : editing ? 'Save' : 'Create'}</Button>
-        </Modal.Footer>
-      </Form>
-    </Modal>
-  )
-}

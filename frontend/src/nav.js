@@ -7,7 +7,7 @@
 // hold some hotel permissions today (docs/PERMISSIONS.md, † grants), and a
 // permission never implies where it applies.
 import {
-  DashboardIcon, BuildingIcon, BoxIcon, DoorIcon, UserIcon, ReceiptIcon, UsersIcon, WalletIcon,
+  DashboardIcon, BuildingIcon, BoxIcon, DoorIcon, UserIcon, ReceiptIcon, UsersIcon, WalletIcon, SettingsIcon,
 } from './components/icons'
 import { P } from './auth/permissions'
 
@@ -19,6 +19,7 @@ export const GROUPS = [
   { key: 'guest_services', label: 'Guest services' },
   { key: 'property', label: 'Property' },
   { key: 'team', label: 'Team' },
+  { key: 'settings', label: 'Settings' },
 ]
 
 export const NAV = [
@@ -41,7 +42,7 @@ export const NAV = [
     scope: 'property', permission: P.FINANCE_COLLECTIONS_VIEW, group: 'overview', Icon: WalletIcon,
   },
   {
-    to: '/front-desk', label: 'Front Desk', blurb: 'Rooms, rates & reservations',
+    to: '/front-desk', label: 'Front Desk', blurb: 'Reservations, rooms & check-out',
     scope: 'property', permission: P.FRONT_DESK_RESERVATION_VIEW, group: 'guest_services', Icon: DoorIcon,
   },
   {
@@ -53,12 +54,18 @@ export const NAV = [
     scope: 'property', permission: P.POS_SALE_VIEW, group: 'guest_services', Icon: ReceiptIcon,
   },
   {
-    to: '/inventory', label: 'Inventory', blurb: 'Stock & receipt booklets',
+    to: '/inventory', label: 'Inventory', blurb: 'Stock & categories',
     scope: 'property', permission: P.INVENTORY_ITEM_VIEW, group: 'property', Icon: BoxIcon,
   },
   {
     to: '/staff', label: 'Staff', blurb: 'Manage your team',
     scope: 'property', permission: P.STAFF_ACCOUNT_VIEW, group: 'team', Icon: UsersIcon,
+  },
+  // Settings never ships without its change log (CLAUDE.md), so it opens for
+  // whoever may read that log: a Manager (step 9).
+  {
+    to: '/settings', label: 'Settings', blurb: 'Rooms, rates & change log',
+    scope: 'property', permission: P.SETTINGS_CHANGE_LOG_VIEW, group: 'settings', Icon: SettingsIcon,
   },
 ]
 
