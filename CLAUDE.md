@@ -550,8 +550,11 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   `contain()` them (`beneficiariesFor()`), so it can't silently bill full rate.
 
 ### Front Desk (reservations)
-- **Pricing is `ReservationsTable::quote()`**: nightly rate = `promo_rate` ?? resolved room rate
-  (`resolveBaseRate()`: room-specific `room_rates` row, else cheapest property-wide). Order of
+- **Pricing is `ReservationsTable::quote()`**: nightly rate = `promo_rate` ?? `nightly_rate` (the
+  base rate fixed at booking, step 9 C1) ?? resolved room rate (`resolveBaseRate()`: room-specific
+  `room_rates` row, else cheapest property-wide; only bookings from before step 9 read it live).
+  `priceBasis()` resolves and records it (`rate_source`); edits re-price only on a room or source
+  change. `GET /reservations/{id}/price` explains any price. Order of
   deductions: **channel discount first** (percent, or fixed capped at subtotal), then the statutory
   share, then the **referral** (`discount_amount`, flat pesos, optional but `> 0` if set, capped so
   the total can't go negative). Statutory and referral stack. Then the booking's **extra

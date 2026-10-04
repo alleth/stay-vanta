@@ -621,6 +621,11 @@ class OperationsController extends AppController
                     ['event_table' => 'food_order_events', 'event_type IN' => ['placed', 'refunded']],
                     ['event_table' => 'invoice_events', 'event_type IN' => self::FEED_INVOICE_EVENTS],
                     ['event_table' => 'reservation_events', 'event_type IN' => self::FEED_RESERVATION_EVENTS],
+                    // Configuration (step 9, C4): price changes and deletions;
+                    // everything else is in Settings → Change log.
+                    "event_table = 'config_changes' AND EXISTS (SELECT 1 FROM config_changes cc
+                        WHERE cc.id = ActivityIndex.event_id AND cc.event_type != 'baseline_recorded'
+                        AND (cc.impact = 'price' OR cc.event_type = 'deleted'))",
                 ],
             ])
             ->orderBy(['occurred_at' => 'DESC'])
@@ -644,9 +649,14 @@ class OperationsController extends AppController
         $invoiceEventIds = [];
         $saleRefundIds = [];
         $reservationEventIds = [];
+        $configChangeIds = [];
         foreach ($rows as $row) {
             if ($row['event_table'] === 'reservation_events') {
                 $reservationEventIds[] = (int)$row['event_id'];
+                continue;
+            }
+            if ($row['event_table'] === 'config_changes') {
+                $configChangeIds[] = (int)$row['event_id'];
                 continue;
             }
             if ($row['event_table'] === 'stock_movements') {
@@ -662,6 +672,7 @@ class OperationsController extends AppController
         $invoiceLines = $this->invoiceFeedLines($invoiceEventIds);
         $saleRefundLines = $this->saleRefundFeedLines($saleRefundIds);
         $reservationLines = $this->reservationFeedLines($reservationEventIds);
+        $configLines = $this->configFeedLines($configChangeIds);
         $movements = $movementIds === [] ? [] : $this->fetchTable('StockMovements')->find()
             ->contain([
                 'InventoryItems' => ['fields' => ['id', 'name', 'unit']],
@@ -700,6 +711,12 @@ class OperationsController extends AppController
             if ($row['event_table'] === 'reservation_events') {
                 if (isset($reservationLines[(int)$row['event_id']])) {
                     $events[] = $reservationLines[(int)$row['event_id']];
+                }
+                continue;
+            }
+            if ($row['event_table'] === 'config_changes') {
+                if (isset($configLines[(int)$row['event_id']])) {
+                    $events[] = $configLines[(int)$row['event_id']];
                 }
                 continue;
             }
@@ -858,6 +875,58 @@ class OperationsController extends AppController
                 'backdated_entry' => !empty($changes['backdated_entry']),
                 'changed' => $e->event_type === ReservationEventsTable::DISCOUNT_CHANGED
                     ? array_keys($changes) : null,
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Feed lines for configuration changes (build step 9): price changes and
+     * deletions, as they happened — what (entity type and its label), who,
+     * when, why, the impact, and each changed price field before and after.
+     *
+     * @param list<int> $changeIds config_changes ids on this page.
+     * @return array<int, array<string, mixed>> Feed line per change id.
+     */
+    private function configFeedLines(array $changeIds): array
+    {
+        if ($changeIds === []) {
+            return [];
+        }
+        $changes = $this->fetchTable('ConfigChanges')->find()->where(['id IN' => $changeIds])->all()->toList();
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($c) => $c->actor_id, $changes))));
+        $actors = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        $lines = [];
+        foreach ($changes as $c) {
+            // Scalar fields only (a menu's options are in the change log).
+            $fields = [];
+            if ($c->event_type === 'updated') {
+                foreach ((array)$c->changes as $field => $change) {
+                    $scalar = is_array($change)
+                        && !is_array($change['before'] ?? null)
+                        && !is_array($change['after'] ?? null);
+                    if ($scalar) {
+                        $fields[$field] = $change;
+                    }
+                }
+            }
+            $lines[(int)$c->id] = [
+                'type' => 'config',
+                'id' => 'config-change-' . $c->id,
+                'at' => $c->occurred_at,
+                'actor' => $c->actor_id !== null ? ($actors[$c->actor_id] ?? null) : null,
+                'recorded' => $c->source !== 'import',
+                'source' => $c->source,
+                'event' => $c->event_type,
+                'entity_type' => $c->entity_type,
+                'entity_id' => (int)$c->entity_id,
+                'label' => $c->snapshot['label'] ?? null,
+                'impact' => $c->impact,
+                'reason' => $c->reason,
+                'fields' => $fields,
             ];
         }
 

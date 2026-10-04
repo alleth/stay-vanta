@@ -40,6 +40,7 @@ export const P = {
   SETTINGS_ROOM_RATE_MANAGE: 'settings.room_rate.manage',
   SETTINGS_PROMO_RATE_MANAGE: 'settings.promo_rate.manage',
   SETTINGS_EXTRA_CHARGE_MANAGE: 'settings.extra_charge.manage',
+  SETTINGS_CHANGE_LOG_VIEW: 'settings.change_log.view',
   STAFF_ACCOUNT_VIEW: 'staff.account.view',
   STAFF_ACCOUNT_MANAGE: 'staff.account.manage',
 }
@@ -110,6 +111,7 @@ export const ROLE_FALLBACK = {
     P.OPERATIONS_TODAY_VIEW,
     P.OPERATIONS_STAFF_VIEW,
     P.FINANCE_ANALYTICS_VIEW,
+    P.SETTINGS_CHANGE_LOG_VIEW,
     P.FINANCE_INVOICE_REVERSE,
     P.FINANCE_INVOICE_REFUND,
     P.FRONT_DESK_RESERVATION_BACKDATE,

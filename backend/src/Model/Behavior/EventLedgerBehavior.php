@@ -78,7 +78,8 @@ class EventLedgerBehavior extends Behavior
      * @param string $type One of the table's TYPES.
      * @param \Cake\Datasource\EntityInterface $subject The record the event is about (has property_id).
      * @param array<string, mixed> $options `changes` (before/after), `columns` (typed columns such as
-     *   amount), `correctsEventId` (the event this one corrects).
+     *   amount), `correctsEventId` (the event this one corrects), `snapshot` (facts added to the
+     *   table's own snapshot).
      * @return \Cake\Datasource\EntityInterface The stored event.
      */
     public function record(
@@ -102,7 +103,15 @@ class EventLedgerBehavior extends Behavior
             'corrects_event_id' => $options['correctsEventId'] ?? null,
         ] + $columns, ['guard' => false]);
 
-        return $this->write($context, $type, $event, $subject);
+        // `snapshot` adds facts to the table's own snapshot (e.g. a
+        // reservation's price, step 9); it never replaces them.
+        $writeOptions = [];
+        if (!empty($options['snapshot'])) {
+            $base = method_exists($table, 'snapshotOf') ? $table->snapshotOf($subject) : [];
+            $writeOptions['snapshot'] = $base + (array)$options['snapshot'];
+        }
+
+        return $this->write($context, $type, $event, $subject, $writeOptions);
     }
 
     /**

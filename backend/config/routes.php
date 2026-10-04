@@ -75,6 +75,9 @@ return function (RouteBuilder $routes): void {
         $builder->get('/finance/summary', ['controller' => 'Finance', 'action' => 'summary']);
         $builder->get('/finance/seasonality', ['controller' => 'Finance', 'action' => 'seasonality']);
         $builder->get('/platform/dashboard', ['controller' => 'Platform', 'action' => 'dashboard']);
+        // The configuration change log (step 9).
+        $builder->get('/platform/property-changes', ['controller' => 'ConfigChanges', 'action' => 'propertyChanges']);
+        $builder->get('/config-changes', ['controller' => 'ConfigChanges', 'action' => 'index']);
 
         // Old /reports/* paths, served by the same actions until the frontend has
         // moved off them for a release (build step 3); then remove these lines.
@@ -168,6 +171,8 @@ return function (RouteBuilder $routes): void {
         $builder->get('/reservations', ['controller' => 'Reservations', 'action' => 'index']);
         $builder->get('/reservations/stats', ['controller' => 'Reservations', 'action' => 'stats']);
         $builder->get('/reservations/{id}/history', ['controller' => 'Reservations', 'action' => 'history'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->get('/reservations/{id}/price', ['controller' => 'Reservations', 'action' => 'price'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post('/reservations', ['controller' => 'Reservations', 'action' => 'add']);
         $builder->patch('/reservations/{id}', ['controller' => 'Reservations', 'action' => 'edit'])

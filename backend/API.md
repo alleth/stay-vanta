@@ -28,6 +28,19 @@ records — records one `config_changes` row (who, role, reason, before/after, i
 - an edit that changes nothing is 400 "Nothing to change" (rooms excepted: their edits include
   occupancy status, which is operational and not audited).
 
+Reading it:
+- `GET /api/config-changes[?entity_type=&entity_id=&impact=&event=&page=]` — **Manager**
+  (`settings.change_log.view`): the property's change log, newest first, 50 a page →
+  `{changes, page, has_more}`; each `{id, at, actor, recorded (false = imported baseline),
+  source, property_id, entity_type, entity_id, label, event, impact, reason, changes,
+  correlation_id}`. Property records are left out.
+- `GET /api/platform/property-changes[?property_id=]` — **Platform Owner**
+  (`platform.property.manage`): changes to property records (fee, subscription, name).
+- Operations → Activity lines of `type: config`: price-impact changes and deletions (`entity_type`,
+  `label`, `event`, `impact`, `reason`, `fields` before/after); everything else is only in the log.
+- History before step 9: one `baseline_recorded` per row, its values at import, no actor
+  (`BackfillConfigBaseline`, `bin/cake activity_backfill`).
+
 ## Auth
 - `POST /api/auth/login` (public) · `GET /api/auth/me` · `POST /api/auth/logout`
 - The `user` object both login and `me` return carries `permissions`: the sorted list of
@@ -246,6 +259,17 @@ records — records one `config_changes` row (who, role, reason, before/after, i
   (`source: invoice`: its lines, their reversals, the invoice's settlement and refunds; `amount`,
   `line`, `method`, SI/OR numbers). Within one request the reservation event leads. Managers may
   open a deleted reservation's history; anyone else gets 404.
+- **Rates are fixed at booking (step 9, C1).** A new booking stores `nightly_rate` (the base rate
+  then) and `rate_source` (`{base_rate, room_rate_id, scope: room|property, promo_rate_id,
+  multiplier, resolved_at}`), besides the channel's `promo_rate`; `quote()` uses promo, then the
+  fixed rate, and only a booking from before step 9 reads the live base rate. An edit re-prices
+  only when it changes the room or the source (the event shows `nightly_rate` before/after).
+  Price-setting events carry `snapshot.price` (the quote and its basis).
+- `GET /api/reservations/{id}/price` (step 9) → `{reservation_id, basis (promo|locked|live),
+  rate_source, current (the quote now), history (each price-setting event's price, who, why),
+  config_changes (changes to its room rates, promo rates and extra charges since it was made:
+  who, why, before/after, `moved_this_price`, `why`), posted (its invoice lines), notes}`.
+  Managers may open a deleted reservation's.
 - `GET /api/reservations?deleted=only` — **Manager only** (403 otherwise): the read-only list of
   soft-deleted reservations.
 - Embedded staff (`receptionist`, `last_receptionist`) carry `{id, name}` only (step 8). Each listed

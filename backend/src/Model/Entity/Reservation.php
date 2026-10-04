@@ -24,6 +24,8 @@ use Cake\ORM\Entity;
  * @property string $status         booked | checked_in | checked_out | cancelled
  * @property string $source         walk_in, or one of the property's booking_sources codes
  * @property string|null $promo_rate
+ * @property string|null $nightly_rate Base rate fixed at booking (step 9, C1); null = before step 9 (live).
+ * @property array|null $rate_source Where the rate came from (room-rate row, promo row, values).
  * @property string|null $downpayment  50% collected up front on an advance booking
  * @property \App\Model\Entity\ReservationDiscount[] $reservation_discounts  one row per
  *   Senior/PWD guest on this booking; the statutory 20% covers each one's own share of
@@ -55,6 +57,9 @@ class Reservation extends Entity
         'source' => true,
         'booking_reference' => true,
         'promo_rate' => true,
+        // Set by the controller from the resolved rate, never from the request.
+        'nightly_rate' => true,
+        'rate_source' => true,
         'sold_rate' => true,
         'channel_discount_type' => true,
         'channel_discount_value' => true,

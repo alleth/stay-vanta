@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Event\ActivityBackfill;
+use App\Event\ConfigBaseline;
 use Cake\Command\Command;
 use Cake\Console\Arguments;
 use Cake\Console\ConsoleIo;
@@ -76,6 +77,26 @@ class ActivityBackfillCommand extends Command
                 $c['cancels_unrecorded'],
                 $c['reservation_unindexed'],
                 $ok ? '' : '  <- INCOMPLETE',
+            ));
+        }
+
+        // The configuration baseline (step 9): rows with no recorded change.
+        $baseline = new ConfigBaseline($connection);
+        if (!$args->getOption('check-only')) {
+            foreach ($baseline->run($propertyId) as $what => $count) {
+                $io->out(sprintf('%-24s %d baselines added', $what, $count));
+            }
+        }
+        foreach ($baseline->check($propertyId) as $id => $c) {
+            $incomplete += $c['complete'] ? 0 : 1;
+            $io->out(sprintf(
+                'property %d: %d configuration rows, %d with no recorded change, %d baselines, %d changes since%s',
+                $id,
+                $c['config_rows'],
+                $c['unrecorded'],
+                $c['baselines'],
+                $c['recorded_changes'],
+                $c['complete'] ? '' : '  <- INCOMPLETE',
             ));
         }
 

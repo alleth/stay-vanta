@@ -217,6 +217,25 @@ class ConfigAuditBehavior extends Behavior
     }
 
     /**
+     * Record a row as it stands now, for the baseline import (step 9, C7):
+     * `baseline_recorded` with its current values, at the context's moment
+     * (import time), no actor. Call inside a transaction.
+     *
+     * @param \App\Event\EventContext $context An import context.
+     * @param \Cake\Datasource\EntityInterface $entity The row, as stored.
+     * @return void
+     */
+    public function recordBaseline(EventContext $context, EntityInterface $entity): void
+    {
+        $this->write(
+            $context,
+            $entity,
+            ConfigChangesTable::BASELINE_RECORDED,
+            ['after' => $this->valuesOf($entity, false)],
+        );
+    }
+
+    /**
      * `[type, changes]`: created (`{after}`), deleted (`{before}`), updated
      * (`{field: {before, after}}`), or `[null, []]` when no audited field changed.
      *

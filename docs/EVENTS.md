@@ -270,6 +270,13 @@ Rules (decided 2026-10-04):
   deleted room's number). No restore.
 - **No empty change:** an edit that changes nothing is refused ("Nothing to change") and records
   nothing.
+- **History before step 9** (part 2, `ConfigBaseline`): one `baseline_recorded` per row with no
+  change, its values at import, dated at import, no actor or reason, correlation
+  `import-config-<entity>-<id>`; idempotent, checked per property. Nothing earlier is invented.
+- **Read by** Settings → Change log (`GET /config-changes`, Manager; property records:
+  `GET /platform/property-changes`, Platform Owner) and, for price changes and deletions only,
+  Operations → Activity (C4). A booking's price view (`GET /reservations/{id}/price`) lists the
+  changes to its rate inputs since it was made.
 - **Side effects are their own changes, in the same request:** a booking source created by a
   promo-rate save; each sub-category detached when its parent category is deleted.
 

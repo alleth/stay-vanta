@@ -86,10 +86,11 @@ several properties.
 | `settings.room_rate.manage` | PO†, M | Manager | | Settings |
 | `settings.promo_rate.manage` | PO†, M | Manager | | Settings |
 | `settings.extra_charge.manage` | PO†, M | Manager | | Settings |
+| `settings.change_log.view` | M | Manager, Property Owner | | Settings |
 | `staff.account.view` | PO, M | Manager, Property Owner | | Staff |
 | `staff.account.manage` | PO, M | Manager | | Staff |
 
-37 permissions: 2 platform, 35 property.
+38 permissions: 2 platform, 36 property.
 
 ## Endpoint map
 
@@ -130,6 +131,9 @@ several properties.
 | `POST/PATCH/PUT /room-rates…` | `settings.room_rate.manage` | |
 | `POST/PATCH/PUT/DELETE /promo-rates…` | `settings.promo_rate.manage` | |
 | `POST/PATCH/PUT/DELETE /extra-charges…` | `settings.extra_charge.manage` | |
+| `GET /config-changes` | `settings.change_log.view` | The configuration change log (step 9): the property's changes, property records excepted |
+| `GET /platform/property-changes` | `platform.property.manage` | Changes to property records (fee, subscription, name), step 9 |
+| `GET /reservations/{id}/price` | `front_desk.reservation.view` | Where a booking's price comes from (step 9) |
 | `GET /users` | `staff.account.view` | |
 | `POST /users`, `PATCH/PUT /users/{id}`, `POST /users/{id}/reset-password` | `staff.account.manage` | Rules kept: who may manage whom (below) |
 

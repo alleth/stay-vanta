@@ -456,9 +456,14 @@ class ReservationsTable extends Table
      */
     public function quote(Reservation $reservation, float $baseNightlyRate): array
     {
-        $nightly = $reservation->promo_rate !== null
-            ? (float)$reservation->promo_rate
-            : $baseNightlyRate;
+        // The rate fixed at booking wins (step 9, C1): the channel's promo
+        // rate, else the base rate locked then; only a booking from before
+        // step 9 still reads the live base rate.
+        $nightly = match (true) {
+            $reservation->promo_rate !== null => (float)$reservation->promo_rate,
+            $reservation->nightly_rate !== null => (float)$reservation->nightly_rate,
+            default => $baseNightlyRate,
+        };
 
         $nights = $this->nights($reservation);
         $subtotal = $nightly * $nights;

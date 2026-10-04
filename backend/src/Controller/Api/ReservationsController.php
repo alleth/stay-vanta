@@ -400,19 +400,11 @@ class ReservationsController extends AppController
                     throw new BadRequestException('Unknown booking source.');
                 }
 
-                // The promo rate is never client-supplied: it's the room's
-                // original (base) rate × the admin's multiplier for the chosen
-                // source (room-specific preferred), or null (base rate applies)
-                // when no multiplier — or no base rate — is configured.
-                $promoRate = null;
-                if ($source !== BookingSourcesTable::WALK_IN) {
-                    $multiplier = $this->fetchTable('PromoRates')
-                        ->multiplierFor($propertyId, $source, $roomId ? (int)$roomId : null);
-                    if ($multiplier !== null) {
-                        $base = $this->resolveBaseRate($propertyId, $roomId ? (int)$roomId : null);
-                        $promoRate = $base > 0 ? round($base * $multiplier, 2) : null;
-                    }
-                }
+                // The rate is never client-supplied, and it's fixed now (step 9,
+                // C1): the room's base rate, and the channel's promo rate (base ×
+                // the admin's multiplier) when one is configured, with where
+                // each came from.
+                $basis = $this->priceBasis($propertyId, $roomId ? (int)$roomId : null, $source);
 
                 // A walk-in is a guest standing at the desk, so it isn't a
                 // future booking at all: the stay starts today and they take
@@ -462,7 +454,9 @@ class ReservationsController extends AppController
                     'channel_discount_value' => $channelDiscount['value'],
                     'total_guests' => $totalGuests,
                     'discount_amount' => $this->resolveReferralAmount(),
-                    'promo_rate' => $promoRate,
+                    'promo_rate' => $basis['promo_rate'],
+                    'nightly_rate' => $basis['nightly_rate'],
+                    'rate_source' => $basis['rate_source'],
                     'additional_beds' => (int)($this->request->getData('additional_beds') ?? 0),
                 ]);
 
@@ -606,17 +600,18 @@ class ReservationsController extends AppController
         $roomId = $this->request->getData('room_id') ?? $reservation->room_id;
         $channelDiscount = $this->resolveChannelDiscount($source, $reservation);
 
-        // The promo rate is never client-supplied: recomputed the same way
-        // add() does, for the (possibly new) source/room.
-        $promoRate = null;
-        if ($source !== BookingSourcesTable::WALK_IN) {
-            $multiplier = $this->fetchTable('PromoRates')
-                ->multiplierFor($propertyId, $source, $roomId ? (int)$roomId : null);
-            if ($multiplier !== null) {
-                $base = $this->resolveBaseRate($propertyId, $roomId ? (int)$roomId : null);
-                $promoRate = $base > 0 ? round($base * $multiplier, 2) : null;
-            }
-        }
+        // The rate stays as fixed at booking (step 9, C1) unless this edit
+        // changes what it's made of — the room or the booking source — in
+        // which case it's re-priced from today's configuration, and the
+        // reservation event records the old and new rate.
+        $repriced = (int)$roomId !== (int)$reservation->room_id || $source !== $reservation->source;
+        $basis = $repriced
+            ? $this->priceBasis($propertyId, $roomId ? (int)$roomId : null, $source)
+            : [
+                'promo_rate' => $reservation->promo_rate,
+                'nightly_rate' => $reservation->nightly_rate,
+                'rate_source' => $reservation->rate_source,
+            ];
 
         // Omitting the key leaves the booking's beneficiaries alone; sending
         // it (even empty, to clear them) replaces the lot.
@@ -668,7 +663,7 @@ class ReservationsController extends AppController
                 $propertyId,
                 $roomId,
                 $source,
-                $promoRate,
+                $basis,
                 $channelDiscount,
                 $totalGuests,
                 $beneficiaries,
@@ -702,7 +697,9 @@ class ReservationsController extends AppController
                         : $this->trimmedOrNull('booking_reference') ?? $reservation->booking_reference,
                     'total_guests' => $totalGuests,
                     'discount_amount' => $this->resolveReferralAmount(),
-                    'promo_rate' => $promoRate,
+                    'promo_rate' => $basis['promo_rate'],
+                    'nightly_rate' => $basis['nightly_rate'],
+                    'rate_source' => $basis['rate_source'],
                     'sold_rate' => $source === BookingSourcesTable::WALK_IN
                         ? null
                         : $this->trimmedOrNull('sold_rate') ?? $reservation->sold_rate,
@@ -1310,6 +1307,182 @@ class ReservationsController extends AppController
             'history' => $history,
         ]);
         $this->viewBuilder()->setOption('serialize', ['reservation_id', 'deleted', 'history']);
+    }
+
+    /**
+     * GET /api/reservations/{id}/price (build step 9) — where a booking's
+     * price comes from: what it is now and on what basis (`promo`, `locked`
+     * at booking, or `live` for a booking from before step 9); the price
+     * each price-setting event recorded, with who and why; every change to
+     * its rate inputs since it was made (its room's and the property-wide
+     * room rate, its channel's promo rate, its extra charges) with who, why,
+     * and whether it moved this booking's price; and what was billed. A
+     * Manager may open a deleted reservation's.
+     */
+    public function price(int $id): void
+    {
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_VIEW);
+        $withDeleted = $this->can(Permissions::FRONT_DESK_RESERVATION_DELETE);
+        /** @var \App\Model\Entity\Reservation $reservation */
+        $reservation = $this->scopeToProperty(
+            $this->fetchTable('Reservations')->find('all', withDeleted: $withDeleted)
+                ->where(['Reservations.id' => $id]),
+        )->firstOrFail();
+        $current = $this->priceSnapshot($reservation)['price'];
+
+        // The price each price-setting event recorded (from step 9 on).
+        $events = $this->fetchTable('ReservationEvents')->find()
+            ->where(['reservation_id' => $id])->orderBy(['id' => 'ASC'])->all()->toList();
+        $configChanges = $this->rateInputChanges($reservation);
+        $names = $this->namesOf(array_merge($events, $configChanges));
+        $who = fn($e) => $e->actor_id !== null ? ($names[$e->actor_id] ?? null) : null;
+
+        $history = [];
+        foreach ($events as $e) {
+            if (!isset($e->snapshot['price'])) {
+                continue;
+            }
+            $history[] = [
+                'event' => $e->event_type,
+                'at' => $e->occurred_at,
+                'actor' => $who($e),
+                'recorded' => $e->source !== 'import',
+                'reason' => $e->reason,
+                'price' => $e->snapshot['price'],
+            ];
+        }
+
+        // When the room charge was posted, if it was.
+        $postedAt = null;
+        $posted = [];
+        $lines = $this->fetchTable('InvoiceLines')->find()
+            ->where([
+                'source_id' => $id,
+                'source_type IN' => ['reservation', 'early_check_in', 'downpayment_credit'],
+            ])
+            ->orderBy(['id' => 'ASC'])->all()->toList();
+        foreach ($lines as $line) {
+            $postedAt ??= $line->source_type === 'reservation' ? $line->created : null;
+            $posted[] = [
+                'id' => (int)$line->id,
+                'description' => $line->description,
+                'amount' => round((float)$line->amount, 2),
+                'source_type' => $line->source_type,
+                'at' => $line->created,
+            ];
+        }
+
+        $basis = $current['basis'];
+        $changes = array_map(function ($c) use ($who, $basis, $postedAt): array {
+            $afterBilling = $postedAt !== null && $c->occurred_at > $postedAt;
+            $rateInput = in_array($c->entity_type, ['room_rate', 'promo_rate'], true);
+            $moved = $rateInput && $basis === 'live' && !$afterBilling && $c->impact === 'price';
+
+            return [
+                'id' => (int)$c->id,
+                'at' => $c->occurred_at,
+                'actor' => $who($c),
+                'recorded' => $c->source !== 'import',
+                'entity_type' => $c->entity_type,
+                'entity_id' => (int)$c->entity_id,
+                'label' => $c->snapshot['label'] ?? null,
+                'event' => $c->event_type,
+                'impact' => $c->impact,
+                'reason' => $c->reason,
+                'changes' => $c->changes,
+                'moved_this_price' => $moved,
+                'why' => match (true) {
+                    $afterBilling => 'After the room charge was posted: the bill was already set.',
+                    $c->entity_type === 'extra_charge' => 'Extra charges are copied onto the booking when picked.',
+                    $basis === 'promo' => 'This booking’s rate was fixed at booking (channel promo rate).',
+                    $basis === 'locked' => 'This booking’s rate was fixed at booking.',
+                    $moved => 'This booking reads the live rate (made before rates were fixed at booking).',
+                    default => 'Doesn’t change this booking’s nightly rate.',
+                },
+            ];
+        }, $configChanges);
+
+        $this->set([
+            'reservation_id' => (int)$reservation->id,
+            'basis' => $basis,
+            'rate_source' => $reservation->rate_source,
+            'current' => $current,
+            'history' => $history,
+            'config_changes' => $changes,
+            'posted' => $posted,
+            'notes' => array_values(array_filter([
+                $history === [] ? 'This booking was made before prices were recorded with each change.' : null,
+                $basis === 'live'
+                    ? 'Its nightly rate is read from today’s room rate until the room charge is posted.'
+                    : null,
+            ])),
+        ]);
+        $this->viewBuilder()->setOption(
+            'serialize',
+            ['reservation_id', 'basis', 'rate_source', 'current', 'history', 'config_changes', 'posted', 'notes'],
+        );
+    }
+
+    /**
+     * Configuration changes to a booking's rate inputs since it was made:
+     * the room rates that apply to its room (its own and property-wide), its
+     * channel's promo rates (deleted ones too) and the extra charges it
+     * picked, oldest first. Baseline imports are left out: they're not changes.
+     *
+     * @return list<\Cake\Datasource\EntityInterface>
+     */
+    private function rateInputChanges(Reservation $reservation): array
+    {
+        $propertyId = (int)$reservation->property_id;
+        $roomId = $reservation->room_id;
+        $rateIds = $this->fetchTable('RoomRates')->find()
+            ->select(['id'])
+            ->where(['property_id' => $propertyId])
+            ->where(['OR' => [['room_id IS' => null], ['room_id' => (int)$roomId]]])
+            ->all()->extract('id')->toList();
+        $promoIds = $reservation->source === BookingSourcesTable::WALK_IN ? [] : $this->fetchTable('PromoRates')
+            ->find('all', withDeleted: true)->select(['id'])
+            ->where(['property_id' => $propertyId, 'source' => $reservation->source])
+            ->where(['OR' => [['room_id IS' => null], ['room_id' => (int)$roomId]]])
+            ->all()->extract('id')->toList();
+        $chargeIds = $this->fetchTable('ReservationExtraCharges')->find()
+            ->select(['extra_charge_id'])
+            ->where(['reservation_id' => (int)$reservation->id, 'extra_charge_id IS NOT' => null])
+            ->all()->extract('extra_charge_id')->toList();
+
+        $or = [];
+        foreach (['room_rate' => $rateIds, 'promo_rate' => $promoIds, 'extra_charge' => $chargeIds] as $type => $ids) {
+            if ($ids !== []) {
+                $or[] = ['entity_type' => $type, 'entity_id IN' => array_map('intval', $ids)];
+            }
+        }
+        if ($or === []) {
+            return [];
+        }
+
+        return $this->fetchTable('ConfigChanges')->find()
+            ->where([
+                'property_id' => $propertyId,
+                'event_type !=' => 'baseline_recorded',
+                'occurred_at >=' => $reservation->created,
+                'OR' => $or,
+            ])
+            ->orderBy(['occurred_at' => 'ASC', 'id' => 'ASC'])
+            ->all()->toList();
+    }
+
+    /**
+     * Current names of the people behind these ledger rows.
+     *
+     * @param list<\Cake\Datasource\EntityInterface> $rows Ledger rows.
+     * @return array<int, string>
+     */
+    private function namesOf(array $rows): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(fn($r) => $r->actor_id, $rows))));
+
+        return $ids === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $ids])->all()->combine('id', 'name')->toArray();
     }
 
     /**
@@ -1980,6 +2153,17 @@ class ReservationsController extends AppController
      */
     private function resolveBaseRate(int $propertyId, ?int $roomId): float
     {
+        return $this->resolveRate($propertyId, $roomId)['rate'];
+    }
+
+    /**
+     * The nightly base rate and the room-rate row it came from:
+     * `{rate, room_rate_id, scope: room|property|null}`.
+     *
+     * @return array{rate: float, room_rate_id: int|null, scope: string|null}
+     */
+    private function resolveRate(int $propertyId, ?int $roomId): array
+    {
         $rates = $this->fetchTable('RoomRates');
         $rate = $rates->find()
             ->where(['RoomRates.property_id' => $propertyId])
@@ -1993,7 +2177,81 @@ class ReservationsController extends AppController
             ->orderBy(['RoomRates.room_id' => 'DESC', 'RoomRates.base_rate' => 'ASC'])
             ->first();
 
-        return $rate ? (float)$rate->base_rate : 0.0;
+        return $rate
+            ? [
+                'rate' => (float)$rate->base_rate,
+                'room_rate_id' => (int)$rate->id,
+                'scope' => $rate->room_id !== null ? 'room' : 'property',
+            ]
+            : ['rate' => 0.0, 'room_rate_id' => null, 'scope' => null];
+    }
+
+    /**
+     * What a booking's nightly price is made of, resolved now (step 9, C1):
+     * the base rate (fixed onto the booking as `nightly_rate`), the channel's
+     * promo rate when the source has a multiplier, and `rate_source` naming
+     * the room-rate and promo rows used and their values at this moment.
+     *
+     * @return array{promo_rate: float|null, nightly_rate: float|null, rate_source: array<string, mixed>}
+     */
+    private function priceBasis(int $propertyId, ?int $roomId, string $source): array
+    {
+        $base = $this->resolveRate($propertyId, $roomId);
+        $promo = null;
+        if ($source !== BookingSourcesTable::WALK_IN) {
+            $query = $this->fetchTable('PromoRates')->find()
+                ->where(['PromoRates.property_id' => $propertyId, 'PromoRates.source' => $source]);
+            $query->where($roomId !== null
+                ? ['OR' => [['PromoRates.room_id' => $roomId], ['PromoRates.room_id IS' => null]]]
+                : ['PromoRates.room_id IS' => null]);
+            $promo = $query->orderBy(['PromoRates.room_id' => 'DESC'])->first();
+        }
+        $promoRate = $promo !== null && $base['rate'] > 0
+            ? round($base['rate'] * (float)$promo->multiplier, 2)
+            : null;
+
+        return [
+            'promo_rate' => $promoRate,
+            'nightly_rate' => $base['rate'] > 0 ? round($base['rate'], 2) : null,
+            'rate_source' => [
+                'base_rate' => $base['rate'],
+                'room_rate_id' => $base['room_rate_id'],
+                'scope' => $base['scope'],
+                'promo_rate_id' => $promo !== null ? (int)$promo->id : null,
+                'multiplier' => $promo !== null ? (float)$promo->multiplier : null,
+                'resolved_at' => DateTime::now()->format('Y-m-d H:i:s'),
+            ],
+        ];
+    }
+
+    /**
+     * The price a reservation event records (step 9): the quote at this
+     * moment and what its nightly rate rests on — `promo` (the channel's
+     * rate), `locked` (the base rate fixed at booking) or `live` (a booking
+     * from before step 9, still reading today's base rate).
+     *
+     * @return array<string, mixed>
+     */
+    private function priceSnapshot(Reservation $reservation): array
+    {
+        /** @var \App\Model\Table\ReservationsTable $reservations */
+        $reservations = $this->fetchTable('Reservations');
+        $quote = $reservations->quote(
+            $reservation,
+            $this->resolveBaseRate((int)$reservation->property_id, $reservation->room_id),
+        );
+        unset($quote['statutory_shares']);
+
+        return [
+            'price' => $quote + [
+                'basis' => match (true) {
+                    $reservation->promo_rate !== null => 'promo',
+                    $reservation->nightly_rate !== null => 'locked',
+                    default => 'live',
+                },
+                'rate_source' => $reservation->rate_source,
+            ],
+        ];
     }
 
     /**
@@ -2076,7 +2334,13 @@ class ReservationsController extends AppController
 
     /** Fields whose before/after every reservation event keeps. */
     private const TRACKED_INTS = ['room_id', 'guest_id', 'total_guests', 'additional_beds'];
-    private const TRACKED_MONEY = ['sold_rate', 'channel_discount_value', 'discount_amount', 'promo_rate'];
+    private const TRACKED_MONEY = [
+        'sold_rate',
+        'channel_discount_value',
+        'discount_amount',
+        'promo_rate',
+        'nightly_rate',
+    ];
     private const TRACKED_TEXT = ['status', 'source', 'booking_reference', 'channel_discount_type'];
     private const TRACKED_DATES = ['check_in', 'check_out'];
     private const TRACKED_MOMENTS = ['checked_in_at', 'checked_out_at'];
@@ -2170,12 +2434,23 @@ class ReservationsController extends AppController
     {
         /** @var \App\Model\Table\ReservationEventsTable $events */
         $events = $this->fetchTable('ReservationEvents');
+        // Events that set a price carry it (step 9): what was charged per
+        // night, every discount and extra, the total, and where the rate came from.
+        $setsPrice = in_array($type, [
+            ReservationEventsTable::BOOKED,
+            ReservationEventsTable::WALKED_IN,
+            ReservationEventsTable::BACKDATED,
+            ReservationEventsTable::EDITED,
+            ReservationEventsTable::CORRECTED,
+            ReservationEventsTable::DISCOUNT_CHANGED,
+        ], true);
         $events->record($this->eventContext(), $type, $reservation, [
             'columns' => [
                 'room_id' => $reservation->room_id ? (int)$reservation->room_id : null,
                 'status_after' => $reservation->status,
             ],
             'changes' => $changes,
+            'snapshot' => $setsPrice ? $this->priceSnapshot($reservation) : [],
         ]);
     }
 

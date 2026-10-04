@@ -71,6 +71,7 @@ final class Permissions
     public const SETTINGS_ROOM_RATE_MANAGE = 'settings.room_rate.manage';
     public const SETTINGS_PROMO_RATE_MANAGE = 'settings.promo_rate.manage';
     public const SETTINGS_EXTRA_CHARGE_MANAGE = 'settings.extra_charge.manage';
+    public const SETTINGS_CHANGE_LOG_VIEW = 'settings.change_log.view';
 
     // Staff
     public const STAFF_ACCOUNT_VIEW = 'staff.account.view';
@@ -115,6 +116,7 @@ final class Permissions
         self::SETTINGS_ROOM_RATE_MANAGE,
         self::SETTINGS_PROMO_RATE_MANAGE,
         self::SETTINGS_EXTRA_CHARGE_MANAGE,
+        self::SETTINGS_CHANGE_LOG_VIEW,
         self::STAFF_ACCOUNT_VIEW,
         self::STAFF_ACCOUNT_MANAGE,
     ];
@@ -207,6 +209,7 @@ final class Permissions
             self::OPERATIONS_TODAY_VIEW,
             self::OPERATIONS_STAFF_VIEW,
             self::FINANCE_ANALYTICS_VIEW,
+            self::SETTINGS_CHANGE_LOG_VIEW,
             self::FINANCE_INVOICE_REVERSE,
             self::FINANCE_INVOICE_REFUND,
             self::FRONT_DESK_RESERVATION_BACKDATE,
