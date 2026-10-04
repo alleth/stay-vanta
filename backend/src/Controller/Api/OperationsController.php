@@ -621,11 +621,11 @@ class OperationsController extends AppController
                     ['event_table' => 'food_order_events', 'event_type IN' => ['placed', 'refunded']],
                     ['event_table' => 'invoice_events', 'event_type IN' => self::FEED_INVOICE_EVENTS],
                     ['event_table' => 'reservation_events', 'event_type IN' => self::FEED_RESERVATION_EVENTS],
-                    // Configuration (step 9, C4): price changes and deletions;
+                    // Configuration (step 9, C4): price changes (updates) and deletions;
                     // everything else is in Settings → Change log.
                     "event_table = 'config_changes' AND EXISTS (SELECT 1 FROM config_changes cc
                         WHERE cc.id = ActivityIndex.event_id AND cc.event_type != 'baseline_recorded'
-                        AND (cc.impact = 'price' OR cc.event_type = 'deleted'))",
+                        AND ((cc.event_type = 'updated' AND cc.impact = 'price') OR cc.event_type = 'deleted'))",
                 ],
             ])
             ->orderBy(['occurred_at' => 'DESC'])

@@ -1460,13 +1460,20 @@ class ReservationsController extends AppController
             return [];
         }
 
+        // Changes after the booking was made. Timestamps are to the second:
+        // a row created in the booking's own second already existed.
+        $bookedAt = $reservation->created;
+
         return $this->fetchTable('ConfigChanges')->find()
             ->where([
                 'property_id' => $propertyId,
                 'event_type !=' => 'baseline_recorded',
-                'occurred_at >=' => $reservation->created,
                 'OR' => $or,
             ])
+            ->where(['OR' => [
+                ['occurred_at >' => $bookedAt],
+                ['occurred_at' => $bookedAt, 'event_type !=' => 'created'],
+            ]])
             ->orderBy(['occurred_at' => 'ASC', 'id' => 'ASC'])
             ->all()->toList();
     }
@@ -2165,14 +2172,12 @@ class ReservationsController extends AppController
     private function resolveRate(int $propertyId, ?int $roomId): array
     {
         $rates = $this->fetchTable('RoomRates');
-        $rate = $rates->find()
-            ->where(['RoomRates.property_id' => $propertyId])
-            ->where(function ($exp) use ($roomId) {
-                return $exp->or([
-                    'RoomRates.room_id' => $roomId,
-                    'RoomRates.room_id IS' => null,
-                ]);
-            })
+        $query = $rates->find()->where(['RoomRates.property_id' => $propertyId]);
+        // With no room yet, only a property-wide rate can apply.
+        $query->where($roomId !== null
+            ? ['OR' => [['RoomRates.room_id' => $roomId], ['RoomRates.room_id IS' => null]]]
+            : ['RoomRates.room_id IS' => null]);
+        $rate = $query
             // Prefer a room-specific rate over a property-wide one.
             ->orderBy(['RoomRates.room_id' => 'DESC', 'RoomRates.base_rate' => 'ASC'])
             ->first();

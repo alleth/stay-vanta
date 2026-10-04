@@ -36,7 +36,7 @@ Reading it:
   correlation_id}`. Property records are left out.
 - `GET /api/platform/property-changes[?property_id=]` — **Platform Owner**
   (`platform.property.manage`): changes to property records (fee, subscription, name).
-- Operations → Activity lines of `type: config`: price-impact changes and deletions (`entity_type`,
+- Operations → Activity lines of `type: config`: price changes to existing rows and deletions (`entity_type`,
   `label`, `event`, `impact`, `reason`, `fields` before/after); everything else is only in the log.
 - History before step 9: one `baseline_recorded` per row, its values at import, no actor
   (`BackfillConfigBaseline`, `bin/cake activity_backfill`).

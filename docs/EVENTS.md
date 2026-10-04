@@ -274,7 +274,7 @@ Rules (decided 2026-10-04):
   change, its values at import, dated at import, no actor or reason, correlation
   `import-config-<entity>-<id>`; idempotent, checked per property. Nothing earlier is invented.
 - **Read by** Settings → Change log (`GET /config-changes`, Manager; property records:
-  `GET /platform/property-changes`, Platform Owner) and, for price changes and deletions only,
+  `GET /platform/property-changes`, Platform Owner) and, for price changes to existing rows and deletions only,
   Operations → Activity (C4). A booking's price view (`GET /reservations/{id}/price`) lists the
   changes to its rate inputs since it was made.
 - **Side effects are their own changes, in the same request:** a booking source created by a
