@@ -49,7 +49,9 @@ trait ApiScenarioTrait
      * Append-only ledgers: their tables refuse deletes, so cleanup removes
      * test rows through the connection, the one place that may.
      */
-    private const LEDGER_TABLES = ['activity_index', 'food_order_events', 'stock_movements', 'invoice_events'];
+    private const LEDGER_TABLES = [
+        'activity_index', 'food_order_events', 'stock_movements', 'invoice_events', 'reservation_events',
+    ];
 
     protected function createProperty(string $name): int
     {
@@ -124,7 +126,12 @@ trait ApiScenarioTrait
         if ($method === 'get') {
             $this->get($url);
         } elseif ($method === 'delete') {
-            $this->delete($url);
+            if ($body === []) {
+                $this->delete($url);
+            } else {
+                // Elevated deletes carry their reason in the body (step 8).
+                $this->_sendRequest($url, 'DELETE', json_encode($body));
+            }
         } else {
             $this->{$method}($url, json_encode($body));
         }
@@ -156,7 +163,8 @@ trait ApiScenarioTrait
     {
         $locator = $this->getTableLocator();
         foreach ($this->scenarioPropertyIds as $propertyId) {
-            $reservationIds = $locator->get('Reservations')->find()
+            // Soft-deleted ones too (step 8): their discounts and extras still exist.
+            $reservationIds = $locator->get('Reservations')->find('all', withDeleted: true)
                 ->where(['property_id' => $propertyId])->all()->extract('id')->toList();
             $orderIds = $locator->get('FoodOrders')->find()
                 ->where(['property_id' => $propertyId])->all()->extract('id')->toList();

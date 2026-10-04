@@ -14,5 +14,6 @@ final class EventLedgers
         'FoodOrderEvents' => 'food_order',
         'StockMovements' => 'inventory_item',
         'InvoiceEvents' => 'invoice',
+        'ReservationEvents' => 'reservation',
     ];
 }

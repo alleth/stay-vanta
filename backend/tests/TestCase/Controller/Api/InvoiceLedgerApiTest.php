@@ -109,7 +109,7 @@ class InvoiceLedgerApiTest extends TestCase
         [$id, $invoiceId] = $this->billedStay();
         $lines = $this->getTableLocator()->get('InvoiceLines')->find()->where(['invoice_id' => $invoiceId])->count();
 
-        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/cancel");
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/cancel", ['reason' => 'Guest left early']);
         $this->assertResponseOk((string)$this->_response->getBody());
 
         $this->assertSame($lines * 2, $this->getTableLocator()->get('InvoiceLines')->find()
@@ -193,7 +193,9 @@ class InvoiceLedgerApiTest extends TestCase
         $this->callAs($this->adminToken, 'POST', "/api/reservations/{$reservation['id']}/cancel");
         $this->assertResponseCode(400, 'how the refund was paid is required');
         $this->assertSame('booked', $this->getTableLocator()->get('Reservations')->get($reservation['id'])->status);
-        $this->callAs($this->adminToken, 'POST', "/api/reservations/{$reservation['id']}/cancel", ['refund_method' => 'cash']);
+        $this->callAs($this->adminToken, 'POST', "/api/reservations/{$reservation['id']}/cancel", [
+            'refund_method' => 'cash', 'reason' => 'Guest changed plans',
+        ]);
         $this->assertResponseOk((string)$this->_response->getBody());
 
         $refund = $this->getTableLocator()->get('InvoiceEvents')->find()

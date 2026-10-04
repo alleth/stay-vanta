@@ -184,10 +184,47 @@ Rules (decided 2026-10-03):
 - **Settlement is idempotent:** a second settle is refused, consumes no receipt number, records no
   event and changes no figure (`SettlementApiTest`).
 
+### reservation_events (`ReservationEvents`)
+
+Front Desk: the reservation lifecycle (build step 8, approved 2026-10-04 as R1–R8). Subject
+`reservation_id`; activity subject `reservation`. Typed columns: `room_id`, `status_after`.
+Snapshot: guest id and display name, room number, dates, status, guest count. `changes` holds
+`{field: {before, after}}` for every tracked field that changed (including the Senior/PWD
+beneficiaries with names and ID numbers, and the extra charges); a creation holds `{after: …}` and a
+deletion `{before: …}`. Written only by `ReservationsController`, one event per action, with the
+reservation row locked (`ReservationsTable::lockReservation()`), re-checked, changed and recorded in
+one transaction.
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `booked` | | | A future booking is created (it holds the room) |
+| `walked_in` | | | A walk-in is created, checked in at once (it occupies the room) |
+| `backdated` | yes | | A Manager enters a past stay, or moves a booking's check-in before today; `occurred_at` is when it was entered, the stay's dates are in `changes` |
+| `edited` | | | A booking is changed before check-in |
+| `corrected` | yes | | A Manager corrects a checked-in or checked-out stay |
+| `discount_changed` | | | A booking's discounts change after it was made (setting or changing a referral amount needs a reason, asked by the controller) |
+| `checked_in` | | | Check-in (`early_check_in` in `changes` when its fee was posted) |
+| `checked_out` | | | Check-out (`room_charge_posted` when the check-out posted it) |
+| `cancelled` | | | Cancelled with no money taken |
+| `cancelled_after_payment` | yes | | Cancelled after a downpayment was collected or charges were posted |
+| `deleted` | yes | | A Manager deletes a reservation entered by mistake: soft, the whole reservation in `changes` |
+
+Rules (decided 2026-10-04):
+- **One event per action**, refused with the action: the second of two identical check-ins,
+  check-outs, cancellations, corrections, backdated entries or deletions is refused, records no
+  event and changes nothing (`ReservationEventsApiTest`). An edit that changes nothing is refused.
+- **A referral discount needs a reason** (R3) when it is set or changed, at booking or on an edit;
+  statutory and channel discounts don't (law and configuration decide them).
+- **Soft delete** (R4): `reservations.deleted_at`; `ReservationsTable` hides deleted rows from every
+  query unless asked (`find('all', withDeleted: true)`). The row, its discounts and extras stay; no
+  restore. Deleted means "historically happened", not "temporarily hidden".
+- **Money stays in `invoice_events`**: a check-out's room charge, a cancellation's reversals and
+  refund share the action's correlation id with its reservation event; nothing is copied.
+- **`reservations.receptionist_id` is legacy** (R6): still stamped for one release, never the actor.
+
 ## Planned
 
 | Ledger | Build step |
 |---|---|
-| `reservation_events` | 8 |
 | `config_changes` (ConfigAuditBehavior) | 9 |
 | `access_events` | 10 |

@@ -4,20 +4,24 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\Permissions;
+use App\Event\ReasonRequiredException;
 use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
 use App\Model\Table\InvoiceEventsTable;
 use App\Model\Table\InvoicesTable;
+use App\Model\Table\ReservationEventsTable;
 use App\Model\Table\ReservationExtraChargesTable;
 use App\Model\Table\ReservationsTable;
 use Cake\Database\Expression\QueryExpression;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
+use Cake\Http\Exception\NotFoundException;
 use Cake\I18n\Date;
 use Cake\I18n\DateTime;
 use Cake\ORM\Query\SelectQuery;
+use DateTimeInterface;
 use RuntimeException;
 
 /**
@@ -335,6 +339,14 @@ class ReservationsController extends AppController
             $this->request->getData('source') ?? BookingSourcesTable::WALK_IN,
             $this->request->getData('check_in'),
         );
+        // Build step 8: a past stay and a referral discount (R3) say why,
+        // asked before anything is written.
+        if ($backdated) {
+            $this->requireReason('A past stay needs a reason: why it is being entered now.');
+        }
+        if ($this->resolveReferralAmount() !== null) {
+            $this->requireReason('A referral discount needs a reason: who referred the guest, or why.');
+        }
 
         // Rolls back the inline-created guest if the reservation fails to save.
         $ok = $reservations->getConnection()->transactional(
@@ -459,6 +471,16 @@ class ReservationsController extends AppController
                 if ($guestId !== null) {
                     $this->collectAdvanceDownpayment($reservation, $propertyId, $guestId);
                 }
+
+                // One event per action (build step 8), in this transaction:
+                // a past stay, a walk-in (occupies the room) or a booking (holds it).
+                $this->recordReservationEvent(
+                    $reservation,
+                    $backdated
+                        ? ReservationEventsTable::BACKDATED
+                        : ($isWalkIn ? ReservationEventsTable::WALKED_IN : ReservationEventsTable::BOOKED),
+                    ['after' => $this->stateOf($reservation)],
+                );
 
                 return true;
             },
@@ -594,6 +616,27 @@ class ReservationsController extends AppController
             }
         }
 
+        // Build step 8: which event this edit is, and the reasons it needs,
+        // asked before anything changes. Correcting a stay (Manager), moving a
+        // check-in before today (Manager) and setting a referral discount (R3)
+        // say why.
+        $movesIntoPast = $newCheckIn !== null
+            && $newCheckIn !== $reservation->check_in?->format('Y-m-d')
+            && $this->isBeforeToday($newCheckIn);
+        $newReferral = $this->resolveReferralAmount();
+        $referralSet = $newReferral !== null && (
+            $reservation->discount_amount === null
+            || round((float)$newReferral, 2) !== round((float)$reservation->discount_amount, 2)
+        );
+        if ($isStay) {
+            $this->requireReason('Correcting a stay needs a reason: what was wrong.');
+        } elseif ($movesIntoPast) {
+            $this->requireReason('Moving a booking before today needs a reason.');
+        }
+        if ($referralSet) {
+            $this->requireReason('A referral discount needs a reason: who referred the guest, or why.');
+        }
+
         // Transactional for the same reason add() is: lockRoom() only holds
         // for the life of a transaction, and moving a booking to a different
         // room (or different dates) races exactly like creating one.
@@ -610,7 +653,20 @@ class ReservationsController extends AppController
                 $beneficiaries,
                 $replaceBeneficiaries,
                 $extras,
+                $isStay,
+                $movesIntoPast,
             ): bool {
+                // Lock, then check (build step 8): a second request for the
+                // same reservation waits here, then sees what the first did.
+                $locked = $reservations->lockReservation((int)$reservation->id);
+                if ($locked === null) {
+                    throw new NotFoundException('Reservation not found.');
+                }
+                if ($locked->status !== $reservation->status || $locked->modified != $reservation->modified) {
+                    throw new BadRequestException('This reservation was changed meanwhile; reload it and try again.');
+                }
+                $before = $this->stateOf($reservation);
+
                 if ($roomId) {
                     $reservations->lockRoom((int)$roomId);
                 }
@@ -671,6 +727,22 @@ class ReservationsController extends AppController
                     $this->collectAdvanceDownpayment($reservation, $propertyId, (int)$reservation->guest_id);
                 }
 
+                // One event, with every changed field before and after. An
+                // edit that changes nothing (e.g. the same correction sent
+                // twice) is refused and records nothing.
+                $changes = $this->changesBetween($before, $this->stateOf($reservation));
+                if ($changes === []) {
+                    throw new BadRequestException('Nothing to change: the reservation already reads like this.');
+                }
+                $type = match (true) {
+                    $isStay => ReservationEventsTable::CORRECTED,
+                    $movesIntoPast => ReservationEventsTable::BACKDATED,
+                    array_intersect(array_keys($changes), self::DISCOUNT_STATE) !== []
+                        => ReservationEventsTable::DISCOUNT_CHANGED,
+                    default => ReservationEventsTable::EDITED,
+                };
+                $this->recordReservationEvent($reservation, $type, $changes);
+
                 return true;
             },
         );
@@ -729,24 +801,49 @@ class ReservationsController extends AppController
     {
         $this->request->allowMethod('delete');
 
-        $this->authorize(Permissions::FRONT_DESK_RESERVATION_DELETE, 'Only a Manager can delete a reservation.');
+        // Elevated since build step 8: the deletion says why.
+        $this->authorizeElevated(
+            Permissions::FRONT_DESK_RESERVATION_DELETE,
+            'Only a Manager can delete a reservation.',
+        );
 
+        /** @var \App\Model\Table\ReservationsTable $reservations */
         $reservations = $this->fetchTable('Reservations');
+        // A deleted reservation is hidden from every query, so deleting it
+        // again is a 404 and records nothing.
         $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
             ->firstOrFail();
 
-        $blocker = $this->transactionOn($reservation);
-        if ($blocker !== null) {
-            throw new BadRequestException(
-                "This reservation can't be deleted: {$blocker}."
-                . ($reservation->status === 'cancelled' || $this->isSettled($reservation) ? '' : ' Cancel it instead.'),
-            );
-        }
+        $refuseIfTransacted = function (Reservation $reservation): void {
+            $blocker = $this->transactionOn($reservation);
+            if ($blocker !== null) {
+                throw new BadRequestException(
+                    "This reservation can't be deleted: {$blocker}."
+                    . ($reservation->status === 'cancelled' || $this->isSettled($reservation)
+                        ? ''
+                        : ' Cancel it instead.'),
+                );
+            }
+        };
+        $refuseIfTransacted($reservation);
 
-        $reservations->getConnection()->transactional(function () use ($reservations, $reservation): void {
-            $this->fetchTable('ReservationDiscounts')->deleteAll(['reservation_id' => $reservation->id]);
-            $this->fetchTable('ReservationExtraCharges')->deleteAll(['reservation_id' => $reservation->id]);
-            $reservations->deleteOrFail($reservation);
+        // Soft delete (build step 8): the row, its discounts and extras stay;
+        // `deleted_at` hides it and the `deleted` event keeps who, when, why
+        // and the whole reservation as it was. Locked and re-checked first.
+        $reservations->getConnection()->transactional(function () use (
+            $reservations,
+            $reservation,
+            $refuseIfTransacted,
+        ): void {
+            if ($reservations->lockReservation((int)$reservation->id) === null) {
+                throw new NotFoundException('Reservation not found.');
+            }
+            $refuseIfTransacted($reservation);
+            $before = $this->stateOf($reservation);
+            $reservation->set('deleted_at', new DateTime());
+            $reservation->set('receptionist_id', (int)$this->currentUser->id);
+            $reservations->saveOrFail($reservation);
+            $this->recordReservationEvent($reservation, ReservationEventsTable::DELETED, ['before' => $before]);
 
             // A guest recorded as in the room no longer is — unless another
             // stay still has them there.
@@ -868,6 +965,17 @@ class ReservationsController extends AppController
                 );
             }
         }
+        // Build step 8, R2: cancelling once money was taken (a downpayment
+        // collected, or charges posted to the guest's invoice) says why.
+        $invoicesTable = $this->fetchTable('Invoices');
+        $moneyTaken = $transition === 'cancel' && (
+            (float)$reservation->downpayment > 0
+            || $invoicesTable->invoiceForLine('reservation', (int)$reservation->id) !== null
+            || $invoicesTable->invoiceForLine('early_check_in', (int)$reservation->id) !== null
+        );
+        if ($moneyTaken) {
+            $this->requireReason('Cancelling a reservation that money was taken for needs a reason.');
+        }
         // An invoice change the ledger refuses (e.g. a line on a settled
         // invoice) rolls the whole transition back and answers 400.
         try {
@@ -878,7 +986,25 @@ class ReservationsController extends AppController
                 $transition,
                 $fromStatus,
                 $refundMethod,
+                $moneyTaken,
             ) {
+                // Lock, then check (build step 8): the second of two identical
+                // requests waits here, then finds the status already moved on,
+                // is refused and records nothing.
+                $locked = $reservations->lockReservation((int)$reservation->id);
+                if ($locked === null) {
+                    throw new NotFoundException('Reservation not found.');
+                }
+                if ($locked->status !== $fromStatus) {
+                    throw new BadRequestException(sprintf(
+                        'Cannot %s a reservation that is %s.',
+                        $transition,
+                        $locked->status,
+                    ));
+                }
+                $invoices = $this->fetchTable('Invoices');
+                $chargePostedBefore = $invoices->invoiceForLine('reservation', (int)$reservation->id) !== null;
+
                 $reservation->set('status', $rule['to']);
                 // Re-stamp: this receptionist is now the last to act on the booking.
                 $reservation->set('receptionist_id', (int)$this->currentUser->id);
@@ -967,6 +1093,32 @@ class ReservationsController extends AppController
                         }
                     }
                 }
+
+                // One event per transition (build step 8), in this transaction;
+                // its money effects are in invoice_events under the same
+                // correlation id.
+                $changes = ['status' => ['before' => $fromStatus, 'after' => $reservation->status]];
+                if ($transition === 'check-in') {
+                    $changes['early_check_in'] = (bool)$this->request->getData('early_check_in')
+                        && $invoices->invoiceForLine('early_check_in', (int)$reservation->id) !== null;
+                } elseif ($transition === 'check-out') {
+                    $changes['room_charge_posted'] = !$chargePostedBefore
+                        && $invoices->invoiceForLine('reservation', (int)$reservation->id) !== null;
+                } else {
+                    $changes['charges_reversed'] = $chargePostedBefore;
+                    $changes['downpayment_refunded'] = $refundMethod !== null;
+                }
+                $this->recordReservationEvent(
+                    $reservation,
+                    match ($transition) {
+                        'check-in' => ReservationEventsTable::CHECKED_IN,
+                        'check-out' => ReservationEventsTable::CHECKED_OUT,
+                        default => $moneyTaken
+                            ? ReservationEventsTable::CANCELLED_AFTER_PAYMENT
+                            : ReservationEventsTable::CANCELLED,
+                    },
+                    $changes,
+                );
             });
         } catch (RuntimeException $e) {
             throw new BadRequestException($e->getMessage());
@@ -1733,6 +1885,124 @@ class ReservationsController extends AppController
             'downpayment',
             (int)$reservation->id,
         );
+    }
+
+    // ---- Reservation ledger (build step 8) ---------------------------------
+
+    /** Fields whose before/after every reservation event keeps. */
+    private const TRACKED_INTS = ['room_id', 'guest_id', 'total_guests', 'additional_beds'];
+    private const TRACKED_MONEY = ['sold_rate', 'channel_discount_value', 'discount_amount', 'promo_rate'];
+    private const TRACKED_TEXT = ['status', 'source', 'booking_reference', 'channel_discount_type'];
+    private const TRACKED_DATES = ['check_in', 'check_out'];
+    private const TRACKED_MOMENTS = ['checked_in_at', 'checked_out_at'];
+    /** The parts of a reservation that are its discounts (a change records `discount_changed`). */
+    private const DISCOUNT_STATE = [
+        'channel_discount_type',
+        'channel_discount_value',
+        'discount_amount',
+        'beneficiaries',
+    ];
+
+    /**
+     * The reservation as the ledger compares it: every tracked field in one
+     * normal form (so "500" and "500.00" are the same), its Senior/PWD
+     * beneficiaries (names and ID numbers) and its extra charges, as stored.
+     *
+     * @return array<string, mixed>
+     */
+    private function stateOf(Reservation $reservation): array
+    {
+        $state = [];
+        foreach (self::TRACKED_INTS as $field) {
+            $value = $reservation->get($field);
+            $state[$field] = $value === null || $value === '' ? null : (int)$value;
+        }
+        foreach (self::TRACKED_MONEY as $field) {
+            $value = $reservation->get($field);
+            $state[$field] = $value === null || $value === '' ? null : round((float)$value, 2);
+        }
+        foreach (self::TRACKED_TEXT as $field) {
+            $value = $reservation->get($field);
+            $state[$field] = $value === null || $value === '' ? null : (string)$value;
+        }
+        foreach (self::TRACKED_DATES as $field) {
+            $value = $reservation->get($field);
+            // Cake's Date isn't a DateTimeInterface; both format the same.
+            $state[$field] = $value instanceof Date || $value instanceof DateTimeInterface
+                ? $value->format('Y-m-d')
+                : ($value ? (string)$value : null);
+        }
+        foreach (self::TRACKED_MOMENTS as $field) {
+            $value = $reservation->get($field);
+            $state[$field] = $value instanceof DateTimeInterface
+                ? DateTime::createFromInterface($value)->setTimezone('UTC')->format('Y-m-d H:i:s')
+                : null;
+        }
+        $id = (int)$reservation->id;
+        $state['beneficiaries'] = $this->fetchTable('ReservationDiscounts')->find()
+            ->select(['discount_type', 'beneficiary_name', 'id_number'])
+            ->where(['reservation_id' => $id])->orderBy(['id' => 'ASC'])
+            ->disableHydration()->all()->toList();
+        $state['extras'] = array_map(fn($e) => [
+            'name' => $e['name'],
+            'amount' => round((float)$e['amount'], 2),
+            'quantity' => (int)$e['quantity'],
+        ], $this->fetchTable('ReservationExtraCharges')->find()
+            ->select(['name', 'amount', 'quantity'])
+            ->where(['reservation_id' => $id])->orderBy(['id' => 'ASC'])
+            ->disableHydration()->all()->toList());
+
+        return $state;
+    }
+
+    /**
+     * What changed between two stateOf() results: `{field: {before, after}}`.
+     *
+     * @param array<string, mixed> $before Before.
+     * @param array<string, mixed> $after After.
+     * @return array<string, array{before: mixed, after: mixed}>
+     */
+    private function changesBetween(array $before, array $after): array
+    {
+        $changes = [];
+        foreach (array_keys($before + $after) as $field) {
+            if (($before[$field] ?? null) !== ($after[$field] ?? null)) {
+                $changes[$field] = ['before' => $before[$field] ?? null, 'after' => $after[$field] ?? null];
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
+     * Record one reservation event, inside the action's transaction (the
+     * ledger refuses otherwise): who, role, request id and reason come from
+     * the request's EventContext.
+     *
+     * @param array<string, mixed>|null $changes What changed, as the event should say.
+     */
+    private function recordReservationEvent(Reservation $reservation, string $type, ?array $changes): void
+    {
+        /** @var \App\Model\Table\ReservationEventsTable $events */
+        $events = $this->fetchTable('ReservationEvents');
+        $events->record($this->eventContext(), $type, $reservation, [
+            'columns' => [
+                'room_id' => $reservation->room_id ? (int)$reservation->room_id : null,
+                'status_after' => $reservation->status,
+            ],
+            'changes' => $changes,
+        ]);
+    }
+
+    /**
+     * Refuse, before anything changes, an action whose event needs a reason
+     * when the request has none.
+     */
+    private function requireReason(string $message): void
+    {
+        if ($this->eventContext()->reason === null) {
+            throw new ReasonRequiredException($message);
+        }
     }
 
     private function respondWithReservation(Reservation $reservation, int $status): void

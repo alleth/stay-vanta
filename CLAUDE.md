@@ -139,9 +139,9 @@ housekeeping, expenses, time keeping and configuration.
 
 **Today:** inventory (`stock_movements`), POS sales (`food_order_events`, step 5) and invoices
 (`invoice_events`, step 6, in production 2026-10-03; history from before is imported with no actor)
-meet it. Known gaps: `reservations.receptionist_id` is overwritten on
-every edit and transition, and reservations are hard-deleted; rate, promo, charge and menu-price
-changes record nobody.
+meet it; reservations (`reservation_events`, soft delete) since step 8. `reservations.receptionist_id`
+is legacy ("last touched by", still stamped for one release, never the actor). Known gap: rate,
+promo, charge and menu-price changes record nobody (step 9).
 
 **Event recording standard** (all new ledgers; the shared foundation is build step 5):
 - **Tables:** `<subject>_events` (`reservation_events`, `invoice_events`, `food_order_events`,
@@ -572,11 +572,17 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   among `HOLDS_ROOM` statuses — plus `checked_out` when a past stay is being entered (check-out
   day is free for a same-day check-in; the Calendar tab derives availability the same way).
   `add()`/`edit()` call `lockRoom()` first. `ReservationsTable::conflicting()` queries the overlap.
+- **Every reservation action records one `reservation_events` row** (step 8, `docs/EVENTS.md`):
+  `ReservationsController` locks the row (`lockReservation()`), re-checks, changes and records in one
+  transaction (`recordReservationEvent()`, before/after from `stateOf()`); a repeated action is
+  refused and records nothing. Reasons: past stays, corrections, referral discounts, cancellations
+  once money was taken, deletions.
 - **Lifecycle**: transitions are guarded by an allowed-from-state table and flip `rooms.status`.
   A `booked` reservation is editable (row click reopens `ReservationModal`, booking fields only)
   until check-in, and not at all once a downpayment was collected — cancel and rebook. An
   **admin** can also open a checked-in/out row to correct it (until its room charge is posted;
-  `correctStay()` keeps the dates consistent with the status) or **delete** it — refused by
+  `correctStay()` keeps the dates consistent with the status) or **delete** it (soft since step 8:
+  `deleted_at`, hidden by `ReservationsTable::beforeFind()` unless `withDeleted`) — refused by
   `transactionOn()` once anything was transacted (downpayment, invoice/lines, or the guest's food
   orders during the stay, matched by guest + date since orders carry no `reservation_id`).
   **Once the room charge's invoice is settled (`isSettled()`), a reservation of any status is

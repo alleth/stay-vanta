@@ -209,7 +209,7 @@ class BillingStatesApiTest extends TestCase
         $this->callAs($this->receptionistToken, 'POST', "/api/reservations/$id/post-room-charge");
         $this->assertResponseOk();
 
-        $this->callAs($this->receptionistToken, 'POST', "/api/reservations/$id/cancel");
+        $this->callAs($this->receptionistToken, 'POST', "/api/reservations/$id/cancel", ['reason' => 'Guest left early']);
         $this->assertResponseOk((string)$this->_response->getBody());
         $this->assertSame('cancelled', $this->getTableLocator()->get('Reservations')->get($id)->status);
         $this->assertSame('not_billed', $this->listed($id)['billing_state'], 'its charge is reversed off the open invoice');

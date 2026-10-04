@@ -123,6 +123,15 @@ class BackdatedReservationsApiTest extends TestCase
     }
 
     /**
+     * DELETE with a reason (deleting is elevated since build step 8).
+     */
+    private function deleteWithReason(string $token, int|string $id): void
+    {
+        $this->authedAs($token);
+        $this->_sendRequest("/api/reservations/{$id}", 'DELETE', json_encode(['reason' => 'Entered by mistake']));
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function book(string $token, array $data): array
@@ -131,6 +140,8 @@ class BackdatedReservationsApiTest extends TestCase
         $this->post('/api/reservations', json_encode($data + [
             'room_id' => $this->roomId,
             'source' => 'walk_in',
+            // A past stay says why (build step 8); harmless on any other booking.
+            'reason' => 'Entered after the stay',
         ]));
 
         return (array)json_decode((string)$this->_response->getBody(), true);
@@ -271,6 +282,7 @@ class BackdatedReservationsApiTest extends TestCase
         $this->patch("/api/reservations/{$stay['id']}", json_encode([
             'check_in' => $this->day(-6),
             'check_out' => $this->day(-1),
+            'reason' => 'Dates were typed wrong',
         ]));
 
         $this->assertResponseOk((string)$this->_response->getBody());
@@ -286,7 +298,7 @@ class BackdatedReservationsApiTest extends TestCase
         $stay = $this->recordPastStay(-5, -2);
 
         $this->authedAs($this->adminToken);
-        $this->patch("/api/reservations/{$stay['id']}", json_encode(['check_out' => $this->day(2)]));
+        $this->patch("/api/reservations/{$stay['id']}", json_encode(['check_out' => $this->day(2), 'reason' => 'Guest extended']));
 
         $this->assertResponseCode(400);
     }
@@ -306,11 +318,13 @@ class BackdatedReservationsApiTest extends TestCase
         $stay = $this->recordPastStay(-2, 1);
         $this->assertSame('occupied', $this->getTableLocator()->get('Rooms')->get($this->roomId)->status);
 
-        $this->authedAs($this->adminToken);
-        $this->delete("/api/reservations/{$stay['id']}");
+        $this->deleteWithReason($this->adminToken, $stay['id']);
 
         $this->assertResponseOk((string)$this->_response->getBody());
+        // Soft delete (build step 8): hidden from every query, but the row stays.
         $this->assertFalse($this->getTableLocator()->get('Reservations')->exists(['id' => $stay['id']]));
+        $this->assertNotNull($this->getTableLocator()->get('Reservations')
+            ->find('all', withDeleted: true)->where(['id' => $stay['id']])->firstOrFail()->deleted_at);
         // Nobody is recorded in the room any more.
         $this->assertSame('available', $this->getTableLocator()->get('Rooms')->get($this->roomId)->status);
     }
@@ -338,8 +352,7 @@ class BackdatedReservationsApiTest extends TestCase
         $this->patch("/api/reservations/{$stay['id']}", json_encode(['additional_beds' => 1]));
         $this->assertResponseCode(400);
 
-        $this->authedAs($this->adminToken);
-        $this->delete("/api/reservations/{$stay['id']}");
+        $this->deleteWithReason($this->adminToken, $stay['id']);
         $this->assertResponseCode(400);
         $this->assertTrue($this->getTableLocator()->get('Reservations')->exists(['id' => $stay['id']]));
     }
@@ -434,8 +447,7 @@ class BackdatedReservationsApiTest extends TestCase
         $this->patch("/api/reservations/{$id}", json_encode(['check_out' => $this->day(5)]));
         $this->assertResponseCode(400);
 
-        $this->authedAs($this->adminToken);
-        $this->delete("/api/reservations/{$id}");
+        $this->deleteWithReason($this->adminToken, $id);
         $this->assertResponseCode(400);
         $this->assertStringNotContainsString('Cancel it instead', (string)$this->_response->getBody());
 
@@ -466,8 +478,7 @@ class BackdatedReservationsApiTest extends TestCase
         $order->set('created', new DateTime($this->day(-3) . ' 12:00:00'));
         $orders->saveOrFail($order);
 
-        $this->authedAs($this->adminToken);
-        $this->delete("/api/reservations/{$stay['id']}");
+        $this->deleteWithReason($this->adminToken, $stay['id']);
 
         $this->assertResponseCode(400);
         $this->assertStringContainsString('food orders', (string)$this->_response->getBody());

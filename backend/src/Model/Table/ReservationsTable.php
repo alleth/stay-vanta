@@ -6,6 +6,8 @@ namespace App\Model\Table;
 use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
+use ArrayObject;
+use Cake\Event\EventInterface;
 use Cake\I18n\Date;
 use Cake\ORM\Query\SelectQuery;
 use Cake\ORM\RulesChecker;
@@ -267,6 +269,40 @@ class ReservationsTable extends Table
         }
 
         return $query;
+    }
+
+    /**
+     * Soft delete (build step 8): a deleted reservation keeps its row, but no
+     * query sees it unless it asks with `withDeleted` — lists, counts, the
+     * calendar, room availability, guests in house, Operations, and every
+     * association that contains reservations. Only the history and a
+     * Manager's "Deleted" view ask.
+     *
+     * @param \Cake\Event\EventInterface<\Cake\ORM\Table> $event The event.
+     * @param \Cake\ORM\Query\SelectQuery $query The query.
+     * @param \ArrayObject<string, mixed> $options Find options (`withDeleted`).
+     * @param bool $primary Whether this is the root query.
+     * @return void
+     */
+    public function beforeFind(EventInterface $event, SelectQuery $query, ArrayObject $options, bool $primary): void
+    {
+        if (!empty($options['withDeleted'])) {
+            return;
+        }
+        $query->where([$this->aliasField('deleted_at') . ' IS' => null]);
+    }
+
+    /**
+     * The reservation re-read with a write lock for the rest of the current
+     * transaction (build step 8: lock, then check, then change, then record).
+     * Null when it doesn't exist or was deleted.
+     */
+    public function lockReservation(int $id): ?Reservation
+    {
+        /** @var \App\Model\Entity\Reservation|null $locked */
+        $locked = $this->find()->where([$this->aliasField('id') => $id])->epilog('FOR UPDATE')->first();
+
+        return $locked;
     }
 
     /**

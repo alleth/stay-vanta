@@ -179,6 +179,13 @@ its first 8 characters as the **Reference** on error alerts.
   `billing=not_billed` set above; `unpaid` = the old figure (non-cancelled, `payment_status`
   unpaid), kept until the old screens are gone; `open_invoices` = the property's invoices not yet
   settled, of any kind).
+- **Reservation accountability (build step 8):** every action below records one
+  `reservation_events` row (who, role, before/after, when, reason, request id) under a lock on the
+  reservation; a repeat of the same action is refused (400/404/422) and records nothing. Reasons
+  (`reason` in the body; 400 without): a past stay or moving a check-in before today, correcting a
+  checked-in/out stay, setting or changing a referral `discount_amount`, cancelling once money was
+  taken (downpayment or posted charges), deleting. Deleted reservations are hidden from every
+  endpoint (404).
 - `POST /api/reservations`
   - `walk_in` source → saved straight to `checked_in`, `check_in` forced to today, room flipped
     to `occupied`.
@@ -213,11 +220,14 @@ its first 8 characters as the **Reference** on error alerts.
   also edit a `checked_in`/`checked_out` stay until its room charge is posted (400 after): the
   status stays, so a stay's `check_in` can't move after today (nor a finished stay's `check_out`),
   `checked_in_at`/`checked_out_at` follow their dates, and a checked-in guest's room change moves
-  the occupied flag. **400 for any status once the room charge's invoice is settled.**
-- `DELETE /api/reservations/{id}` — **admin only** (403), any status. 400 once anything has been
+  the occupied flag. **400 for any status once the room charge's invoice is settled.** An edit that
+  changes nothing is 400 ("Nothing to change") and records nothing (step 8).
+- `DELETE /api/reservations/{id}` `{reason}` — **admin only** (403), any status, **soft** (step 8):
+  sets `deleted_at`, keeps the row, its `reservation_discounts` and extras, records `deleted` with
+  the whole reservation; 404 afterwards. 400 without a reason, and once anything has been
   transacted against it: a downpayment, an invoice or invoice line for it, or a non-cancelled food
   order by the same guest dated within the stay (food orders link to the guest, not the booking).
-  Removes its `reservation_discounts`; frees the room if it was the one checking the guest in.
+  Frees the room if it was the one checking the guest in.
 - `POST /api/reservations/{id}/{check-in|check-out|cancel}` — stamp
   `checked_in_at`/`checked_out_at`/`cancelled_at` and `receptionist_id`; flip room status.
   - check-in accepts `early_check_in:true` → posts the configured fee to the guest's invoice.

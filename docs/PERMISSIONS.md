@@ -110,9 +110,9 @@ several properties.
 | `POST/PATCH/PUT/DELETE /receipt-series…` | `finance.receipt_series.manage` | |
 | `GET /reservations`, `GET /reservations/stats` | `front_desk.reservation.view` | |
 | `POST /reservations`, `PATCH/PUT /reservations/{id}` (a booking), `POST /reservations/{id}/{transition}`, `POST /reservations/{id}/post-room-charge`, `POST /reservations/{id}/payment` (legacy) | `front_desk.reservation.manage` | |
-| Booking or moving a check-in before today | `front_desk.reservation.backdate` | Rule kept: a walk-in without it is forced to today, not refused |
-| Editing a checked-in/checked-out stay | `front_desk.reservation.correct` | Refused with **400**, not 403, today; Phase 1 keeps the status code |
-| `DELETE /reservations/{id}` | `front_desk.reservation.delete` | |
+| Booking or moving a check-in before today | `front_desk.reservation.backdate` | Rule kept: a walk-in without it is forced to today, not refused. Needs `reason` (step 8) |
+| Editing a checked-in/checked-out stay | `front_desk.reservation.correct` | Refused with **400**, not 403, today; Phase 1 keeps the status code. Needs `reason` (step 8) |
+| `DELETE /reservations/{id}` | `front_desk.reservation.delete` | Soft delete; needs `reason` (step 8) |
 | `GET /guests`, `/guests/stats`, `/guests/match`, `/guests/{id}` | `guests.guest.view` | |
 | `POST /guests`, `PATCH/PUT /guests/{id}` | `guests.guest.manage` | |
 | `GET /food-orders`, `GET /food-orders/{id}`, `GET /food-menu-items` | `pos.sale.view` | |

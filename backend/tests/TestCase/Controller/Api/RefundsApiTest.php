@@ -271,9 +271,9 @@ class RefundsApiTest extends TestCase
 
         $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/cancel", ['refund_method' => 'bank']);
         $this->assertResponseCode(400, 'an unknown method');
-        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/cancel", ['refund_method' => 'gotyme']);
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/cancel", ['refund_method' => 'gotyme', 'reason' => 'Plans changed']);
         $this->assertResponseOk((string)$this->_response->getBody());
-        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/cancel", ['refund_method' => 'gotyme']);
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/cancel", ['refund_method' => 'gotyme', 'reason' => 'Plans changed']);
         $this->assertResponseCode(400, 'cancelled once');
 
         $events = $this->getTableLocator()->get('InvoiceEvents')->find()
