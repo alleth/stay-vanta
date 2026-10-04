@@ -137,6 +137,20 @@ Carry these into steps 6–10:
   only today, so no isolation risk: such a user sees nothing). Phase 2 memberships replace the
   column anyway.
 
+- [ ] **Configuration rows can name a property that doesn't exist** (no foreign keys). Found
+  2026-10-05 by the step 9 baseline on staging: `extra_charges` id 1 belongs to no existing
+  property (likely the early check-in fee seeded for one of the accounts above). The first
+  baseline release stopped at "An event subject must belong to a property" and **staging's boot
+  failed its migrations for about 20 minutes** (502) until `f4aeade` made the baseline skip and log
+  such rows. Before production: nothing to do (the baseline now skips them). Later: find such rows
+  in every property-owned table and decide, row by row, whether to remove them (soft delete) or
+  leave them; add `existsIn` rules. Lesson for every data migration: a failure blocks the boot, so
+  a backfill must report an unexpected row, not throw on it.
+
+- [ ] **A cancelled stay's invoice stays open at ₱0** and counts in the Outstanding *count*
+  (the amount is right). Seen in step 9 QA: a walk-in's room charge posted, then the stay cancelled
+  (reversed). Decide whether a fully reversed invoice should close or be left out of the count.
+
 - [ ] **phpcs backlog:** about 97 pre-existing style violations in 43 files. Clean them up, then add
   `composer cs-check` to CI so style is enforced.
 - [ ] **CI action versions:** GitHub warns that `actions/checkout`, `actions/cache` and
