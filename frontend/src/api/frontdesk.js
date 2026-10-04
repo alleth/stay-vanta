@@ -69,10 +69,16 @@ export const createReservation = (data, propertyId) =>
 export const updateReservation = (id, data) =>
   client.patch(`/reservations/${id}`, data).then((r) => r.data.reservation)
 
-// Admin only, and refused once anything has been transacted against the
-// reservation (a downpayment, charges on the invoice, food orders during the stay).
-export const deleteReservation = (id) =>
-  client.delete(`/reservations/${id}`).then((r) => r.data)
+// Admin only, with a reason (build step 8: a soft delete, recorded with who and
+// why); refused once anything has been transacted against the reservation (a
+// downpayment, charges on the invoice, food orders during the stay).
+export const deleteReservation = (id, reason) =>
+  client.delete(`/reservations/${id}`, { data: { reason } }).then((r) => r.data)
+
+// The reservation's timeline (build step 8): its own events and the invoice
+// events of its money, oldest first → {reservation_id, deleted, history}.
+export const reservationHistory = (id) =>
+  client.get(`/reservations/${id}/history`).then((r) => r.data)
 
 // transition: 'check-in' | 'check-out' | 'cancel'
 // `data` carries flags like { early_check_in: true } for the check-in transition.

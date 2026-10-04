@@ -143,7 +143,9 @@ class ReservationsController extends AppController
         $query->limit($limit)->offset(($page - 1) * $limit);
 
         $rows = $query->all()->toList();
-        $chargeStatus = $this->roomChargeStatuses(array_map(fn(Reservation $r): int => (int)$r->id, $rows));
+        $ids = array_map(fn(Reservation $r): int => (int)$r->id, $rows);
+        $chargeStatus = $this->roomChargeStatuses($ids);
+        $bookedBy = $this->bookedBy($ids);
 
         // Attach a price quote to each reservation, and where its room charge
         // stands: null (not posted yet), 'open' (on the guest's tab, not yet
@@ -152,6 +154,7 @@ class ReservationsController extends AppController
             $r->set('quote', $reservations->quote($r, $this->resolveBaseRate((int)$r->property_id, $r->room_id)));
             $r->set('room_charge_invoice', $chargeStatus[(int)$r->id] ?? null);
             $r->set('billing_state', self::billingState($chargeStatus[(int)$r->id] ?? null));
+            $r->set('booked_by', $bookedBy[(int)$r->id] ?? null);
         }
 
         $this->set([
@@ -1143,6 +1146,47 @@ class ReservationsController extends AppController
         }
 
         $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * Who made each reservation, from its creation event (build step 8;
+     * `receptionist_id` is only "last touched by"): `{name, recorded, at}`,
+     * `recorded: false` for history imported from before step 8 (unknown).
+     *
+     * @param list<int> $ids Reservation ids.
+     * @return array<int, array<string, mixed>>
+     */
+    private function bookedBy(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $events = $this->fetchTable('ReservationEvents')->find()
+            ->select(['reservation_id', 'actor_id', 'source', 'occurred_at'])
+            ->where([
+                'reservation_id IN' => $ids,
+                'event_type IN' => [
+                    ReservationEventsTable::BOOKED,
+                    ReservationEventsTable::WALKED_IN,
+                    ReservationEventsTable::BACKDATED,
+                ],
+            ])
+            ->orderBy(['id' => 'ASC'])
+            ->all()->toList();
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($e) => $e->actor_id, $events))));
+        $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        $result = [];
+        foreach ($events as $e) {
+            $result[(int)$e->reservation_id] ??= [
+                'name' => $e->actor_id !== null ? ($names[$e->actor_id] ?? null) : null,
+                'recorded' => $e->source !== 'import',
+                'at' => $e->occurred_at,
+            ];
+        }
+
+        return $result;
     }
 
     /** Invoice line sources that belong to a reservation. */

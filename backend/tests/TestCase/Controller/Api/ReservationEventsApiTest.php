@@ -491,7 +491,10 @@ class ReservationEventsApiTest extends TestCase
         $this->booking($this->roomId);
         $this->callAs($this->adminToken, 'GET', '/api/reservations?limit=25');
         $this->assertResponseOk();
-        $receptionist = $this->responseJson()['reservations'][0]['receptionist'];
-        $this->assertSame(['id', 'name'], array_keys($receptionist), 'no token expiry or other account fields');
+        $row = $this->responseJson()['reservations'][0];
+        $this->assertSame(['id', 'name'], array_keys($row['receptionist']), 'no token expiry or other account fields');
+        // Who booked it comes from its creation event, not the legacy column.
+        $this->assertStringContainsString('resv-desk', (string)$row['booked_by']['name']);
+        $this->assertTrue($row['booked_by']['recorded']);
     }
 }

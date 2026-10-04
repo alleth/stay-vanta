@@ -571,8 +571,33 @@ function invoiceText(e) {
 // " · by GCash" for a refund's method (build step 7c).
 const method = (e) => (e.method ? ` · by ${refundMethodLabel(e.method)}` : '')
 
+// Reservation lines (build step 8): what happened to whose stay, in which
+// room, and why when a reason was given.
+const RESERVATION_TEXT = {
+  booked: 'Booked',
+  walked_in: 'Walk-in checked in',
+  backdated: 'Past stay entered',
+  corrected: 'Corrected stay',
+  discount_changed: 'Changed discount',
+  checked_in: 'Checked in',
+  checked_out: 'Checked out',
+  cancelled: 'Cancelled reservation',
+  cancelled_after_payment: 'Cancelled reservation (after payment)',
+  deleted: 'Deleted reservation',
+}
+
+function reservationText(e) {
+  const guest = e.guest ?? 'guest'
+  const room = e.room ? ` · Room ${e.room}` : ''
+  const dates = e.check_in ? ` · ${e.check_in} → ${e.check_out ?? '?'}` : ''
+  const after = e.backdated_entry ? ' · entered after the stay' : ''
+  const why = e.reason ? ` · “${e.reason}”` : ''
+  return `${RESERVATION_TEXT[e.event] ?? e.event} · ${guest}${room}${dates}${after}${why}`
+}
+
 function activityText(e) {
   if (e.type === 'invoice') return invoiceText(e)
+  if (e.type === 'reservation') return reservationText(e)
   if (e.type === 'sale_refund') {
     return `Refunded order #${e.order_id} · ${formatMoney(e.amount)}${method(e)}${e.reason ? ` · “${e.reason}”` : ''}`
   }

@@ -25,6 +25,7 @@ import {
 import { describeError } from '../utils/apiError'
 import ReasonModal from '../components/ReasonModal'
 import RefundMethodSelect from '../components/RefundMethodSelect'
+import ReservationHistory from '../components/ReservationHistory'
 
 // Standard check-in is from noon; arriving earlier in the day is an early check-in.
 const isEarlyCheckInNow = () => new Date().getHours() < 12
@@ -99,6 +100,7 @@ const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : null)
 // row always opens; this decides whether the modal opens editable or as a
 // read-only view. Mirrors ReservationsController::edit()/delete().
 function editBlockReason(r, canCorrect) {
+  if (r.deleted_at) return 'This reservation was deleted. Its history is kept below.'
   if (r.room_charge_invoice === 'settled') {
     return 'Its invoice is settled, so it can no longer be edited or deleted.'
   }
@@ -233,14 +235,18 @@ export default function FrontDesk() {
   const [pending, setPending] = useState(null) // key of the in-flight inline action
   const [earlyConfirm, setEarlyConfirm] = useState(null) // reservation pending an early check-in
   const [reverseFor, setReverseFor] = useState(null) // reservation whose room charge is being reversed
-  const [cancelRefund, setCancelRefund] = useState(null) // {reservation, method}: an advance booking being cancelled
+  const [cancelRefund, setCancelRefund] = useState(null) // {reservation, method, reason}: an advance booking being cancelled
+  const [cancelWithReason, setCancelWithReason] = useState(null) // a stay with charges being cancelled
   const today = todayStr()
 
   // Front Desk shows a "fresh start" each day: pending bookings (booked /
   // checked_in) always show, but completed transactions (checked_out /
   // cancelled) only show if they happened within the selected window — the
   // server applies it, since the table is paginated there.
-  const since = resFilter === 'all' ? undefined : resFilter === 'week' ? startOfWeek() : today
+  const since = resFilter === 'all' || resFilter === 'deleted' ? undefined
+    : resFilter === 'week' ? startOfWeek() : today
+  // A Manager's read-only view of deleted reservations (build step 8).
+  const deletedOnly = resFilter === 'deleted' ? 'only' : undefined
 
   const refresh = useCallback(async () => {
     if (!propertyId) return
@@ -249,7 +255,7 @@ export default function FrontDesk() {
         listRooms(propertyId), listRoomRates(propertyId), listBookingSources(propertyId),
         listPromoRates(propertyId),
         pageReservations(propertyId, {
-          page: resPage, limit: RESERVATIONS_PER_PAGE, since, billing: resBilling ?? undefined,
+          page: resPage, limit: RESERVATIONS_PER_PAGE, since, billing: resBilling ?? undefined, deleted: deletedOnly,
         }),
         listReservations(propertyId, { on_date: calDate }),
         reservationStats(propertyId), listExtraCharges(propertyId),
@@ -271,7 +277,7 @@ export default function FrontDesk() {
     } finally {
       setLoading(false)
     }
-  }, [propertyId, resPage, since, resBilling, calDate])
+  }, [propertyId, resPage, since, resBilling, calDate, deletedOnly])
 
   // The active early check-in fee (0 if none) — shown in the warning and billed
   // automatically by the backend when an early check-in is confirmed.
@@ -357,7 +363,13 @@ export default function FrontDesk() {
     // Cancelling an advance booking retains 10% of the downpayment and returns
     // 90%: a refund (cash out today), so it asks how the money went back.
     if (transition === 'cancel' && r.status === 'booked' && Number(r.downpayment) > 0) {
-      setCancelRefund({ reservation: r, method: '' })
+      setCancelRefund({ reservation: r, method: '', reason: '' })
+      return
+    }
+    // Once money was taken (charges posted, or the guest is in the room with
+    // charges likely), cancelling records why (build step 8, R2).
+    if (transition === 'cancel' && (r.status === 'checked_in' || r.billing_state === 'billed')) {
+      setCancelWithReason(r)
       return
     }
     runTransition(r.id, transition)
@@ -499,6 +511,7 @@ export default function FrontDesk() {
                     <option value="today">Today&apos;s activity</option>
                     <option value="week">This week</option>
                     <option value="all">All</option>
+                    {canDelete && <option value="deleted">Deleted</option>}
                   </Form.Select>
                 </Form.Group>
                 {resBilling === 'not_billed' && (
@@ -518,7 +531,7 @@ export default function FrontDesk() {
                   <tr>
                     <th>Guest</th><th>Room</th><th>Dates</th><th>Source</th>
                     <th className="text-right">Total</th><th>Status</th><th>Billing</th>
-                    <th>Logs</th><th>Last updated by</th><th className="text-right">Actions</th>
+                    <th>Logs</th><th>Booked by</th><th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -612,8 +625,11 @@ export default function FrontDesk() {
                         {r.checked_in_at && <div>In: {fmtDateTime(r.checked_in_at)}</div>}
                         {r.checked_out_at && <div>Out: {fmtDateTime(r.checked_out_at)}</div>}
                       </td>
-                      <td className="text-xs text-muted">{r.receptionist?.name ?? '—'}</td>
+                      <td className="text-xs text-muted">
+                        {r.booked_by ? (r.booked_by.recorded ? r.booked_by.name ?? 'Unknown user' : 'Not recorded') : '—'}
+                      </td>
                       <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                        {r.deleted_at ? <Badge bg="secondary">Deleted</Badge> : (
                         <div className="inline-flex flex-wrap justify-end gap-1">
                           {r.status === 'booked' && (
                             <Button size="sm" variant="outline-primary"
@@ -655,6 +671,7 @@ export default function FrontDesk() {
                             </Button>
                           )}
                         </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -953,14 +970,22 @@ export default function FrontDesk() {
               </p>
               <RefundMethodSelect id="cancel-refund-method" value={cancelRefund.method}
                 onChange={(method) => setCancelRefund({ ...cancelRefund, method })} />
+              <Form.Group>
+                <Form.Label>Reason</Form.Label>
+                <Form.Control id="cancel-refund-reason" as="textarea" rows={2} maxLength={500}
+                  value={cancelRefund.reason} placeholder="e.g. Guest changed travel plans"
+                  onChange={(e) => setCancelRefund({ ...cancelRefund, reason: e.target.value })} />
+                <Form.Text>Saved with the cancellation and can’t be edited later.</Form.Text>
+              </Form.Group>
             </Modal.Body>
             <Modal.Footer>
               <Button variant="secondary" onClick={() => setCancelRefund(null)}>Back</Button>
-              <Button variant="danger" disabled={!cancelRefund.method || pending !== null}
+              <Button variant="danger"
+                disabled={!cancelRefund.method || cancelRefund.reason.trim().length < 5 || pending !== null}
                 onClick={async () => {
-                  const { reservation, method } = cancelRefund
+                  const { reservation, method, reason } = cancelRefund
                   setCancelRefund(null)
-                  await runTransition(reservation.id, 'cancel', { refund_method: method })
+                  await runTransition(reservation.id, 'cancel', { refund_method: method, reason: reason.trim() })
                 }}>
                 Cancel and refund {formatMoney(dp * 0.9)}
               </Button>
@@ -968,6 +993,17 @@ export default function FrontDesk() {
           </Modal>
         )
       })()}
+      <ReasonModal show={cancelWithReason !== null}
+        title="Cancel reservation"
+        description={cancelWithReason && `Cancelling ${cancelWithReason.guest?.full_name ?? 'this stay'}`
+          + ' reverses the charges already posted to the guest’s invoice. The reversal lines stay on the invoice.'}
+        confirmLabel="Cancel reservation"
+        onHide={() => setCancelWithReason(null)}
+        onConfirm={async (reason) => {
+          await transitionReservation(cancelWithReason.id, 'cancel', { reason })
+          setCancelWithReason(null)
+          await refresh()
+        }} />
       <ReasonModal show={reverseFor !== null}
         title="Reverse room charge"
         description={reverseFor && `Takes the room charge${Number(reverseFor.downpayment) > 0 ? ' and downpayment credit' : ''} for `
@@ -1146,24 +1182,25 @@ function ReservationModal({
   // A stay that's under way or over (admin-only to edit) keeps its status, so
   // its dates can't be moved to say it hasn't happened yet.
   const isStay = reservation?.status === 'checked_in' || reservation?.status === 'checked_out'
+  // Build step 8: the changes that say why, asked in the form (the server
+  // refuses them without one). One reason covers the whole save.
+  const [reason, setReason] = useState('')
+  const movesIntoPast = editing && reservation.status === 'booked' && Boolean(form.check_in)
+    && form.check_in < todayStr() && form.check_in !== reservation.check_in
+  const referralSet = Boolean(form.referral) && Number(form.discount_amount) > 0
+    && (!editing || Number(form.discount_amount) !== Number(reservation.discount_amount ?? 0))
+  const reasonNeeded = editing && isStay ? 'Correcting a stay'
+    : (isPast || movesIntoPast) ? 'Entering a stay before today'
+      : referralSet ? 'Giving a referral discount' : null
   // Any room may be picked for nights that are already over; today's status
   // says nothing about who was in it then.
   const stayEnded = Boolean(form.check_in) && form.check_in < todayStr()
     && Boolean(form.check_out) && form.check_out <= todayStr()
 
-  const [deleting, setDeleting] = useState(false)
-  async function remove() {
-    if (!window.confirm('Delete this reservation? This can\'t be undone.')) return
-    setDeleting(true)
-    setErr(null)
-    try {
-      await deleteReservation(reservation.id)
-      onSaved()
-    } catch (ex) {
-      setErr(describeError(ex, 'Delete failed.'))
-      setDeleting(false)
-    }
-  }
+  // Deleting is a Manager's soft delete with a reason (build step 8): the
+  // reservation and its history are kept, hidden from the lists.
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const deleting = confirmDelete
 
   // A walk-in is someone at the desk right now, so the stay starts today and
   // the date isn't the receptionist's to choose. The backend decides this for
@@ -1307,6 +1344,7 @@ function ReservationModal({
 
   function buildPayload(extra = {}) {
     const payload = { ...form, ...extra }
+    if (reasonNeeded) payload.reason = reason.trim()
     if (!payload.referral) payload.discount_amount = ''
     delete payload.referral
     // Sent blank to clear it: a walk-in has no channel to have promised one.
@@ -1352,7 +1390,8 @@ function ReservationModal({
   }
 
   return (
-    <Modal show onHide={onClose} centered size="xl">
+    <>
+    <Modal show={!confirmDelete} onHide={onClose} centered size="xl">
       <Form onSubmit={(e) => { e.preventDefault(); if (!readOnly) book(false) }}>
         <Modal.Header closeButton>
           <Modal.Title>
@@ -1800,7 +1839,16 @@ function ReservationModal({
           </section>
           </div>
          </div>
+          {reasonNeeded && !readOnly && (
+            <Form.Group className="mt-4">
+              <Form.Label htmlFor="reservation-reason">Reason</Form.Label>
+              <Form.Control id="reservation-reason" as="textarea" rows={2} maxLength={500} required minLength={5}
+                value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this is being done" />
+              <Form.Text>Needed because {reasonNeeded.toLowerCase()}. Saved with the change and can’t be edited later.</Form.Text>
+            </Form.Group>
+          )}
          </fieldset>
+          {editing && <ReservationHistory reservationId={reservation.id} rooms={rooms} />}
         </Modal.Body>
         <Modal.Footer>
           {readOnly ? (
@@ -1808,8 +1856,9 @@ function ReservationModal({
           ) : (
             <>
               {editing && canDelete && (
-                <Button variant="outline-danger" className="mr-auto" disabled={busy || deleting} onClick={remove}>
-                  {deleting ? <Spinner size="sm" /> : 'Delete'}
+                <Button variant="outline-danger" className="mr-auto" disabled={busy || deleting}
+                  onClick={() => setConfirmDelete(true)}>
+                  Delete
                 </Button>
               )}
               <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -1821,6 +1870,17 @@ function ReservationModal({
         </Modal.Footer>
       </Form>
     </Modal>
+    <ReasonModal show={confirmDelete}
+      title="Delete reservation"
+      description="Use this only for a reservation entered by mistake. It disappears from every list, but it and its history are kept, and it can’t be restored. To undo a real booking, cancel it instead."
+      confirmLabel="Delete reservation"
+      onHide={() => setConfirmDelete(false)}
+      onConfirm={async (deleteReason) => {
+        await deleteReservation(reservation.id, deleteReason)
+        setConfirmDelete(false)
+        onSaved()
+      }} />
+    </>
   )
 }
 

@@ -448,6 +448,11 @@ would make the key attacker-controlled.
   render it as `<Alert variant="danger">{error}</Alert>`: `Alert` shows the message plus
   "Reference: 8c2a236e" with a Copy button. Don't read `ex.response.data.message` by hand; if the
   error goes inside other text, use `error.message`. `useSubmit` already returns one.
+- **A reservation's history is `src/components/ReservationHistory.jsx`** (step 8, rendered in
+  `ReservationModal`): its events and its invoice events from `GET /reservations/{id}/history`.
+  It, and "Booked by" (`booked_by`), are the record of who did what; never show
+  `reservation.receptionist` as the person responsible. `ReservationModal` asks for a reason in the
+  form when the save needs one (a correction, a stay before today, a referral discount).
 - **Elevated actions ask why with `src/components/ReasonModal.jsx`** (`show`, `title`,
   `description`, `confirmLabel`, `onConfirm(reason)`, `onHide`) and send `reason` with the request.
 - Initial loads use skeletons from `src/components/Skeleton.jsx`, not spinners (inline action

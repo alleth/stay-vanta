@@ -236,7 +236,9 @@ its first 8 characters as the **Reference** on error alerts.
   open a deleted reservation's history; anyone else gets 404.
 - `GET /api/reservations?deleted=only` — **Manager only** (403 otherwise): the read-only list of
   soft-deleted reservations.
-- Embedded staff (`receptionist`, `last_receptionist`) carry `{id, name}` only (step 8).
+- Embedded staff (`receptionist`, `last_receptionist`) carry `{id, name}` only (step 8). Each listed
+  reservation carries `booked_by` `{name, recorded, at}` from its creation event (`recorded: false`
+  = imported, person unknown); `receptionist` is legacy ("last touched by") and not shown.
 - `DELETE /api/reservations/{id}` `{reason}` — **admin only** (403), any status, **soft** (step 8):
   sets `deleted_at`, keeps the row, its `reservation_discounts` and extras, records `deleted` with
   the whole reservation; 404 afterwards. 400 without a reason, and once anything has been
