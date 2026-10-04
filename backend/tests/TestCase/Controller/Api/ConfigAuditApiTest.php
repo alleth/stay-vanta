@@ -80,24 +80,24 @@ class ConfigAuditApiTest extends TestCase
         $this->assertSame($this->_response->getHeaderLine('X-Request-Id'), $created->correlation_id);
 
         // A price change needs a reason: refused, nothing saved or recorded.
-        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$rateId", ['base_rate' => 1200, 'description' => 'Sea view']);
+        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$rateId", ['room_id' => $this->roomId, 'base_rate' => 1200, 'description' => 'Sea view']);
         $this->assertResponseCode(400);
         $this->assertEquals(1000, $this->getTableLocator()->get('RoomRates')->get($rateId)->base_rate);
         $this->assertCount(1, $this->changes('room_rate', $rateId));
 
-        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$rateId", ['base_rate' => 1200, 'description' => 'Sea view', 'reason' => 'Peak season']);
+        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$rateId", ['room_id' => $this->roomId, 'base_rate' => 1200, 'description' => 'Sea view', 'reason' => 'Peak season']);
         $this->assertResponseOk((string)$this->_response->getBody());
         $updated = $this->changes('room_rate', $rateId)[1];
         $this->assertSame(['updated', 'price', 'Peak season'], [$updated->event_type, $updated->impact, $updated->reason]);
         $this->assertEquals(['base_rate' => ['before' => 1000, 'after' => 1200]], $updated->changes);
 
         // The same save again changes nothing: refused, nothing recorded.
-        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$rateId", ['base_rate' => 1200, 'description' => 'Sea view', 'reason' => 'Again']);
+        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$rateId", ['room_id' => $this->roomId, 'base_rate' => 1200, 'description' => 'Sea view', 'reason' => 'Again']);
         $this->assertResponseCode(400);
         $this->assertStringContainsString('Nothing to change', (string)$this->responseJson()['message']);
 
         // A description is operational: no reason asked.
-        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$rateId", ['base_rate' => 1200, 'description' => 'Garden view']);
+        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$rateId", ['room_id' => $this->roomId, 'base_rate' => 1200, 'description' => 'Garden view']);
         $this->assertResponseOk();
         $this->assertSame('operational', $this->changes('room_rate', $rateId)[2]->impact);
         $this->assertCount(3, $this->changes('room_rate', $rateId));
@@ -157,7 +157,9 @@ class ConfigAuditApiTest extends TestCase
         $this->assertSame('booking', $this->changes('room', $roomId)[0]->impact);
 
         // Front Desk marking a room for maintenance is operational state, not configuration.
-        $this->callAs($this->deskToken, 'PATCH', "/api/rooms/$roomId", ['status' => 'maintenance']);
+        $this->callAs($this->deskToken, 'PATCH', "/api/rooms/$roomId", [
+            'room_number' => 'C-2', 'room_type' => 'Twin', 'status' => 'maintenance',
+        ]);
         $this->assertResponseOk((string)$this->_response->getBody());
         $this->assertCount(1, $this->changes('room', $roomId));
 

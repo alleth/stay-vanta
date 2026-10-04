@@ -174,9 +174,11 @@ class ActivityBackfillTest extends TestCase
         $this->historicalMovement(new DateTime('2026-08-01 09:00:00'), $this->otherId);
 
         $this->assertSame(1, $this->backfill($this->otherId)['stock_index']);
+        // Fixture configuration rows are recorded since step 9; this is about the backfill only.
         $this->assertSame(
             0,
-            $this->getTableLocator()->get('ActivityIndex')->find()->where(['property_id' => $this->propertyId])->count(),
+            $this->getTableLocator()->get('ActivityIndex')->find()
+                ->where(['property_id' => $this->propertyId, 'event_table !=' => 'config_changes'])->count(),
         );
     }
 
