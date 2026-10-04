@@ -60,6 +60,11 @@ return [
         // mean for reports and day filters. Stored timestamps stay in
         // defaultTimezone (UTC); see App\Model\BusinessTime.
         'businessTimezone' => env('APP_BUSINESS_TIMEZONE', 'Asia/Manila'),
+        // What Collected means (build step 7c): `cash` = cash movement by day
+        // (refunds on the day the money went back), `historical` = the model
+        // before 7c-2, kept for one release as the rollback switch. See
+        // App\Model\Finance\Collections.
+        'collectedModel' => env('APP_COLLECTED_MODEL', 'cash'),
         'base' => false,
         'dir' => 'src',
         'webroot' => 'webroot',

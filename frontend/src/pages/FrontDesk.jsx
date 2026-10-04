@@ -24,6 +24,7 @@ import {
 } from '../api/frontdesk'
 import { describeError } from '../utils/apiError'
 import ReasonModal from '../components/ReasonModal'
+import RefundMethodSelect from '../components/RefundMethodSelect'
 
 // Standard check-in is from noon; arriving earlier in the day is an early check-in.
 const isEarlyCheckInNow = () => new Date().getHours() < 12
@@ -232,6 +233,7 @@ export default function FrontDesk() {
   const [pending, setPending] = useState(null) // key of the in-flight inline action
   const [earlyConfirm, setEarlyConfirm] = useState(null) // reservation pending an early check-in
   const [reverseFor, setReverseFor] = useState(null) // reservation whose room charge is being reversed
+  const [cancelRefund, setCancelRefund] = useState(null) // {reservation, method}: an advance booking being cancelled
   const today = todayStr()
 
   // Front Desk shows a "fresh start" each day: pending bookings (booked /
@@ -352,13 +354,11 @@ export default function FrontDesk() {
       && !window.confirm('Check out this guest? This finalizes the stay and posts the room charge to their invoice.')) {
       return
     }
-    // Cancelling an advance booking retains 10% of the downpayment.
+    // Cancelling an advance booking retains 10% of the downpayment and returns
+    // 90%: a refund (cash out today), so it asks how the money went back.
     if (transition === 'cancel' && r.status === 'booked' && Number(r.downpayment) > 0) {
-      const dp = Number(r.downpayment)
-      if (!window.confirm(
-        `Cancel this advance booking? 10% of the ${formatMoney(dp)} downpayment is retained — `
-        + `${formatMoney(dp * 0.9)} will be refunded to the guest.`,
-      )) return
+      setCancelRefund({ reservation: r, method: '' })
+      return
     }
     runTransition(r.id, transition)
   }
@@ -938,6 +938,36 @@ export default function FrontDesk() {
         </>
       )}
 
+      {cancelRefund && (() => {
+        const dp = Number(cancelRefund.reservation.downpayment)
+        return (
+          <Modal show onHide={() => setCancelRefund(null)}>
+            <Modal.Header closeButton>
+              <Modal.Title>Cancel advance booking</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+              <p className="mb-3 text-sm text-muted">
+                {cancelRefund.reservation.guest?.full_name ?? 'The guest'} paid a {formatMoney(dp)} downpayment.
+                10% ({formatMoney(dp * 0.1)}) is retained and {formatMoney(dp * 0.9)} goes back to the guest,
+                recorded as a refund today.
+              </p>
+              <RefundMethodSelect id="cancel-refund-method" value={cancelRefund.method}
+                onChange={(method) => setCancelRefund({ ...cancelRefund, method })} />
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="secondary" onClick={() => setCancelRefund(null)}>Back</Button>
+              <Button variant="danger" disabled={!cancelRefund.method || pending !== null}
+                onClick={async () => {
+                  const { reservation, method } = cancelRefund
+                  setCancelRefund(null)
+                  await runTransition(reservation.id, 'cancel', { refund_method: method })
+                }}>
+                Cancel and refund {formatMoney(dp * 0.9)}
+              </Button>
+            </Modal.Footer>
+          </Modal>
+        )
+      })()}
       <ReasonModal show={reverseFor !== null}
         title="Reverse room charge"
         description={reverseFor && `Takes the room charge${Number(reverseFor.downpayment) > 0 ? ' and downpayment credit' : ''} for `

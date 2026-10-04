@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card, Table, Button, Badge, Modal, Form, Alert, Spinner } from '../ui'
 import { formatMoney } from '../../utils/format'
-import { listInvoices, getInvoice, settleInvoice, reverseInvoiceLine } from '../../api/food'
+import { listInvoices, getInvoice, settleInvoice, reverseInvoiceLine, refundInvoice } from '../../api/food'
 import { SkeletonTableRows, Skeleton } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
 import { useAuth } from '../../context/AuthContext'
 import { P } from '../../auth/permissions'
 import ReasonModal from '../ReasonModal'
+import RefundMethodSelect from '../RefundMethodSelect'
+import { newRefundKey, refundMethodLabel } from '../../utils/refunds'
 
 // The guests' invoices — the list, the folio view and Settle — as one panel,
 // rendered as a tab by Front Desk and Finance. Settling is where
@@ -38,7 +40,9 @@ const EVENT_LABELS = {
   line_reversed_on_cancel: 'Reversed on cancellation',
   settled: 'Settled',
   settled_on_creation: 'Settled on creation',
-  refund_recorded: 'Refund recorded',
+  refund_recorded: 'Refund recorded (before 7c)',
+  refunded: 'Refunded',
+  refunded_on_cancel: 'Downpayment refunded on cancellation',
 }
 
 // `onSettled` lets the host page refresh whatever depends on an invoice being
@@ -219,6 +223,23 @@ function InvoiceModal({ id, onClose, onChanged }) {
   // refuses everything else the same way.
   const canReverse = can(P.FINANCE_INVOICE_REVERSE) && invoice?.status === 'open'
 
+  // Money back on a settled invoice (build step 7c): a Manager, with a reason
+  // and method; recorded as its own event, the invoice never changes.
+  const canRefund = can(P.FINANCE_INVOICE_REFUND) && settled && Number(invoice?.refundable ?? 0) > 0
+  const [refund, setRefund] = useState(null) // {amount, method, key} while the dialog is open
+  const refundAmount = Number(refund?.amount)
+  const refundReady = refund !== null && refund.method !== '' && refundAmount > 0
+    && refundAmount <= Number(invoice?.refundable ?? 0)
+
+  async function recordRefund(reason) {
+    const updated = await refundInvoice(invoice.id, {
+      amount: refundAmount, method: refund.method, reason, refundKey: refund.key,
+    })
+    setRefund(null)
+    setInvoice(updated)
+    onChanged?.()
+  }
+
   async function reverse(reason) {
     await reverseInvoiceLine(invoice.id, reversing.id, reason)
     setReversing(null)
@@ -228,7 +249,7 @@ function InvoiceModal({ id, onClose, onChanged }) {
 
   return (
     <>
-    <Modal show={reversing === null} onHide={onClose} centered size="lg">
+    <Modal show={reversing === null && refund === null} onHide={onClose} centered size="lg">
       <Modal.Header closeButton className="border-0 px-6 pt-4 pb-0" />
       <Modal.Body className="px-6 pt-0 pb-6">
         {error && <Alert variant="danger">{error}</Alert>}
@@ -359,6 +380,36 @@ function InvoiceModal({ id, onClose, onChanged }) {
               </p>
             )}
 
+            {/* ---- Refunds: money returned, each its own record (step 7c) ---- */}
+            {(invoice.refunds ?? []).length > 0 && (
+              <div className="mt-6">
+                <div className="flex items-baseline justify-between border-b border-line pb-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Refunds</span>
+                  <span className="text-xs text-muted">Cash out on the day recorded; the invoice is unchanged</span>
+                </div>
+                {invoice.refunds.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2">
+                    <div className="min-w-0">
+                      <div className="text-sm">
+                        {EVENT_LABELS[r.event] ?? r.event} · {refundMethodLabel(r.method)}
+                      </div>
+                      <div className="text-[11px] text-muted">
+                        {fmtDateTime(r.at)} · by {actorLabel(r.actor, r.recorded)}
+                        {r.reason && <> · {r.reason}</>}
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-sm tabular-nums text-red-700 dark:text-red-300">
+                      {formatMoney(r.amount)}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex justify-between pt-1.5 text-xs text-muted">
+                  <span>Still refundable</span>
+                  <span className="tabular-nums">{formatMoney(invoice.refundable ?? 0)}</span>
+                </div>
+              </div>
+            )}
+
             {/* ---- History: the invoice's ledger, oldest first ---- */}
             {(invoice.history ?? []).length > 0 && (
               <details className="mt-6">
@@ -388,9 +439,37 @@ function InvoiceModal({ id, onClose, onChanged }) {
         )}
       </Modal.Body>
       <Modal.Footer className="border-0 px-6 pt-0 pb-6">
+        {canRefund && (
+          <Button variant="outline-danger" className="mr-auto"
+            onClick={() => setRefund({ amount: '', method: '', key: newRefundKey() })}>
+            Record refund
+          </Button>
+        )}
         <Button variant="secondary" onClick={onClose}>Close</Button>
       </Modal.Footer>
     </Modal>
+      <ReasonModal show={refund !== null}
+        title="Record refund"
+        description={invoice && `Money returned to ${invoice.guest?.full_name ?? 'the guest'} against invoice #${String(invoice.id).padStart(4, '0')}. `
+          + 'It counts as cash out today. The settled invoice and its receipt numbers stay as they are.'}
+        confirmLabel="Record refund"
+        ready={refundReady}
+        onHide={() => setRefund(null)}
+        onConfirm={recordRefund}>
+        {refund !== null && (
+          <>
+            <Form.Group className="mb-3">
+              <Form.Label>Amount returned</Form.Label>
+              <Form.Control id="invoice-refund-amount" type="number" min="0.01" step="0.01"
+                max={invoice?.refundable ?? undefined} value={refund.amount}
+                onChange={(e) => setRefund({ ...refund, amount: e.target.value })} />
+              <Form.Text>Up to {formatMoney(invoice?.refundable ?? 0)}.</Form.Text>
+            </Form.Group>
+            <RefundMethodSelect id="invoice-refund-method" value={refund.method}
+              onChange={(method) => setRefund({ ...refund, method })} />
+          </>
+        )}
+      </ReasonModal>
       <ReasonModal show={reversing !== null}
         title="Reverse invoice line"
         description={reversing && `Adds a reversal of “${reversing.description}” (${formatMoney(reversing.amount)}). `

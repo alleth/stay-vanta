@@ -79,7 +79,9 @@ Subscribers.
 ### Terminology (use these words on screens, in docs and in comments)
 | Term | Meaning | Don't use |
 |---|---|---|
-| Collected | Money received: settled invoices + paid POS sales | "Revenue" on screens ("Revenue today" → **Collected today**) |
+| Collected | Cash in on the day it came in: settled invoices + paid POS sales (step 7c) | "Revenue" on screens ("Revenue today" → **Collected today**) |
+| Refunded | Cash out: money returned to a guest, on the day it went back | "Credit", "reversal" for money returned |
+| Net Collected | Collected − Refunded; the headline money figure | |
 | Outstanding | Amount still on open invoices | "Not yet settled", "unsettled" |
 | Receivables | The Finance tab of what's owed | "To collect" |
 | Invoice | The guest's bill (the BIR Sales Invoice) | "Folio", "tab", "bill" |
@@ -482,17 +484,21 @@ would make the key attacker-controlled.
 ## Domain rules
 
 ### Money: revenue, invoices, receipts
-- **One calculation: `App\Model\Finance\Collections`** (build step 7a) — `collected($from, $to)`,
-  `collectedOn($day)`, `byPeriod()`, `settledInvoices()`, `paidSales()`, `outstanding()`. Finance
-  and Operations read every Collected/Outstanding figure from it; never write a second money query.
-  **7c-1:** `cashMovement()` / `cashIn()` / `refunded()` (cash in, cash out, net, each on the day
-  the money moved) exist beside them but no report reads them until 7c-2; `App\Model\Finance\Restatement`
-  (`bin/cake cash_restatement`) lists what the switch changes.
-  `CollectionsEquivalenceTest` holds it to the pre-7a queries (retire that reference deliberately
-  when step 7b changes the meaning; don't edit it to match).
-- **Hotel revenue = collected**: Σ settled `invoices.total` (by `settled_at`, stamped in
-  `InvoicesTable::settle`) + Σ `paid` `food_orders.total` (by `created`). Charge-to-room food
-  already lives inside invoices, so only `paid` orders are added. **Posting a room charge is not
+- **One calculation: `App\Model\Finance\Collections`** (7a; cash movement since 7c-2, decided
+  2026-10-03 as D1–D8). `figures($from, $to)` / `figuresOn($day)` / `figuresByPeriod()` return
+  Collected (cash in), Refunded (cash out) and Net Collected; `refunds()` lists them;
+  `outstanding()` is open invoices. Finance and Operations read every money figure from it; never
+  write a second money query. `App.collectedModel` (`APP_COLLECTED_MODEL`, default `cash`) =
+  `historical` is the one-release rollback switch (`historical()`: a refund lowers the day its
+  invoice or sale was collected). `App\Model\Finance\Restatement` (`bin/cake cash_restatement`,
+  read-only) lists what differs between the two models per property.
+- **Collected = cash in**: settled invoices at the full amount settled (by `settled_at`, stamped in
+  `InvoicesTable::settle`) + `paid` `food_orders.total` (by `created`; a later cancellation doesn't
+  undo it). **Refunded = cash out** on the day it went back: `refunded` / `refunded_on_cancel`
+  invoice events and `refunded` POS events (by `occurred_at`, never backdated), plus pre-7c
+  `downpayment_refund` lines by when written (their amount is added back to the invoice's
+  collection day). A past day never changes once it has ended. Charge-to-room food already lives
+  inside invoices, so only `paid` orders are added. **Posting a room charge is not
   collecting it**: it puts the charge on the guest's *open* invoice (the stay reads **Billed**),
   which counts only once settled (**Settled**; Settle is where SI/OR booklet numbers are assigned —
   deliberately kept). So reports also return `outstanding` (Σ open invoices, shown as
@@ -506,11 +512,13 @@ would make the key attacker-controlled.
 - **Invoices change only through `InvoicesTable`** (build step 6), every method taking the request's
   `EventContext` and recording to `invoice_events` under a `FOR UPDATE` lock: `openInvoiceFor()`,
   `addLine()`, `reverseLinesFor()` / `reverseLine()`, `settle()`, `settledInvoiceWith()`,
-  `recordRefund()`. **Lines are never deleted**: a cancelled line gets a negative line with
+  `refund()`. **Lines are never deleted**: a cancelled line gets a negative line with
   `reverses_line_id`, and the total is the sum of all lines. "Is it posted?" checks
   (`invoiceForLine()`, not-billed, billing state) use `InvoiceLinesTable::find('active')`.
-  **Settled invoices never change** (refused with a 400), except `recordRefund()` for a downpayment
-  refund (on step 7's agenda). Settling is idempotent. Manual reversal:
+  **Settled invoices never change** (refused with a 400): money given back is `refund()`, an event
+  only (Manager `POST /invoices/{id}/refund`, `finance.invoice.refund`, reason + method; or the
+  downpayment refund on cancel), never more than `refundable()`, recorded exactly once (an
+  `idempotency_key` from the dialog; a repeat is 409). Settling is idempotent. Manual reversal:
   `POST /invoices/{id}/lines/{lineId}/reverse` (`finance.invoice.reverse`, Manager, reason).
   Catalog: `docs/EVENTS.md`. **Discounts are always itemized as their own negative lines** naming who got
   them, never folded into a net figure. VAT (12%, already included in prices) is derived for
@@ -579,7 +587,8 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
 - **Downpayment**: an advance booking (check-in after today, guest on file) collects 50% as an
   immediately-settled invoice (`InvoicesTable::settledInvoiceWith`), so it counts as collected that
   day. `collectAdvanceDownpayment()` is shared by `add()` and `edit()`. Cancel from `booked`
-  appends a negative `downpayment_refund` (90%), retaining 10%.
+  requires `refund_method` and records a `refunded_on_cancel` event for 90% (cash out today),
+  retaining 10%; the settled downpayment invoice never changes.
 - **Room charge**: `ReservationsController::postRoomCharge()` posts the itemized `quote()` onto
   the guest's invoice. It's called by Post room charge (`postCharge()`, via `postChargeOrFail()`)
   and by check-out, and is idempotent
@@ -606,6 +615,9 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   decrements stock for the linked item, every recipe ingredient (per-serving qty × ordered qty) and
   picked options via `StockMovementsTable::record()` (short stock rolls back the whole order), and
   for `charge_to_room` appends lines to the guest's open invoice. `cancelOrder()` reverses both.
+  **Cancelling and refunding are separate** (step 7c): cancelling a paid sale asks "Was money
+  returned to the guest?"; yes records a `refunded` POS event (cash out today, reason + method),
+  no keeps the sale collected. A Manager can record the refund later (`POST /food-orders/{id}/refund`).
 - `total = subtotal − statutory discount + cooking_charge`; `cooking_charge` is a service fee
   added after the discount. Custom lines (`food_menu_item_id` null) are part of the subtotal but
   never touch stock. `payment_method` is required iff `payment_status` is `paid`.

@@ -25,9 +25,9 @@ const CHART_COLORS = {
 }
 
 // Seasonality: one year at a time, toggled between two metrics — non-
-// cancelled reservations by check-in date ("Guests"), or collected revenue
-// ("Collected", the same settled-invoices + paid-POS-sales definition as
-// adminDashboard's revenue buckets). Rendered with ApexCharts via
+// cancelled reservations by check-in date ("Guests"), or Net Collected (cash
+// in less refunds, the same Collections definition as every money report).
+// Rendered with ApexCharts via
 // react-apexcharts.
 //
 // The anatomy, top to bottom: a headline total with a vs-last-year change
@@ -84,7 +84,7 @@ export function SeasonalityChart() {
   const prevMonths = result?.prevMonths ?? null
 
   const years = Array.from({ length: 6 }, (_, i) => nowYear - i)
-  const metricLabel = metric === 'revenue' ? 'Collected' : 'Guests'
+  const metricLabel = metric === 'revenue' ? 'Net collected' : 'Guests'
   const pick = (m) => (metric === 'revenue' ? m.revenue : m.count)
   const formatValue = (v) => (metric === 'revenue' ? formatMoney(v) : `${v} visit${v === 1 ? '' : 's'}`)
 
@@ -246,7 +246,7 @@ export function SeasonalityChart() {
             </Button>
             <Button size="sm" variant={metric === 'revenue' ? 'secondary' : 'outline-secondary'}
               onClick={() => setMetric('revenue')}>
-              Collected
+              Net collected
             </Button>
           </ButtonGroup>
           <Form.Select size="sm" value={year} style={{ width: 'auto' }}

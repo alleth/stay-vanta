@@ -23,17 +23,27 @@ class FinanceController extends AppController
     /**
      * GET /api/finance/summary  (Manager only, own property)
      *
-     * Collected by period (week / month / year to date / all time, on the
-     * hotel's calendar) and what's outstanding right now.
+     * Net Collected by period (week / month / year to date / all time, on
+     * the hotel's calendar), each period's cash in / cash out / net under
+     * `cash`, and what's outstanding right now.
      */
     public function summary(): void
     {
         $this->authorize(Permissions::FINANCE_ANALYTICS_VIEW, 'Only a Manager can view revenue by period.');
         $propertyId = (int)$this->effectivePropertyId();
 
+        $money = $this->money($propertyId);
+        $periods = $money->figuresByPeriod();
         $this->set('summary', [
-            'collected' => $this->money($propertyId)->byPeriod(),
-            'outstanding' => $this->money($propertyId)->outstanding(),
+            // The headline: Net Collected per period (same keys as before 7c-2).
+            'collected' => array_map(fn(array $f) => $f['net'], $periods),
+            'cash' => array_map(fn(array $f) => [
+                'collected' => $f['collected']['total'],
+                'refunded' => $f['refunded']['total'],
+                'net' => $f['net'],
+            ], $periods),
+            'outstanding' => $money->outstanding(),
+            'model' => Collections::model(),
         ]);
         $this->viewBuilder()->setOption('serialize', ['summary']);
     }
@@ -141,18 +151,59 @@ class FinanceController extends AppController
         }
 
         $money = $this->money($propertyId);
-        $collected = $money->collected($from, $to);
+        $figures = $money->figures($from, $to);
+        // Under the historical (rollback) model refunds aren't a figure of their own.
+        $refunds = Collections::model() === Collections::MODEL_CASH
+            ? $this->describeRefunds($money->refunds($from, $to))
+            : [];
 
         $this->set('collection', [
             'scope' => $scope,
             'label' => $label,
-            'invoices' => $collected['invoices'],
-            'food_orders' => $collected['pos'],
-            'total' => $collected['total'],
+            // Cash in, by part (the pre-7c-2 keys).
+            'invoices' => $figures['collected']['invoices'],
+            'food_orders' => $figures['collected']['pos'],
+            // Net Collected: cash in less cash out (step 7c).
+            'total' => $figures['net'],
+            'collected' => $figures['collected'],
+            'refunded' => $figures['refunded'] + ['by_method' => Collections::byMethod($refunds)],
+            'net' => $figures['net'],
+            'refunds' => $refunds,
             // Not part of the window: what's still owed right now.
             'outstanding' => $money->outstanding(),
+            'model' => Collections::model(),
         ]);
         $this->viewBuilder()->setOption('serialize', ['collection']);
+    }
+
+    /**
+     * Refunds as the Refunds list shows them: the guest (invoices) and the
+     * name of whoever recorded each, looked up now.
+     *
+     * @param list<array<string, mixed>> $refunds From Collections::refunds().
+     * @return list<array<string, mixed>>
+     */
+    private function describeRefunds(array $refunds): array
+    {
+        if ($refunds === []) {
+            return [];
+        }
+        $actorIds = array_values(array_unique(array_filter(array_column($refunds, 'actor_id'))));
+        $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+        $invoiceIds = array_values(array_unique(array_filter(array_column($refunds, 'invoice_id'))));
+        $guests = $invoiceIds === [] ? [] : $this->fetchTable('Invoices')->find()
+            ->contain(['Guests' => ['fields' => ['id', 'full_name']]])
+            ->where(['Invoices.id IN' => $invoiceIds])->all()
+            ->combine('id', fn($i) => $i->guest?->full_name)->toArray();
+
+        return array_map(function (array $r) use ($names, $guests): array {
+            $r['actor'] = $r['actor_id'] !== null ? ($names[$r['actor_id']] ?? null) : null;
+            $r['guest'] = $r['invoice_id'] !== null ? ($guests[$r['invoice_id']] ?? null) : null;
+            unset($r['actor_id']);
+
+            return $r;
+        }, $refunds);
     }
 
     /**
@@ -229,11 +280,15 @@ class FinanceController extends AppController
                 ])
                 ->count();
 
+            $figures = $money->figures($from, $to);
             $months[] = [
                 'month' => $m,
                 'label' => self::MONTH_LABELS[$m],
                 'count' => $count,
-                'revenue' => $money->collected($from, $to)['total'],
+                // Net Collected (cash in less cash out), with its parts.
+                'revenue' => $figures['net'],
+                'collected' => $figures['collected']['total'],
+                'refunded' => $figures['refunded']['total'],
             ];
         }
 

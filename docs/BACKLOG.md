@@ -83,7 +83,7 @@ exception); pre-7c downpayment refunds restated once to their own day; cancelled
 with no refund on record stay collected; refund method recorded; no backdating. Manager refunds
 on settled invoices (`finance.invoice.refund`) approved as S1.
 - [x] 7a: one shared calculation (`App\Model\Finance\Collections`), figures unchanged.
-- [ ] 7c-1: `method` columns, the cash-movement calculation beside today's, the restatement list
+- [x] 7c-1: `method` columns, the cash-movement calculation beside today's, the restatement list
   logged on deploy (`bin/cake cash_restatement`). No figure changes.
 - [ ] 7c-2: the switch (refund events, UI, reports), `APP_COLLECTED_MODEL=cash|historical` for
   one release.

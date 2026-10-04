@@ -220,11 +220,15 @@ return function (RouteBuilder $routes): void {
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post('/food-orders/{id}/cancel', ['controller' => 'FoodOrders', 'action' => 'cancel'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post('/food-orders/{id}/refund', ['controller' => 'FoodOrders', 'action' => 'refund'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         $builder->get('/invoices', ['controller' => 'Invoices', 'action' => 'index']);
         $builder->get('/invoices/{id}', ['controller' => 'Invoices', 'action' => 'view'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post('/invoices/{id}/settle', ['controller' => 'Invoices', 'action' => 'settle'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post('/invoices/{id}/refund', ['controller' => 'Invoices', 'action' => 'refund'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post('/invoices/{id}/lines/{lineId}/reverse', ['controller' => 'Invoices', 'action' => 'reverseLine'])
             ->setPatterns(['id' => '\d+', 'lineId' => '\d+'])->setPass(['id', 'lineId']);

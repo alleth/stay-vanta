@@ -13,8 +13,14 @@ const MIN_LENGTH = 5
  *
  * `onConfirm(reason)` performs the action; while it runs the modal shows a
  * spinner, and an error (with its reference) stays in the modal.
+ *
+ * `children` are extra fields shown above the reason (e.g. a refund's amount
+ * and method; their state lives in the caller), and `ready` is false while
+ * those fields aren't complete, keeping Confirm disabled.
  */
-export default function ReasonModal({ show, title, description, confirmLabel = 'Confirm', onConfirm, onHide }) {
+export default function ReasonModal({
+  show, title, description, confirmLabel = 'Confirm', onConfirm, onHide, children, ready = true,
+}) {
   const [reason, setReason] = useState('')
   const trimmed = reason.trim()
   const { run, busy, err, setErr } = useSubmit(async () => {
@@ -38,6 +44,7 @@ export default function ReasonModal({ show, title, description, confirmLabel = '
         <Modal.Body>
           {description && <p className="mb-3 text-sm text-muted">{description}</p>}
           {err && <Alert variant="danger">{err}</Alert>}
+          {children}
           <Form.Group>
             <Form.Label>Reason</Form.Label>
             <Form.Control
@@ -54,7 +61,7 @@ export default function ReasonModal({ show, title, description, confirmLabel = '
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={close} disabled={busy}>Back</Button>
-          <Button type="submit" variant="danger" disabled={busy || trimmed.length < MIN_LENGTH}>
+          <Button type="submit" variant="danger" disabled={busy || !ready || trimmed.length < MIN_LENGTH}>
             {busy ? <Spinner size="sm" /> : confirmLabel}
           </Button>
         </Modal.Footer>

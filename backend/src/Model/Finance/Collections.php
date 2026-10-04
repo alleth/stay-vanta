@@ -6,32 +6,38 @@ namespace App\Model\Finance;
 use App\Model\BusinessTime;
 use App\Model\Table\FoodOrderEventsTable;
 use App\Model\Table\InvoiceEventsTable;
+use Cake\Core\Configure;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\ORM\Query\SelectQuery;
 
 /**
- * The one definition of a property's money figures (build step 7a). Every
- * report that shows Collected or Outstanding reads it from here: Finance
- * (collections, summary, seasonality and their old /reports paths) and
- * Operations ("Collected today", the POS paid trend).
+ * The one definition of a property's money figures. Every report that shows
+ * Collected, Refunded, Net Collected or Outstanding reads it from here:
+ * Finance (collections, summary, seasonality and their old /reports paths)
+ * and Operations (today's money, the POS trend).
  *
- * - **Collected** in a window = settled invoices by `settled_at` (room
- *   charges, downpayments net of refunds, food charged to the room) + `paid`
- *   POS sales by `created`. Charge-to-room food already lives inside
- *   invoices, so only `paid` sales are added (no double counting).
- * - **Outstanding** = the total on open invoices right now; not tied to a
- *   window.
+ * Since build step 7c-2 (decided 2026-10-03, D1–D8) the figures are **cash
+ * movement**: Collected = cash in (settled invoices at the full amount
+ * settled, by `settled_at`; paid POS sales by `created`), Refunded = cash out
+ * on the day it went back (refund events by `occurred_at`; pre-7c downpayment
+ * refund lines by when they were written), Net Collected = in − out. A past
+ * day never changes once it has ended. Outstanding = open invoices now.
+ *
+ * `App.collectedModel` (env APP_COLLECTED_MODEL) = `historical` brings back
+ * the model before 7c-2 from the same data (a refund lowers the day its
+ * invoice or sale was collected; nothing counts as Refunded): the rollback
+ * switch, kept for one release.
  *
  * Windows are stored-timezone bounds `[from, to)` built with BusinessTime
  * (the hotel's day, not UTC's); null leaves that side open. One query per
  * figure, never `GROUP BY` (ONLY_FULL_GROUP_BY on MySQL 9, see CLAUDE.md).
- *
- * Step 7a moved these queries here unchanged; what Collected means (e.g.
- * refunds on the day they happen) is step 7b's decision, made here once.
  */
 class Collections
 {
     use LocatorAwareTrait;
+
+    public const MODEL_CASH = 'cash';
+    public const MODEL_HISTORICAL = 'historical';
 
     /**
      * @param int $propertyId The property whose money this is.
@@ -41,42 +47,48 @@ class Collections
     }
 
     /**
-     * Collected in `[from, to)`: invoice and POS parts, each with its count,
-     * and their total.
+     * Which model the reports use: `cash` unless configured `historical`.
+     */
+    public static function model(): string
+    {
+        return Configure::read('App.collectedModel') === self::MODEL_HISTORICAL
+            ? self::MODEL_HISTORICAL
+            : self::MODEL_CASH;
+    }
+
+    /**
+     * The figures every report shows for `[from, to)`, under the configured
+     * model: cash in (invoice and POS parts), cash out (the same parts) and
+     * Net Collected.
      *
      * @param string|null $from Stored-timezone lower bound, inclusive; null for no bound.
      * @param string|null $to Stored-timezone upper bound, exclusive; null for no bound.
-     * @return array{invoices: array{total: float, count: int}, pos: array{total: float, count: int}, total: float}
+     * @return array<string, mixed> `collected` and `refunded` ({invoices, pos} each {total, count}, total), `net`.
      */
-    public function collected(?string $from, ?string $to): array
+    public function figures(?string $from, ?string $to): array
     {
-        $invoices = $this->settledInvoices($from, $to);
-        $pos = $this->paidSales($from, $to);
-
-        return [
-            'invoices' => $invoices,
-            'pos' => $pos,
-            'total' => round($invoices['total'] + $pos['total'], 2),
-        ];
+        return self::model() === self::MODEL_HISTORICAL
+            ? $this->historical($from, $to)
+            : $this->cashMovement($from, $to);
     }
 
     /**
-     * Collected over one of the hotel's days (YYYY-MM-DD).
+     * figures() over one of the hotel's days (YYYY-MM-DD).
      *
-     * @return array{invoices: array{total: float, count: int}, pos: array{total: float, count: int}, total: float}
+     * @return array<string, mixed> As figures().
      */
-    public function collectedOn(string $date): array
+    public function figuresOn(string $date): array
     {
-        return $this->collected(BusinessTime::startOf($date), BusinessTime::endOf($date));
+        return $this->figures(BusinessTime::startOf($date), BusinessTime::endOf($date));
     }
 
     /**
-     * Collected this week, this month, this year (the hotel's calendar) and
-     * all time.
+     * figures() for this week, this month, this year (the hotel's calendar)
+     * and all time.
      *
-     * @return array{week: float, month: float, ytd: float, all_time: float}
+     * @return array<string, array<string, mixed>> Keyed week, month, ytd, all_time.
      */
-    public function byPeriod(): array
+    public function figuresByPeriod(): array
     {
         $now = BusinessTime::now();
         $ranges = [
@@ -86,7 +98,67 @@ class Collections
             'all_time' => null,
         ];
 
-        return array_map(fn(?string $from) => $this->collected($from, null)['total'], $ranges);
+        return array_map(fn(?string $from) => $this->figures($from, null), $ranges);
+    }
+
+    /**
+     * Net Collected per period (the headline numbers).
+     *
+     * @return array{week: float, month: float, ytd: float, all_time: float}
+     */
+    public function byPeriod(): array
+    {
+        return array_map(fn(array $f) => $f['net'], $this->figuresByPeriod());
+    }
+
+    /**
+     * The model before 7c-2, from today's data: settled invoices by
+     * `settled_at` and paid sales by `created`, each less the refund events
+     * against it, so a refund lowers the day its invoice or sale was
+     * collected (pre-7c refund lines already sit inside the invoice total).
+     * Nothing counts as Refunded and Net equals Collected. Used by the
+     * rollback switch and as the "before" of the restatement report.
+     *
+     * @return array<string, mixed> As figures().
+     */
+    public function historical(?string $from, ?string $to): array
+    {
+        $invoices = $this->settledInvoices($from, $to);
+        $invoiceRefunds = $this->total($this->window(
+            $this->fetchTable('InvoiceEvents')->find()
+                ->innerJoin(['Invoices' => 'invoices'], ['Invoices.id = InvoiceEvents.invoice_id'])
+                ->where([
+                    'InvoiceEvents.property_id' => $this->propertyId,
+                    'InvoiceEvents.event_type IN' => InvoiceEventsTable::REFUND_TYPES,
+                ]),
+            'Invoices.settled_at',
+            $from,
+            $to,
+        ), 'InvoiceEvents.amount');
+        $invoices['total'] = round($invoices['total'] + $invoiceRefunds['total'], 2);
+
+        $pos = $this->paidSales($from, $to);
+        $posRefunds = $this->total($this->window(
+            $this->fetchTable('FoodOrderEvents')->find()
+                ->innerJoin(['FoodOrders' => 'food_orders'], ['FoodOrders.id = FoodOrderEvents.food_order_id'])
+                ->where([
+                    'FoodOrderEvents.property_id' => $this->propertyId,
+                    'FoodOrderEvents.event_type' => FoodOrderEventsTable::REFUNDED,
+                ]),
+            'FoodOrders.created',
+            $from,
+            $to,
+        ), 'FoodOrderEvents.amount');
+        $pos['total'] = round($pos['total'] + $posRefunds['total'], 2);
+
+        $collected = ['invoices' => $invoices, 'pos' => $pos, 'total' => round($invoices['total'] + $pos['total'], 2)];
+        $none = ['total' => 0.0, 'count' => 0];
+
+        return [
+            'collected' => $collected,
+            'refunded' => ['invoices' => $none, 'pos' => $none, 'total' => 0.0],
+            'net' => $collected['total'],
+        ];
     }
 
     /**
@@ -122,8 +194,86 @@ class Collections
     // ---- Cash movement (build step 7c, decided 2026-10-03 as D1–D8) --------
     //
     // Collected = cash in, Refunded = cash out, Net = in − out, each on the
-    // day the money moved. Built in 7c-1 beside the figures above and not yet
-    // read by any report; 7c-2 switches the reports to it.
+    // day the money moved. What figures() returns under the `cash` model.
+
+    /**
+     * Every refund in `[from, to)`, newest first, for the Refunds list: when,
+     * invoice or sale, guest, amount (positive), method, who, why. A refund
+     * line from before 7c reads `recorded: false` for whatever wasn't
+     * stored (its method; its actor unless step 6 recorded it), never guessed.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function refunds(?string $from, ?string $to): array
+    {
+        $items = [];
+        $invoiceEvents = $this->window($this->fetchTable('InvoiceEvents')->find()->where([
+            'property_id' => $this->propertyId,
+            'event_type IN' => InvoiceEventsTable::REFUND_TYPES,
+        ]), 'occurred_at', $from, $to)->all();
+        foreach ($invoiceEvents as $e) {
+            $items[] = [
+                'id' => 'invoice-event-' . $e->id, 'kind' => 'invoice', 'type' => $e->event_type,
+                'at' => $e->occurred_at, 'invoice_id' => (int)$e->invoice_id, 'order_id' => null,
+                'amount' => round(-(float)$e->amount, 2), 'method' => $e->method,
+                'actor_id' => $e->actor_id, 'recorded' => true, 'reason' => $e->reason,
+            ];
+        }
+
+        $legacy = $this->window($this->fetchTable('InvoiceLines')->find()->innerJoinWith('Invoices')->where([
+            'Invoices.property_id' => $this->propertyId,
+            'Invoices.status' => 'settled',
+            'InvoiceLines.source_type' => self::LEGACY_REFUND_LINE,
+        ]), 'InvoiceLines.created', $from, $to)->all();
+        foreach ($legacy as $line) {
+            // Step 6 recorded who wrote the refund line (refund_recorded); older ones are unknown.
+            $recordedBy = $this->fetchTable('InvoiceEvents')->find()
+                ->select(['actor_id'])
+                ->where(['invoice_line_id' => $line->id, 'event_type' => InvoiceEventsTable::REFUND_RECORDED])
+                ->disableHydration()->first();
+            $items[] = [
+                'id' => 'invoice-line-' . $line->id, 'kind' => 'invoice', 'type' => 'refund_line',
+                'at' => $line->created, 'invoice_id' => (int)$line->invoice_id, 'order_id' => null,
+                'amount' => round(-(float)$line->amount, 2), 'method' => null,
+                'actor_id' => $recordedBy['actor_id'] ?? null, 'recorded' => false, 'reason' => null,
+            ];
+        }
+
+        $saleEvents = $this->window($this->fetchTable('FoodOrderEvents')->find()->where([
+            'property_id' => $this->propertyId,
+            'event_type' => FoodOrderEventsTable::REFUNDED,
+        ]), 'occurred_at', $from, $to)->all();
+        foreach ($saleEvents as $e) {
+            $items[] = [
+                'id' => 'sale-event-' . $e->id, 'kind' => 'pos', 'type' => $e->event_type,
+                'at' => $e->occurred_at, 'invoice_id' => null, 'order_id' => (int)$e->food_order_id,
+                'amount' => round(-(float)$e->amount, 2), 'method' => $e->method,
+                'actor_id' => $e->actor_id, 'recorded' => true, 'reason' => $e->reason,
+            ];
+        }
+
+        usort($items, fn($a, $b) => [$b['at'], $b['id']] <=> [$a['at'], $a['id']]);
+
+        return $items;
+    }
+
+    /**
+     * Refunded per method (`not_recorded` for refunds from before 7c).
+     *
+     * @param list<array<string, mixed>> $refunds From refunds().
+     * @return array<string, float>
+     */
+    public static function byMethod(array $refunds): array
+    {
+        $totals = [];
+        foreach ($refunds as $r) {
+            $key = $r['method'] ?? 'not_recorded';
+            $totals[$key] = round(($totals[$key] ?? 0.0) + $r['amount'], 2);
+        }
+        ksort($totals);
+
+        return $totals;
+    }
 
     /** The pre-7c downpayment refund: a negative line on a settled invoice. */
     public const LEGACY_REFUND_LINE = 'downpayment_refund';

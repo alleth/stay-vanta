@@ -165,7 +165,7 @@ class InvoiceLedgerApiTest extends TestCase
         $this->assertSame(['opened', 'line_added', 'settled'], $this->types($invoiceId));
     }
 
-    public function testADownpaymentIsSettledOnCreationAndItsRefundIsRecorded(): void
+    public function testADownpaymentIsSettledOnCreationAndItsRefundIsCashOut(): void
     {
         // An advance (online) booking for a guest on file collects a 50% downpayment.
         $this->insertRow('BookingSources', ['property_id' => $this->propertyId, 'name' => 'Agoda', 'code' => 'agoda']);
@@ -189,16 +189,28 @@ class InvoiceLedgerApiTest extends TestCase
         );
         $before = $this->total($invoiceId);
 
+        // Since step 7c the refund is cash out with its method, asked for first.
         $this->callAs($this->adminToken, 'POST', "/api/reservations/{$reservation['id']}/cancel");
+        $this->assertResponseCode(400, 'how the refund was paid is required');
+        $this->assertSame('booked', $this->getTableLocator()->get('Reservations')->get($reservation['id'])->status);
+        $this->callAs($this->adminToken, 'POST', "/api/reservations/{$reservation['id']}/cancel", ['refund_method' => 'cash']);
         $this->assertResponseOk((string)$this->_response->getBody());
 
         $refund = $this->getTableLocator()->get('InvoiceEvents')->find()
-            ->where(['invoice_id' => $invoiceId, 'event_type' => 'refund_recorded'])->firstOrFail();
+            ->where(['invoice_id' => $invoiceId, 'event_type' => 'refunded_on_cancel'])->firstOrFail();
         $this->assertSame('admin', $refund->actor_role);
         $this->assertSame($this->_response->getHeaderLine('X-Request-Id'), $refund->correlation_id);
         $this->assertEqualsWithDelta(-$before * 0.9, (float)$refund->amount, 0.01, '90% refunded');
-        $this->assertEqualsWithDelta($before * 0.1, (float)$refund->total_after, 0.01, '10% retained');
-        $this->assertSame('settled', $this->getTableLocator()->get('Invoices')->get($invoiceId)->status);
+        $this->assertSame('cash', $refund->method);
+        $this->assertSame('advance_booking_cancellation', $refund->changes['policy']['rule']);
+        // The settled downpayment invoice never changes: no line, same total.
+        $invoice = $this->getTableLocator()->get('Invoices')->get($invoiceId);
+        $this->assertSame('settled', $invoice->status);
+        $this->assertSame($before, (float)$invoice->total);
+        $this->assertFalse($this->getTableLocator()->get('InvoiceLines')->exists([
+            'invoice_id' => $invoiceId, 'source_type' => 'downpayment_refund',
+        ]));
+        $this->assertSame(['opened', 'line_added', 'settled_on_creation', 'refunded_on_cancel'], $this->types($invoiceId));
     }
 
     public function testAManagerReversesARoomChargeFromFrontDesk(): void

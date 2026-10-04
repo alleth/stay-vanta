@@ -108,7 +108,8 @@ records its own `redacted` event; it's the only sanctioned change to a ledger ro
 
 ### food_order_events (`FoodOrderEvents`)
 
-POS sales. Subject `food_order_id`; activity subject `food_order`. Typed columns: `amount`, `method` (refunds).
+POS sales. Subject `food_order_id`; activity subject `food_order`. Typed columns: `amount`, `method` and
+`idempotency_key` (refunds).
 
 | Event type | Requires reason | Reason grace | Recorded when |
 |---|---|---|---|
@@ -116,7 +117,7 @@ POS sales. Subject `food_order_id`; activity subject `food_order`. Typed columns
 | `served` | | | An open sale is served |
 | `cancelled` | | | A sale is cancelled, other than below |
 | `cancelled_after_payment` | yes | yes | A served and paid sale is cancelled (`pos.sale.cancel_paid`) |
-| `refunded` | yes | | Money is returned for a paid sale on its cancellation ("Was money returned?" yes): `amount` negative, `method`. Written from step 7c-2 |
+| `refunded` | yes | | Money is returned for a paid sale ("Was money returned?" yes on cancelling it, or `POST /food-orders/{id}/refund` later): `amount` negative, `method`; once per sale |
 
 Grace for `cancelled_after_payment` ends in the cleanup release after step 5.
 
@@ -150,7 +151,7 @@ on each write, so the columns stay nullable in the schema while new writes can't
 ### invoice_events (`InvoiceEvents`)
 
 Finance: invoices (build step 6). Subject `invoice_id`; activity subject `invoice`. Typed columns:
-`amount`, `method` (refunds), `total_after`, `invoice_line_id`, `invoice_number`, `or_number`. Snapshot: guest id and
+`amount`, `method` and `idempotency_key` (refunds), `total_after`, `invoice_line_id`, `invoice_number`, `or_number`. Snapshot: guest id and
 display name, reservation, status, total. Recorded only by `InvoicesTable`, each change locked
 (`FOR UPDATE`), checked, made and recorded in one transaction.
 
@@ -162,19 +163,24 @@ display name, reservation, status, total. Recorded only by `InvoicesTable`, each
 | `line_reversed_on_cancel` | | | A line's source was cancelled (a sale, a reservation's charges) |
 | `settled` | | | An invoice is settled, once; carries the SI/OR numbers |
 | `settled_on_creation` | | | An invoice created settled (an advance booking's downpayment) |
-| `refund_recorded` | | | The one permitted change to a settled invoice: a downpayment refund on cancellation. No longer written from step 7c-2 |
-| `refunded` | yes | | A Manager returns money against a settled invoice (`finance.invoice.refund`): `amount` negative, `method`; the invoice is untouched. Written from step 7c-2 |
-| `refunded_on_cancel` | | | The downpayment refund when an advance booking is cancelled (policy in `changes`): `amount` negative, `method`. Written from step 7c-2 |
+| `refund_recorded` | | | Before step 7c: a downpayment refund written as a line on the settled invoice. No longer written; its rows and lines stay as history |
+| `refunded` | yes | | A Manager returns money against a settled invoice (`finance.invoice.refund`, `POST /invoices/{id}/refund`): `amount` negative, `method`; the invoice is untouched |
+| `refunded_on_cancel` | | | The downpayment refund when an advance booking is cancelled (policy in `changes`): `amount` negative, `method`; once per invoice |
 
 Rules (decided 2026-10-03):
 - **Lines are never deleted.** A reversed line stays, answered by a negative line with
   `reverses_line_id`; the total is the sum of all lines (floored at zero after a reversal, as
   removing lines always was). "Is this charge posted?" checks use `InvoiceLinesTable::find('active')`,
   which ignores both; the reservation delete guard still counts them, as history.
-- **Settled invoices are immutable**, except `refund_recorded`: cancelling an advance booking adds
-  its 90% refund to the downpayment's settled invoice, so the refund lowers Collected on the
-  downpayment's day. Kept as is in step 6; refunds, credit notes and what Collected means are on
-  step 7's agenda (`docs/BACKLOG.md`).
+- **Settled invoices are immutable.** Money given back is a refund event (`refunded`,
+  `refunded_on_cancel`; step 7c), never a line, so the invoice still matches its printed SI/OR.
+  The step 6 exception (`refund_recorded`, a refund line on the downpayment invoice) is no longer
+  written; Collections counts those old lines as cash out on the day they were written.
+- **A refund is recorded exactly once** (step 7c): the screen sends an `idempotency_key` made
+  when the refund dialog opens (unique index; a repeat is 409 and records nothing), a sale has at
+  most one `refunded`, an invoice at most one `refunded_on_cancel`, and an invoice is never
+  refunded beyond what it collected less earlier refunds. `occurred_at` is the refund's date: no
+  backdating.
 - **Settlement is idempotent:** a second settle is refused, consumes no receipt number, records no
   event and changes no figure (`SettlementApiTest`).
 

@@ -5,9 +5,11 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
+use App\Model\Finance\DuplicateRefundException;
 use App\Model\Table\InvoiceEventsTable;
 use Cake\Database\Expression\QueryExpression;
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ConflictException;
 use RuntimeException;
 
 /**
@@ -72,8 +74,15 @@ class InvoicesController extends AppController
         $invoice = $this->scopeToProperty($invoices->find()->where(['Invoices.id' => $id]))
             ->contain(['Guests', 'InvoiceLines'])
             ->firstOrFail();
-        $invoice->set('history', $this->history((int)$invoice->id));
+        $history = $this->history((int)$invoice->id);
+        $invoice->set('history', $history);
         $invoice->set('settled_by', $this->settledBy([(int)$invoice->id])[(int)$invoice->id] ?? null);
+        // Money returned against it (step 7c): its own records, never lines.
+        $invoice->set('refunds', array_values(array_filter(
+            $history,
+            fn($e) => in_array($e['event'], InvoiceEventsTable::REFUND_TYPES, true),
+        )));
+        $invoice->set('refundable', $invoices->refundable($invoice));
 
         $this->set('invoice', $invoice);
         $this->viewBuilder()->setOption('serialize', ['invoice']);
@@ -105,6 +114,7 @@ class InvoicesController extends AppController
             'reverses_line_id' => isset($e->changes['reverses']['line_id'])
                 ? (int)$e->changes['reverses']['line_id'] : null,
             'reason' => $e->reason,
+            'method' => $e->method,
             'invoice_number' => $e->invoice_number,
             'or_number' => $e->or_number,
         ], $events);
@@ -215,5 +225,50 @@ class InvoicesController extends AppController
 
         $this->set('invoice', $invoices->get($invoice->id, contain: ['Guests', 'InvoiceLines']));
         $this->viewBuilder()->setOption('serialize', ['invoice']);
+    }
+
+    /**
+     * POST /api/invoices/{id}/refund  { amount, method, reason, refund_key? }
+     *
+     * Money returned against a settled invoice (finance.invoice.refund, a
+     * Manager, with a reason; build step 7c): recorded as a `refunded` event,
+     * cash out today. The invoice never changes. Refused (400) on an open
+     * invoice, a non-positive amount, an unknown method or more than is
+     * refundable; a repeat of the same request (same `refund_key`) is 409 and
+     * records nothing. Returns the invoice as GET /invoices/{id} does.
+     */
+    public function refund(int $id): void
+    {
+        $this->request->allowMethod('post');
+        $this->authorizeElevated(Permissions::FINANCE_INVOICE_REFUND, 'Only a Manager can refund an invoice.');
+        /** @var \App\Model\Table\InvoicesTable $invoices */
+        $invoices = $this->fetchTable('Invoices');
+        $invoice = $this->scopeToProperty($invoices->find()->where(['Invoices.id' => $id]))->firstOrFail();
+
+        $amount = $this->request->getData('amount');
+        if (!is_numeric($amount)) {
+            throw new BadRequestException('Enter the amount returned to the guest.');
+        }
+        $key = $this->request->getData('refund_key');
+        if ($key !== null && (!is_string($key) || $key === '' || strlen($key) > 64)) {
+            throw new BadRequestException('refund_key must be a string of up to 64 characters.');
+        }
+
+        try {
+            $invoices->refund(
+                $this->eventContext(),
+                $invoice,
+                (float)$amount,
+                (string)$this->request->getData('method'),
+                InvoiceEventsTable::REFUNDED,
+                $key,
+            );
+        } catch (DuplicateRefundException $e) {
+            throw new ConflictException($e->getMessage());
+        } catch (RuntimeException $e) {
+            throw new BadRequestException($e->getMessage());
+        }
+
+        $this->view($id);
     }
 }

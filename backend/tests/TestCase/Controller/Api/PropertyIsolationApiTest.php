@@ -211,6 +211,8 @@ class PropertyIsolationApiTest extends TestCase
             ['POST', '/api/invoices/' . $b['invoice'] . '/settle', []],
             ['POST', '/api/food-orders/' . $b['order'] . '/cancel', []],
             ['POST', '/api/food-orders/' . $b['order'] . '/serve', []],
+            ['POST', '/api/invoices/' . $b['invoice'] . '/refund', ['amount' => 1, 'method' => 'cash', 'reason' => 'Not ours']],
+            ['POST', '/api/food-orders/' . $b['order'] . '/refund', ['method' => 'cash', 'reason' => 'Not ours']],
             ['PATCH', '/api/users/' . $b['admin'], ['is_active' => false]],
             ['POST', '/api/users/' . $b['receptionist'] . '/reset-password', ['password' => 'hijacked1']],
         ];

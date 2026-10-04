@@ -33,15 +33,24 @@ its first 8 characters as the **Reference** on error alerts.
 - `PATCH|PUT /api/properties/{id}` — owner-only edit, incl. `subscription_status` & `subscription_fee`.
 - `GET /api/platform/dashboard` (Platform Owner only; old `/api/reports/owner-dashboard`) — subscription revenue (week/month/YTD from
   each subscriber's monthly fee) + counts (hotels, active subscriptions, admins).
+- **Money figures are cash movement (build step 7c, decided 2026-10-03):** Collected = cash in
+  (settled invoices at the full amount settled, by `settled_at`; paid POS sales by `created`),
+  Refunded = cash out on the day the money went back (refund events by `occurred_at`; pre-7c
+  downpayment refund lines by when written), Net Collected = in − out. All from
+  `AppModelFinanceCollections`; `APP_COLLECTED_MODEL=historical` (rollback only, one release)
+  returns the model before 7c-2 from the same data (`model` in each response says which).
 - `GET /api/finance/summary` (**Manager only**, own property) → `{summary: {collected: {week, month,
-  ytd, all_time}, outstanding: {total, count}}}`: collected per period on the hotel's calendar.
+  ytd, all_time}, cash: {<period>: {collected, refunded, net}}, outstanding: {total, count}, model}}`:
+  `collected` per period is **Net Collected** (the headline, same keys as before 7c-2).
 - Old `GET /api/reports/admin-dashboard` (Manager only) keeps its old shape: cards (inventory items,
   occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time) +
   `outstanding` `{total, count}` (see below).
 - `GET /api/finance/collections[?date=YYYY-MM-DD | ?month=&year= | ?from=&to=]` (old
-  `/api/reports/daily-collection`) — money
-  collected in the window (settled invoices by `settled_at` + paid food orders); defaults to
-  today. **The month+year and from/to forms are owner/admin-only** — a receptionist may only view
+  `/api/reports/daily-collection`) — cash movement in the window; defaults to today:
+  `invoices` / `food_orders` `{total, count}` = cash in by part, `total` = **Net Collected**,
+  `collected` `{invoices, pos, total}`, `refunded` `{invoices, pos, total, by_method}`, `net`,
+  `refunds` (each: `at`, `kind` invoice|pos, `type`, `invoice_id`/`order_id`, `guest`, `amount`,
+  `method` (null = not recorded, pre-7c), `actor`, `recorded`, `reason`), `model`. **The month+year and from/to forms are owner/admin-only** — a receptionist may only view
   one day (Revenue → Collections). Also returns `outstanding` `{total, count}`:
   what's on the property's **open** invoices right now (Mark-paid room charges, charged food…) —
   not collected until settled, and not tied to the window.
@@ -50,7 +59,7 @@ its first 8 characters as the **Reference** on error alerts.
 - `GET /api/finance/seasonality[?year=YYYY]` (**Manager only**, own property; old
   `/api/reports/monthly-summary`) — seasonality per
   calendar month of the year (default current): count of non-cancelled reservations (bucketed by
-  `check_in`) and collected revenue (same definition as `admin-dashboard`). One pair of queries
+  `check_in`) and `revenue` = Net Collected, with its `collected` and `refunded` parts. One pair of queries
   per month rather than `GROUP BY MONTH(...)` (`ONLY_FULL_GROUP_BY` avoidance). Powers the
   Revenue page's Analytics → "Seasonality" chart.
 - `GET /api/operations/today` (**Manager + Front Desk Staff**, own property; Platform Owner → 403;
@@ -83,8 +92,9 @@ its first 8 characters as the **Reference** on error alerts.
     `open_food_orders` (today's), `out_of_stock`, `low_stock`, `maintenance_rooms`. Operational
     only: not-billed stays and open invoices belong to Finance (`/reservations?billing=not_billed`,
     `finance/collections`' `outstanding`).
-  - `revenue_today` `{collected, invoices, pos}` — the Dashboard's one money figure: collected
-    today by the `daily-collection` definition (settled invoices by `settled_at` + paid food).
+  - `revenue_today` `{collected, invoices, pos, refunded, net}` — the one money figure: today's
+    cash movement (`collected` = cash in, `invoices`/`pos` its parts, `net` = Net Collected).
+    `pos.trend` and `pos.today.paid` are paid sales net of POS refunds.
   - Every aggregate is summed in PHP from plain row fetches (no `GROUP BY`).
 - `GET /api/operations/activity[?page=N]` (**Manager only**, own property; old `/api/reports/activity`) — the full feed behind the
   Dashboard's Staff card ("View all activity"): the same merged stock-movement + food-order
@@ -212,9 +222,10 @@ its first 8 characters as the **Reference** on error alerts.
   `checked_in_at`/`checked_out_at`/`cancelled_at` and `receptionist_id`; flip room status.
   - check-in accepts `early_check_in:true` → posts the configured fee to the guest's invoice.
   - check-out posts the room charge (+ downpayment credit) if it hasn't been posted already.
-  - cancel from `booked` refunds 90% of the downpayment, retains 10%
-    (`DOWNPAYMENT_RATE`/`CANCELLATION_RETENTION`), and reverses room charge, credit and early
-    check-in fee.
+  - cancel from `booked` with a downpayment **requires `refund_method`** (cash|gcash|maya|gotyme;
+    400 otherwise, before anything changes): 90% goes back, recorded as a `refunded_on_cancel`
+    event (cash out today; step 7c), 10% is retained (`CANCELLATION_RETENTION`). The settled
+    downpayment invoice never changes. Cancel also reverses room charge, credit and early check-in fee.
 - `POST /api/reservations/{id}/post-room-charge` (Manager + Front Desk Staff) — **Post room
   charge**: posts the itemized room charge (+ any downpayment credit) to the guest's open
   invoice, so the stay reads Billed (Settled once that invoice is settled). Idempotent. **400**
@@ -268,6 +279,13 @@ its first 8 characters as the **Reference** on error alerts.
   Cancelling a served + paid order takes `{reason}` (the elevated `pos.sale.cancel_paid`): stored on
   the `cancelled_after_payment` event. Accepted but not yet required (grace window, docs/EVENTS.md);
   once the window closes, a missing reason is a 400.
+  Cancelling a **paid** sale takes `refund: {returned, method}` and `refund_key` (step 7c):
+  `returned: true` records a `refunded` event (cash out today; needs `reason` and a method),
+  false or absent keeps the sale collected. A repeated key is 409. The order list carries
+  `refunded` (bool) per order.
+- `POST /api/food-orders/{id}/refund` `{method, reason, refund_key?}` — **Manager**
+  (`pos.sale.cancel_paid`): money returned for a paid sale **cancelled earlier** with no refund on
+  record; recorded today, once (409 after). 400 if the sale isn't cancelled or wasn't paid.
 
 ## Invoices
 - `GET /api/invoices[?guest_id=&status=&date=YYYY-MM-DD|all]` — `date` hides other days, but
@@ -278,6 +296,12 @@ its first 8 characters as the **Reference** on error alerts.
   the invoice's `invoice_events`, oldest first, each `{id, event, at, actor, recorded, amount,
   total_after, line_id, reverses_line_id, reason, invoice_number, or_number}`. `line_id` is the line
   the event created (for a reversal, the negative line; `reverses_line_id` the original).
+- `POST /api/invoices/{id}/refund` `{amount, method, reason, refund_key?}` — **Manager**
+  (`finance.invoice.refund`, elevated; step 7c): money returned against a **settled** invoice,
+  recorded as a `refunded` event (cash out today). The invoice, its lines and receipt numbers never
+  change. 400: open invoice, amount ≤ 0, unknown method, more than `refundable`; 409: the same
+  `refund_key` again (records nothing). Returns the invoice as `GET /invoices/{id}`, which also
+  carries `refunds` (its refund events) and `refundable` (collected less refunds; 0 when open).
 - `POST /api/invoices/{id}/settle` — stamps `settled_at`; optional `{use_invoice, use_or}` each
   consume the next number from the property's active receipt series of that type
   (`ReceiptSeriesTable::assignNext()`) onto `invoice_number`/`or_number`; 400 if no active series

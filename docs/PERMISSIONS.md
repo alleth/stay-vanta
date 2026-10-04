@@ -61,6 +61,7 @@ several properties.
 | `finance.invoice.view` | PO†, M, FD | Manager, Front Desk, Accountant, Property Owner | | Finance |
 | `finance.invoice.settle` | PO†, M, FD | Manager, Front Desk, Accountant | | Finance |
 | `finance.invoice.reverse` | M | Manager, Accountant | yes | Finance |
+| `finance.invoice.refund` | M | Manager, Accountant | yes | Finance |
 | `finance.receipt_series.manage` | PO†, M | Manager, Accountant | | Finance |
 | `front_desk.reservation.view` | PO†, M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Front Desk |
 | `front_desk.reservation.manage` | PO†, M, FD | Manager, Front Desk | | Front Desk |
@@ -88,7 +89,7 @@ several properties.
 | `staff.account.view` | PO, M | Manager, Property Owner | | Staff |
 | `staff.account.manage` | PO, M | Manager | | Staff |
 
-36 permissions: 2 platform, 34 property.
+37 permissions: 2 platform, 35 property.
 
 ## Endpoint map
 
@@ -105,6 +106,7 @@ several properties.
 | `POST /invoices/{id}/settle` | `finance.invoice.settle` | Locked, recorded once; a second settle is 400 |
 | `POST /reservations/{id}/reverse-room-charge` | `finance.invoice.reverse` | Front Desk's Reverse room charge: needs `reason`; open invoice only |
 | `POST /invoices/{id}/lines/{lineId}/reverse` | `finance.invoice.reverse` | Needs `reason`; open invoices only (build step 6) |
+| `POST /invoices/{id}/refund` | `finance.invoice.refund` | Needs `reason`, `amount`, `method`; settled invoices only, up to what's refundable; a repeated `refund_key` is 409 (build step 7c) |
 | `POST/PATCH/PUT/DELETE /receipt-series…` | `finance.receipt_series.manage` | |
 | `GET /reservations`, `GET /reservations/stats` | `front_desk.reservation.view` | |
 | `POST /reservations`, `PATCH/PUT /reservations/{id}` (a booking), `POST /reservations/{id}/{transition}`, `POST /reservations/{id}/post-room-charge`, `POST /reservations/{id}/payment` (legacy) | `front_desk.reservation.manage` | |
@@ -114,7 +116,8 @@ several properties.
 | `GET /guests`, `/guests/stats`, `/guests/match`, `/guests/{id}` | `guests.guest.view` | |
 | `POST /guests`, `PATCH/PUT /guests/{id}` | `guests.guest.manage` | |
 | `GET /food-orders`, `GET /food-orders/{id}`, `GET /food-menu-items` | `pos.sale.view` | |
-| `POST /food-orders`, `/food-orders/{id}/serve`, `/food-orders/{id}/cancel` | `pos.sale.manage` | Cancelling a served and paid order also needs `pos.sale.cancel_paid` |
+| `POST /food-orders`, `/food-orders/{id}/serve`, `/food-orders/{id}/cancel` | `pos.sale.manage` | Cancelling a served and paid order also needs `pos.sale.cancel_paid`; `refund: {returned, method}` records money returned for a paid sale (needs `reason`) |
+| `POST /food-orders/{id}/refund` | `pos.sale.cancel_paid` | Money returned for a paid sale cancelled earlier with no refund on record: needs `reason`, `method`; once (build step 7c) |
 | `POST/PATCH/PUT/DELETE /food-menu-items…` | `pos.menu.manage` | |
 | `GET /rooms` | `rooms.room.view` | |
 | `PATCH/PUT /rooms/{id}` (status only) | `rooms.room.update_status` | Changing number or type needs `settings.room.manage` |

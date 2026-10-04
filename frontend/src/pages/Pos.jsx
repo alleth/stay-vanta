@@ -10,7 +10,7 @@ import { useSubmit } from '../hooks/useSubmit'
 import { formatMoney } from '../utils/format'
 import {
   listMenu, createMenuItem, updateMenuItem, deleteMenuItem,
-  listOrders, createOrder, serveOrder, cancelOrder,
+  listOrders, createOrder, serveOrder, cancelOrder, refundSale,
 } from '../api/food'
 import { listItems } from '../api/inventory'
 import { listGuests } from '../api/guests'
@@ -18,6 +18,8 @@ import { listReservations } from '../api/frontdesk'
 import { SkeletonTable, SkeletonTableRows } from '../components/Skeleton'
 import { describeError } from '../utils/apiError'
 import ReasonModal from '../components/ReasonModal'
+import RefundMethodSelect from '../components/RefundMethodSelect'
+import { newRefundKey } from '../utils/refunds'
 
 const PAY_VARIANT = { paid: 'success', charge_to_room: 'warning', unpaid: 'secondary' }
 const PAY_LABEL = { paid: 'Paid', charge_to_room: 'Charged to room', unpaid: 'Unpaid' }
@@ -43,7 +45,19 @@ export default function Pos() {
   const [error, setError] = useState(null)
   const [pending, setPending] = useState(null) // key of the in-flight inline action
   // A served, paid sale being cancelled: asks the Manager why first.
+  // Cancelling a paid sale asks whether money went back (build step 7c):
+  // cancelling and refunding are separate, so "No" keeps the sale collected.
   const [cancelPaid, setCancelPaid] = useState(null)
+  const [refundLater, setRefundLater] = useState(null) // a cancelled paid sale with no refund on record
+  const [returned, setReturned] = useState('yes')
+  const [refundMethod, setRefundMethod] = useState('')
+  const [refundKey, setRefundKey] = useState('')
+  const openRefund = (order, setOrder) => {
+    setReturned('yes')
+    setRefundMethod('')
+    setRefundKey(newRefundKey())
+    setOrder(order)
+  }
   const [modal, setModal] = useState(null) // 'order' | {type:'menu',item?,defaultType?}
 
   // Orders — server-paginated and filtered (a fresh start each day).
@@ -134,17 +148,56 @@ export default function Pos() {
         show={cancelPaid !== null}
         title={`Cancel paid order #${cancelPaid?.id ?? ''}`}
         description={
-          `This order was served and paid (${formatMoney(cancelPaid?.total ?? 0)}). Cancelling it restocks `
-          + 'what it used and is recorded with your name and this reason.'
+          `This order was paid (${formatMoney(cancelPaid?.total ?? 0)}). Cancelling it restocks what it used `
+          + 'and is recorded with your name and this reason.'
         }
         confirmLabel="Cancel the order"
+        ready={returned === 'no' || refundMethod !== ''}
         onHide={() => setCancelPaid(null)}
         onConfirm={async (reason) => {
-          await cancelOrder(cancelPaid.id, reason)
+          const refund = returned === 'yes' ? { returned: true, method: refundMethod } : { returned: false }
+          await cancelOrder(cancelPaid.id, reason, refund, refundKey)
           setCancelPaid(null)
           await Promise.all([loadOrders(), loadBase()])
         }}
-      />
+      >
+        <fieldset className="mb-3">
+          <legend className="mb-1 text-sm font-medium">Was money returned to the guest?</legend>
+          <div className="flex gap-6">
+            <Form.Check type="radio" id="pos-returned-yes" name="pos-returned" label="Yes, returned"
+              checked={returned === 'yes'} onChange={() => setReturned('yes')} />
+            <Form.Check type="radio" id="pos-returned-no" name="pos-returned" label="No"
+              checked={returned === 'no'} onChange={() => setReturned('no')} />
+          </div>
+          <Form.Text>
+            {returned === 'yes'
+              ? `Recorded as a ${formatMoney(cancelPaid?.total ?? 0)} refund today (cash out).`
+              : 'The sale stays counted as collected.'}
+          </Form.Text>
+        </fieldset>
+        {returned === 'yes' && (
+          <RefundMethodSelect id="pos-refund-method" value={refundMethod} onChange={setRefundMethod} />
+        )}
+      </ReasonModal>
+
+      <ReasonModal
+        show={refundLater !== null}
+        title={`Record refund for order #${refundLater?.id ?? ''}`}
+        description={
+          `This paid order (${formatMoney(refundLater?.total ?? 0)}) was cancelled with no refund on record. `
+          + 'Record one only if the money went back to the guest; it counts as cash out today.'
+        }
+        confirmLabel="Record refund"
+        ready={refundMethod !== ''}
+        onHide={() => setRefundLater(null)}
+        onConfirm={async (reason) => {
+          await refundSale(refundLater.id, { method: refundMethod, reason, refundKey })
+          setRefundLater(null)
+          await loadOrders()
+        }}
+      >
+        <RefundMethodSelect id="pos-refund-later-method" value={refundMethod} onChange={setRefundMethod} />
+      </ReasonModal>
 
       {loading ? (
         <SkeletonTable rows={6} />
@@ -236,12 +289,22 @@ export default function Pos() {
                           && !(!can(P.POS_SALE_CANCEL_PAID) && o.status === 'served' && o.payment_status === 'paid') && (
                           <Button size="sm" variant="outline-danger"
                             disabled={pending !== null}
-                            onClick={() => (o.status === 'served' && o.payment_status === 'paid'
-                              ? setCancelPaid(o)
+                            onClick={() => (o.payment_status === 'paid'
+                              ? openRefund(o, setCancelPaid)
                               : act(`cancel-${o.id}`, cancelOrder, o.id))}>
                             {pending === `cancel-${o.id}` ? <Spinner size="sm" /> : 'Cancel'}
                           </Button>
                         )}
+                        {o.status === 'cancelled' && o.payment_status === 'paid' && o.refunded === false
+                          && can(P.POS_SALE_CANCEL_PAID) && (
+                          <Button size="sm" variant="outline-secondary"
+                            disabled={pending !== null}
+                            title="The money for this sale may have gone back to the guest"
+                            onClick={() => openRefund(o, setRefundLater)}>
+                            Record refund
+                          </Button>
+                        )}
+                        {o.refunded && <Badge bg="secondary" className="ml-1">Refunded</Badge>}
                       </td>
                     </tr>
                   ))}

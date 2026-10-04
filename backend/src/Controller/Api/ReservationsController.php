@@ -9,6 +9,7 @@ use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
 use App\Model\Table\InvoiceEventsTable;
+use App\Model\Table\InvoicesTable;
 use App\Model\Table\ReservationExtraChargesTable;
 use App\Model\Table\ReservationsTable;
 use Cake\Database\Expression\QueryExpression;
@@ -855,10 +856,29 @@ class ReservationsController extends AppController
             );
         }
         $fromStatus = $reservation->status;
+        // Cancelling an advance booking returns 90% of its downpayment (step
+        // 7c): how the money went back is required, so the refund event can
+        // say. Asked before anything changes.
+        $refundMethod = null;
+        if ($transition === 'cancel' && $fromStatus === 'booked' && (float)$reservation->downpayment > 0) {
+            $refundMethod = (string)$this->request->getData('refund_method');
+            if (!in_array($refundMethod, InvoicesTable::REFUND_METHODS, true)) {
+                throw new BadRequestException(
+                    'Choose how the downpayment refund was paid: ' . implode(', ', InvoicesTable::REFUND_METHODS) . '.',
+                );
+            }
+        }
         // An invoice change the ledger refuses (e.g. a line on a settled
         // invoice) rolls the whole transition back and answers 400.
         try {
-            $reservations->getConnection()->transactional(function () use ($reservations, $reservation, $rule, $transition, $fromStatus) {
+            $reservations->getConnection()->transactional(function () use (
+                $reservations,
+                $reservation,
+                $rule,
+                $transition,
+                $fromStatus,
+                $refundMethod,
+            ) {
                 $reservation->set('status', $rule['to']);
                 // Re-stamp: this receptionist is now the last to act on the booking.
                 $reservation->set('receptionist_id', (int)$this->currentUser->id);
@@ -922,22 +942,27 @@ class ReservationsController extends AppController
                     $invoices->reverseLinesFor($this->eventContext(), 'downpayment_credit', (int)$reservation->id);
 
                     // A cancelled advance booking doesn't get the downpayment back
-                    // in full: 10% is retained, 90% is refunded onto the settled
-                    // downpayment invoice (its total drops to the retained share,
-                    // which is what stays in collections).
+                    // in full: 10% is retained, 90% goes back to the guest. Since
+                    // step 7c that is a refund event (cash out today, with its
+                    // method); the settled downpayment invoice never changes.
                     $downpayment = (float)$reservation->downpayment;
                     if ($fromStatus === 'booked' && $downpayment > 0) {
                         $invoice = $invoices->invoiceForLine('downpayment', (int)$reservation->id);
                         if ($invoice !== null) {
                             $refund = round($downpayment * (1 - self::CANCELLATION_RETENTION), 2);
-                            // The one permitted change to a settled invoice
-                            // (docs/EVENTS.md), recorded as refund_recorded.
-                            $invoices->recordRefund(
+                            $invoices->refund(
                                 $this->eventContext(),
                                 $invoice,
-                                'Downpayment refund on cancellation (10% retained)',
-                                -$refund,
-                                (int)$reservation->id,
+                                $refund,
+                                (string)$refundMethod,
+                                InvoiceEventsTable::REFUNDED_ON_CANCEL,
+                                null,
+                                ['policy' => [
+                                    'rule' => 'advance_booking_cancellation',
+                                    'retained_share' => self::CANCELLATION_RETENTION,
+                                    'downpayment' => $downpayment,
+                                    'reservation_id' => (int)$reservation->id,
+                                ]],
                             );
                         }
                     }

@@ -26,9 +26,14 @@ export const createOrder = (data, propertyId) =>
 export const serveOrder = (id) =>
   client.post(`/food-orders/${id}/serve`).then((r) => r.data.order)
 
-// `reason` is asked for when a served, paid sale is cancelled (pos.sale.cancel_paid).
-export const cancelOrder = (id, reason) =>
-  client.post(`/food-orders/${id}/cancel`, reason ? { reason } : {}).then((r) => r.data.order)
+// `reason` is asked for when a paid sale is cancelled; `refund` says whether
+// money went back to the guest ({ returned, method }, build step 7c) and
+// `refundKey` keeps a repeated request from recording it twice.
+export const cancelOrder = (id, reason, refund, refundKey) =>
+  client.post(`/food-orders/${id}/cancel`, {
+    ...(reason ? { reason } : {}),
+    ...(refund ? { refund, refund_key: refundKey } : {}),
+  }).then((r) => r.data.order)
 
 // Invoices
 export const listInvoices = (propertyId, params = {}) =>
@@ -46,3 +51,13 @@ export const settleInvoice = (id, data = {}) =>
 // the original, with the reason recorded. Open invoices only.
 export const reverseInvoiceLine = (invoiceId, lineId, reason) =>
   client.post(`/invoices/${invoiceId}/lines/${lineId}/reverse`, { reason }).then((r) => r.data.invoice)
+
+// Money returned against a settled invoice (finance.invoice.refund, a Manager;
+// build step 7c). Never changes the invoice; a repeated refund_key is 409.
+export const refundInvoice = (invoiceId, { amount, method, reason, refundKey }) =>
+  client.post(`/invoices/${invoiceId}/refund`, { amount, method, reason, refund_key: refundKey })
+    .then((r) => r.data.invoice)
+
+// Money returned for a paid sale cancelled earlier with no refund on record.
+export const refundSale = (id, { method, reason, refundKey }) =>
+  client.post(`/food-orders/${id}/refund`, { method, reason, refund_key: refundKey }).then((r) => r.data.order)

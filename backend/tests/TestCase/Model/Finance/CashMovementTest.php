@@ -7,17 +7,19 @@ use App\Model\BusinessTime;
 use App\Model\Finance\Collections;
 use App\Model\Finance\Restatement;
 use App\Test\TestCase\Controller\Api\ApiScenarioTrait;
+use Cake\Core\Configure;
 use Cake\I18n\DateTime;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\TestSuite\IntegrationTestTrait;
 use Cake\TestSuite\TestCase;
 
 /**
- * Build step 7c-1: the cash-movement model (Collected = cash in, Refunded =
- * cash out, Net = in − out, each on the day the money moved), built beside
- * today's figures, and the restatement report that lists what switching to
- * it will change. Nothing here changes a report yet; the last assertions
- * prove that.
+ * Build step 7c: the cash-movement model (Collected = cash in, Refunded =
+ * cash out, Net = in − out, each on the day the money moved), the
+ * restatement report that lists what switching to it changes against the
+ * model before (`historical`), the reports switched to it (7c-2), and the
+ * `historical` rollback setting giving the old figures back from the same
+ * data.
  *
  * Pinned with the 7b review's worked example 1 (a ₱1,000 downpayment
  * collected 28 Sep, ₱900 refunded 2 Oct as a pre-7c refund line), plus a
@@ -139,7 +141,7 @@ class CashMovementTest extends TestCase
         $this->assertSame(['total' => 1500.0, 'count' => 2], $all['collected']['invoices']);
         $this->assertSame(['total' => 900.0, 'count' => 1], $all['refunded']['invoices']);
         // The invariant: all-time Net equals all-time Collected as reported today.
-        $this->assertSame($money->collected(null, null)['total'], $all['net']);
+        $this->assertSame($money->historical(null, null)['net'], $all['net']);
         $this->assertSame(1100.0, $all['net']);
         // Outstanding is untouched by any of it.
         $this->assertSame(['total' => 300.0, 'count' => 1], $money->outstanding());
@@ -178,17 +180,59 @@ class CashMovementTest extends TestCase
 
         $events = (new Restatement($this->events))->report();
         $this->assertSame(
-            ['2026-10-04', '2026-10-05'],
+            // Under the old model the refunds lowered the collection days (2 and
+            // 3 Oct); now they land on the days the money went back (4 and 5 Oct).
+            ['2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05'],
             array_column(array_filter($events['days'], fn($r) => $r['changes']), 'period'),
         );
     }
 
-    public function testNoReportChangesIn7c1(): void
+    public function testReportsShowCashMovement(): void
     {
-        foreach (['2026-09-28' => 100.0, '2026-10-02' => 500.0, '2026-10-03' => 500.0] as $day => $total) {
+        $expect = [
+            '2026-09-28' => [1000.0, 0.0, 1000.0],
+            '2026-10-02' => [500.0, 900.0, -400.0],
+            '2026-10-03' => [500.0, 0.0, 500.0],
+        ];
+        foreach ($expect as $day => [$in, $out, $net]) {
             $this->callAs($this->adminToken, 'GET', "/api/finance/collections?date=$day");
             $this->assertResponseOk();
-            $this->assertEquals($total, $this->responseJson()['collection']['total'], "Collected on $day as before");
+            $c = $this->responseJson()['collection'];
+            $this->assertEquals($in, $c['collected']['total'], "cash in on $day");
+            $this->assertEquals($out, $c['refunded']['total'], "cash out on $day");
+            $this->assertEquals($net, $c['net'], "net on $day");
+            $this->assertEquals($net, $c['total'], 'total is Net Collected');
+            $this->assertSame('cash', $c['model']);
+        }
+        // The pre-7c refund line is listed, with what wasn't recorded left empty.
+        $this->callAs($this->adminToken, 'GET', '/api/finance/collections?date=2026-10-02');
+        $refunds = $this->responseJson()['collection']['refunds'];
+        $this->assertCount(1, $refunds);
+        $this->assertEquals(['refund_line', 900, null, false], [
+            $refunds[0]['type'], $refunds[0]['amount'], $refunds[0]['method'], $refunds[0]['recorded'],
+        ]);
+        $this->assertEquals(['not_recorded' => 900], $this->responseJson()['collection']['refunded']['by_method']);
+    }
+
+    public function testTheHistoricalSettingGivesTheOldFiguresBack(): void
+    {
+        Configure::write('App.collectedModel', 'historical');
+        try {
+            foreach (['2026-09-28' => 100.0, '2026-10-02' => 500.0, '2026-10-03' => 500.0] as $day => $total) {
+                $this->callAs($this->adminToken, 'GET', "/api/finance/collections?date=$day");
+                $this->assertResponseOk();
+                $c = $this->responseJson()['collection'];
+                $this->assertEquals($total, $c['total'], "Collected on $day as before 7c-2");
+                $this->assertEquals(0, $c['refunded']['total']);
+                $this->assertSame('historical', $c['model']);
+            }
+            // Refund events count against the day their invoice or sale was collected.
+            $m = (new Collections($this->events))->figuresOn('2026-10-02');
+            $this->assertSame(300.0, $m['net']);
+            $m = (new Collections($this->events))->figuresOn('2026-10-03');
+            $this->assertSame(0.0, $m['net']);
+        } finally {
+            Configure::delete('App.collectedModel');
         }
     }
 }

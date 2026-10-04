@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Card, Form } from '../ui'
+import { Alert, Card, Form, Table } from '../ui'
+import { formatMoney } from '../../utils/format'
+import { refundMethodLabel } from '../../utils/refunds'
 import { collections } from '../../api/finance'
 import { SkeletonCards } from '../Skeleton'
 import { StatTiles } from '../StatCard'
@@ -107,25 +109,69 @@ export function CollectionsReport({ allowMonthly }) {
       {!rangeInvalid && error && <Alert variant="danger">{error}</Alert>}
       {!rangeInvalid && !data && !error && <SkeletonCards count={3} />}
       {!rangeInvalid && data && (
-        <StatTiles
-          money
-          tiles={[
-            { label: 'Total collected', value: data.total },
-            { label: 'Invoices settled', value: data.invoices.total },
-            { label: 'POS sales', value: data.food_orders.total },
-            // Not part of the window above: what's billed right now but not
-            // yet collected — posted room charges, food charged to a room —
-            // until the invoice is settled (Invoices tab).
-            { label: 'Outstanding', value: data.outstanding?.total ?? 0 },
-          ]}
-        />
+        <>
+          {/* Cash movement (build step 7c): money in, money back, the difference,
+              each on the day it moved. The fallbacks read a server from before 7c-2. */}
+          <StatTiles
+            money
+            className="mb-2"
+            tiles={[
+              { label: 'Net collected', value: data.net ?? data.total, variant: 'primary' },
+              { label: 'Collected', value: data.collected?.total ?? data.total },
+              { label: 'Refunded', value: data.refunded?.total ?? 0, variant: data.refunded?.total > 0 ? 'danger' : undefined },
+              // Not part of the window above: what's billed right now but not
+              // yet collected, until the invoice is settled (Invoices tab).
+              { label: 'Outstanding', value: data.outstanding?.total ?? 0 },
+            ]}
+          />
+          <p className="mb-8 text-xs text-muted">
+            Collected: {formatMoney(data.invoices.total)} from settled invoices and {formatMoney(data.food_orders.total)} from
+            POS sales.{data.refunded?.total > 0 && ' Refunded is money returned to guests on these days.'}
+          </p>
+          {data.refunds?.length > 0 && <RefundsTable refunds={data.refunds} />}
+        </>
       )}
       {!rangeInvalid && data?.outstanding?.total > 0 && (
-        <p className="-mt-5 mb-8 text-xs text-muted">
+        <p className="mb-8 text-xs text-muted">
           “Outstanding” is what’s on open invoices right now. It counts as collected once the invoice
           is settled.
         </p>
       )}
     </>
+  )
+}
+
+// The refunds behind the Refunded figure: who returned what, how and why.
+// Refunds from before step 7c have no method or reason on record.
+function RefundsTable({ refunds }) {
+  return (
+    <Card className="mb-8">
+      <Card.Header>Refunds</Card.Header>
+      <Table hover>
+        <thead>
+          <tr>
+            <th>When</th><th>For</th><th>Method</th><th>By</th><th>Reason</th>
+            <th className="text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {refunds.map((r) => (
+            <tr key={r.id}>
+              <td className="whitespace-nowrap text-xs text-muted">{new Date(r.at).toLocaleString()}</td>
+              <td>
+                {r.kind === 'pos'
+                  ? `POS order #${r.order_id}`
+                  : `Invoice #${String(r.invoice_id).padStart(4, '0')}${r.guest ? ` · ${r.guest}` : ''}`}
+                {r.type === 'refunded_on_cancel' && <div className="text-[11px] text-muted">Downpayment, booking cancelled</div>}
+              </td>
+              <td>{refundMethodLabel(r.method)}</td>
+              <td className="text-xs">{r.recorded === false && !r.actor ? 'Not recorded' : r.actor ?? 'Unknown user'}</td>
+              <td className="max-w-[240px] text-xs text-muted">{r.reason ?? '—'}</td>
+              <td className="text-right tabular-nums">{formatMoney(r.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </Card>
   )
 }

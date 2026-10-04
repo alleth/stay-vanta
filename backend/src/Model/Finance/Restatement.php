@@ -78,7 +78,7 @@ class Restatement
             $monthRows[] = $this->compare($month, $first, BusinessTime::startOf($next), $money);
         }
 
-        $before = $money->collected(null, null)['total'];
+        $before = $money->historical(null, null)['net'];
         $after = $money->cashMovement(null, null)['net'];
         $cancelled = $this->fetchTable('FoodOrders')->find()->where([
             'property_id' => $this->propertyId,
@@ -153,7 +153,7 @@ class Restatement
      */
     private function compare(string $period, string $from, string $to, Collections $money): array
     {
-        $before = $money->collected($from, $to)['total'];
+        $before = $money->historical($from, $to)['net'];
         $after = $money->cashMovement($from, $to);
 
         return [

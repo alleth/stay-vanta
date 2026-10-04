@@ -8,6 +8,7 @@ import { staffActivity } from '../../api/operations'
 import { roleLabel } from '../../utils/roles'
 import { SkeletonTable } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
+import { refundMethodLabel } from '../../utils/refunds'
 
 // The Operations page's panels (Manager + Front Desk Staff), drawn from one
 // GET /operations/today payload. Every figure is today's, on the hotel's
@@ -82,16 +83,21 @@ function TodayKpi({ guests, onPick }) {
   )
 }
 
-// Operations' one money card: collected today (the collection report's
-// definition), split into POS and settled room invoices. Anything further —
+// Operations' one money card: Net collected today (cash in less refunds,
+// build step 7c; the collection report's definition), split into POS sales,
+// settled invoices and, when there are any, refunds. Anything further —
 // what's owed, invoices, periods — is in Finance.
 function CollectedTodayKpi({ revenue, pos }) {
   const yesterday = pos.yesterday_paid
   const delta = yesterday > 0 ? Math.round(((pos.today.paid - yesterday) / yesterday) * 100) : null
   return (
-    <SummaryGroup label="Collected today">
-      <div className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">{formatMoney(revenue.collected)}</div>
-      <div className="mt-1 text-xs text-muted">collected</div>
+    <SummaryGroup label="Net collected today">
+      <div className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">
+        {formatMoney(revenue.net ?? revenue.collected)}
+      </div>
+      <div className="mt-1 text-xs text-muted">
+        {revenue.refunded > 0 ? `${formatMoney(revenue.collected)} collected less refunds` : 'collected'}
+      </div>
       <div className="mt-3 space-y-1 border-t border-line pt-2 text-sm">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-muted">
@@ -108,6 +114,12 @@ function CollectedTodayKpi({ revenue, pos }) {
           <span className="text-muted">Invoices settled</span>
           <span className="tabular-nums">{formatMoney(revenue.invoices)}</span>
         </div>
+        {revenue.refunded > 0 && (
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-muted">Refunded</span>
+            <span className="tabular-nums text-red-700 dark:text-red-300">−{formatMoney(revenue.refunded)}</span>
+          </div>
+        )}
       </div>
     </SummaryGroup>
   )
@@ -547,13 +559,23 @@ function invoiceText(e) {
       return `Reversed “${e.line ?? 'a line'}” on ${inv} (cancelled)${money}`
     case 'refund_recorded':
       return `Downpayment refunded · ${inv}${money}${guest}`
+    case 'refunded':
+      return `Refunded ${inv}${money}${method(e)}${guest}${why}`
+    case 'refunded_on_cancel':
+      return `Downpayment refunded (booking cancelled) · ${inv}${money}${method(e)}${guest}`
     default:
       return `${inv} · ${e.event}`
   }
 }
 
+// " · by GCash" for a refund's method (build step 7c).
+const method = (e) => (e.method ? ` · by ${refundMethodLabel(e.method)}` : '')
+
 function activityText(e) {
   if (e.type === 'invoice') return invoiceText(e)
+  if (e.type === 'sale_refund') {
+    return `Refunded order #${e.order_id} · ${formatMoney(e.amount)}${method(e)}${e.reason ? ` · “${e.reason}”` : ''}`
+  }
   if (e.type === 'stock') {
     const sign = e.direction === 'in' ? '+' : '−'
     return `${sign}${qty(e.quantity)} ${e.unit ?? ''} ${e.item ?? 'item'}${e.reason ? ` · ${e.reason}` : ''}`

@@ -5,6 +5,7 @@ namespace App\Model\Table;
 
 use App\Event\EventContext;
 use App\Model\Entity\FoodOrder;
+use App\Model\Finance\DuplicateRefundException;
 use App\Model\StatutoryDiscount;
 use Cake\ORM\Table;
 use Cake\ORM\TableRegistry;
@@ -529,15 +530,23 @@ class FoodOrdersTable extends Table
      * served and paid sale is recorded as cancelled_after_payment (the
      * elevated pos.sale.cancel_paid; its reason comes with the context). The
      * order row is locked first, so a double click can't restock twice.
+     *
+     * Cancelling and refunding are separate (build step 7c, D4): `$refund`
+     * is given only when money went back to the guest for a paid sale
+     * (`['method' => …, 'key' => …]`), and is then recorded as a `refunded`
+     * event (cash out today, with the context's reason) in the same
+     * transaction. Without it a paid sale stays collected.
+     *
+     * @param array{method: string, key?: string|null}|null $refund Money returned, if any.
      */
-    public function cancelOrder(FoodOrder $order, EventContext $context): FoodOrder
+    public function cancelOrder(FoodOrder $order, EventContext $context, ?array $refund = null): FoodOrder
     {
         if ($order->status === 'cancelled') {
             throw new RuntimeException('Order is already cancelled.');
         }
 
         return $this->getConnection()->transactional(
-            function () use ($order, $context): FoodOrder {
+            function () use ($order, $context, $refund): FoodOrder {
                 $locked = $this->lockOrder($order);
                 if ($locked->status === 'cancelled') {
                     throw new RuntimeException('Order is already cancelled.');
@@ -622,10 +631,71 @@ class FoodOrdersTable extends Table
                         'columns' => ['amount' => $locked->total],
                     ],
                 );
+                if ($refund !== null) {
+                    $this->recordRefund($context, $locked, $refund);
+                }
                 $order->set('status', 'cancelled');
 
                 return $order;
             },
         );
+    }
+
+    /**
+     * Record the refund of a paid sale that was cancelled earlier with no
+     * refund on record (build step 7c): cash out today, never backdated, by a
+     * Manager with a reason. Locked, checked, recorded once.
+     *
+     * @param array{method: string, key?: string|null} $refund How the money went back.
+     */
+    public function refundCancelled(FoodOrder $order, EventContext $context, array $refund): FoodOrder
+    {
+        return $this->getConnection()->transactional(
+            function () use ($order, $context, $refund): FoodOrder {
+                $locked = $this->lockOrder($order);
+                if ($locked->status !== 'cancelled') {
+                    throw new RuntimeException('Cancel the sale first; a refund goes with its cancellation.');
+                }
+                $this->recordRefund($context, $locked, $refund);
+
+                return $locked;
+            },
+        );
+    }
+
+    /**
+     * The `refunded` event for a paid sale, inside the caller's transaction
+     * with the order row locked: the full sale (stored negative), its
+     * method, once per sale and once per request key.
+     *
+     * @param array{method: string, key?: string|null} $refund How the money went back.
+     */
+    private function recordRefund(EventContext $context, FoodOrder $locked, array $refund): void
+    {
+        if ($locked->payment_status !== 'paid') {
+            throw new RuntimeException('Only a paid sale can be refunded; nothing was collected for this one.');
+        }
+        $method = (string)($refund['method'] ?? '');
+        if (!in_array($method, self::PAYMENT_METHODS, true)) {
+            throw new RuntimeException(
+                'Choose how the money was returned: ' . implode(', ', self::PAYMENT_METHODS) . '.',
+            );
+        }
+        $key = isset($refund['key']) && $refund['key'] !== '' ? (string)$refund['key'] : null;
+        /** @var \App\Model\Table\FoodOrderEventsTable $events */
+        $events = TableRegistry::getTableLocator()->get('FoodOrderEvents');
+        if ($key !== null && $events->exists(['idempotency_key' => $key])) {
+            throw new DuplicateRefundException('This refund was already recorded.');
+        }
+        if ($events->exists(['food_order_id' => $locked->id, 'event_type' => FoodOrderEventsTable::REFUNDED])) {
+            throw new DuplicateRefundException("This sale's refund was already recorded.");
+        }
+        $events->record($context, FoodOrderEventsTable::REFUNDED, $locked, [
+            'columns' => [
+                'amount' => -round((float)$locked->total, 2),
+                'method' => $method,
+                'idempotency_key' => $key,
+            ],
+        ]);
     }
 }

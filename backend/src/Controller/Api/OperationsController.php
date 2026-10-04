@@ -33,6 +33,8 @@ class OperationsController extends AppController
         InvoiceEventsTable::LINE_REVERSED,
         InvoiceEventsTable::LINE_REVERSED_ON_CANCEL,
         InvoiceEventsTable::REFUND_RECORDED,
+        InvoiceEventsTable::REFUNDED,
+        InvoiceEventsTable::REFUNDED_ON_CANCEL,
     ];
 
     /** The trailing window for the sales trend, top sellers and most-used stock. */
@@ -77,10 +79,10 @@ class OperationsController extends AppController
         [$pos, $todaysOrders] = $this->posSummary($propertyId, $dayStart, $dayEnd, $trendFrom);
         $inventory = $this->inventorySummary($propertyId, $trendFrom);
 
-        // The one money figure Operations keeps: collected today, from the
-        // shared definition (Collections). Everything else about money lives
-        // in Finance.
-        $invoicesToday = (new Collections($propertyId))->settledInvoices($dayStart, $dayEnd)['total'];
+        // The one money figure Operations keeps: today's cash movement, from
+        // the shared definition (Collections). Everything else about money
+        // lives in Finance.
+        $today = (new Collections($propertyId))->figures($dayStart, $dayEnd);
 
         $this->set('operations', [
             'date' => $today,
@@ -88,9 +90,12 @@ class OperationsController extends AppController
             'guests' => $guests,
             'pos' => $pos,
             'revenue_today' => [
-                'collected' => round($invoicesToday + $pos['today']['paid'], 2),
-                'invoices' => $invoicesToday,
-                'pos' => $pos['today']['paid'],
+                // Cash in, by part; then cash out and Net Collected (step 7c).
+                'collected' => $today['collected']['total'],
+                'invoices' => $today['collected']['invoices']['total'],
+                'pos' => $today['collected']['pos']['total'],
+                'refunded' => $today['refunded']['total'],
+                'net' => $today['net'],
             ],
             'inventory' => $inventory,
             'staff' => $seesStaff ? $this->staffSummary($propertyId, $dayStart, $dayEnd) : null,
@@ -326,15 +331,16 @@ class OperationsController extends AppController
             $rows,
         )), 2);
 
-        // Paid sales per day, oldest first (Collections' POS part; one query
-        // per day, no GROUP BY DATE(...)).
+        // Paid sales per day net of POS refunds, oldest first (Collections'
+        // POS parts; a few queries per day, no GROUP BY DATE(...)).
         $money = new Collections($propertyId);
         $trend = [];
         for ($i = self::TREND_DAYS - 1; $i >= 0; $i--) {
             $date = BusinessTime::today()->subDays($i)->format('Y-m-d');
+            $figures = $money->figuresOn($date);
             $trend[] = [
                 'date' => $date,
-                'total' => $money->paidSales(BusinessTime::startOf($date), BusinessTime::endOf($date))['total'],
+                'total' => round($figures['collected']['pos']['total'] - $figures['refunded']['pos']['total'], 2),
             ];
         }
 
@@ -582,12 +588,12 @@ class OperationsController extends AppController
     private function recentActivity(int $propertyId, int $limit = self::LIST_LIMIT, int $offset = 0): array
     {
         $rows = $this->fetchTable('ActivityIndex')->find()
-            ->select(['event_table', 'event_id', 'subject_id'])
+            ->select(['event_table', 'event_type', 'event_id', 'subject_id'])
             ->where([
                 'property_id' => $propertyId,
                 'OR' => [
                     ['event_table' => 'stock_movements'],
-                    ['event_table' => 'food_order_events', 'event_type' => 'placed'],
+                    ['event_table' => 'food_order_events', 'event_type IN' => ['placed', 'refunded']],
                     ['event_table' => 'invoice_events', 'event_type IN' => self::FEED_INVOICE_EVENTS],
                 ],
             ])
@@ -610,9 +616,12 @@ class OperationsController extends AppController
         $movementIds = [];
         $orderIds = [];
         $invoiceEventIds = [];
+        $saleRefundIds = [];
         foreach ($rows as $row) {
             if ($row['event_table'] === 'stock_movements') {
                 $movementIds[] = (int)$row['event_id'];
+            } elseif ($row['event_table'] === 'food_order_events' && $row['event_type'] === 'refunded') {
+                $saleRefundIds[] = (int)$row['event_id'];
             } elseif ($row['event_table'] === 'invoice_events') {
                 $invoiceEventIds[] = (int)$row['event_id'];
             } else {
@@ -620,6 +629,7 @@ class OperationsController extends AppController
             }
         }
         $invoiceLines = $this->invoiceFeedLines($invoiceEventIds);
+        $saleRefundLines = $this->saleRefundFeedLines($saleRefundIds);
         $movements = $movementIds === [] ? [] : $this->fetchTable('StockMovements')->find()
             ->contain([
                 'InventoryItems' => ['fields' => ['id', 'name', 'unit']],
@@ -652,6 +662,12 @@ class OperationsController extends AppController
                         'unit' => $m->inventory_item?->unit,
                         'reason' => $m->reason,
                     ];
+                }
+                continue;
+            }
+            if ($row['event_table'] === 'food_order_events' && $row['event_type'] === 'refunded') {
+                if (isset($saleRefundLines[(int)$row['event_id']])) {
+                    $events[] = $saleRefundLines[(int)$row['event_id']];
                 }
                 continue;
             }
@@ -723,6 +739,41 @@ class OperationsController extends AppController
                 'invoice_number' => $e->invoice_number,
                 'or_number' => $e->or_number,
                 'line' => $e->changes['reverses']['description'] ?? null,
+                'reason' => $e->reason,
+                'method' => $e->method,
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Feed lines for POS refunds (build step 7c): money returned for a
+     * cancelled paid sale, as it happened: when, who, how much, how, why.
+     *
+     * @param list<int> $eventIds food_order_events ids (refunded) on this page.
+     * @return array<int, array<string, mixed>> Feed line per event id.
+     */
+    private function saleRefundFeedLines(array $eventIds): array
+    {
+        if ($eventIds === []) {
+            return [];
+        }
+        $events = $this->fetchTable('FoodOrderEvents')->find()->where(['id IN' => $eventIds])->all()->toList();
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($e) => $e->actor_id, $events))));
+        $actors = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        $lines = [];
+        foreach ($events as $e) {
+            $lines[(int)$e->id] = [
+                'type' => 'sale_refund',
+                'id' => 'sale-event-' . $e->id,
+                'at' => $e->occurred_at,
+                'actor' => $e->actor_id !== null ? ($actors[$e->actor_id] ?? null) : null,
+                'order_id' => (int)$e->food_order_id,
+                'amount' => round(-(float)$e->amount, 2),
+                'method' => $e->method,
                 'reason' => $e->reason,
             ];
         }
