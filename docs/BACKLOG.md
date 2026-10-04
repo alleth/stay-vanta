@@ -116,6 +116,12 @@ Carry these into steps 6–10:
 
 ## Smaller items
 
+- [ ] **Step 8 follow-ups (in production 2026-10-04, `d9cda62`).** Cleanup release: stop stamping
+  `reservations.receptionist_id` (legacy since step 8, R6) and drop it from the API. A production
+  probe of a non-existent API path answers 401, not 404 (the fallback routes authenticate before
+  resolving the action), so an unauthenticated probe can't prove a route exists: verify new routes
+  with a signed-in request or the tests.
+
 - [ ] **Staging database sleeps when idle (observed 2026-10-04, not a blocker).** Railway stops the
   staging MySQL container about 10 minutes after its last activity ("Received SHUTDOWN from user
   <via user signal>") and wakes it on the next request, which takes about 45 s; requests in that
