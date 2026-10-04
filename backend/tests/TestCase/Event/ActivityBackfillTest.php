@@ -96,8 +96,8 @@ class ActivityBackfillTest extends TestCase
         $this->historicalMovement(new DateTime('2026-08-02 08:00:00'));
         $this->historicalOrder();
 
-        $this->assertSame(['placed_events' => 1, 'order_index' => 1, 'stock_index' => 2, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0], $this->backfill());
-        $this->assertSame(['placed_events' => 0, 'order_index' => 0, 'stock_index' => 0, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0], $this->backfill());
+        $this->assertSame(['placed_events' => 1, 'order_index' => 1, 'stock_index' => 2, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0, 'reservation_created_events' => 0, 'reservation_checked_in_events' => 0, 'reservation_checked_out_events' => 0, 'reservation_cancelled_events' => 0, 'reservation_index' => 0], $this->backfill());
+        $this->assertSame(['placed_events' => 0, 'order_index' => 0, 'stock_index' => 0, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0, 'reservation_created_events' => 0, 'reservation_checked_in_events' => 0, 'reservation_checked_out_events' => 0, 'reservation_cancelled_events' => 0, 'reservation_index' => 0], $this->backfill());
 
         $counts = (new ActivityBackfill($this->connection))->check($this->propertyId)[$this->propertyId];
         $this->assertSame(2, $counts['stock_indexed']);
@@ -150,7 +150,7 @@ class ActivityBackfillTest extends TestCase
         $this->assertResponseCode(201);
         $indexed = $this->getTableLocator()->get('ActivityIndex')->find()->where(['property_id' => $this->propertyId])->count();
 
-        $this->assertSame(['placed_events' => 0, 'order_index' => 0, 'stock_index' => 0, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0], $this->backfill());
+        $this->assertSame(['placed_events' => 0, 'order_index' => 0, 'stock_index' => 0, 'invoice_opened_events' => 0, 'invoice_line_events' => 0, 'invoice_settled_events' => 0, 'invoice_index' => 0, 'reservation_created_events' => 0, 'reservation_checked_in_events' => 0, 'reservation_checked_out_events' => 0, 'reservation_cancelled_events' => 0, 'reservation_index' => 0], $this->backfill());
         $this->assertSame(
             $indexed,
             $this->getTableLocator()->get('ActivityIndex')->find()->where(['property_id' => $this->propertyId])->count(),
@@ -248,5 +248,117 @@ class ActivityBackfillTest extends TestCase
         $this->assertSame(0, $added['invoice_line_events']);
         $this->assertSame(0, $added['invoice_settled_events']);
         $this->assertSame(0, $added['invoice_index']);
+    }
+
+    /**
+     * A reservation as stored before step 8 (no events), with the moments it recorded.
+     *
+     * @param array<string, mixed> $fields Columns.
+     */
+    private function legacyReservation(array $fields): int
+    {
+        return $this->insertRow('Reservations', $fields + [
+            'property_id' => $this->propertyId, 'room_id' => $this->roomId, 'guest_id' => $this->guestId,
+            'receptionist_id' => $this->deskId, 'total_guests' => 1, 'payment_status' => 'unpaid',
+            'check_in' => '2026-08-01', 'check_out' => '2026-08-02',
+        ]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function reservationTypes(int $id): array
+    {
+        return $this->getTableLocator()->get('ReservationEvents')->find()
+            ->where(['reservation_id' => $id])->orderBy(['occurred_at' => 'ASC', 'id' => 'ASC'])
+            ->all()->extract('event_type')->toList();
+    }
+
+    public function testReservationHistoryIsImportedWithoutInventingAnything(): void
+    {
+        $booking = $this->legacyReservation([
+            'source' => 'agoda', 'status' => 'checked_out', 'created' => new DateTime('2026-08-01 02:00:00'),
+            'checked_in_at' => new DateTime('2026-08-03 06:00:00'), 'checked_out_at' => new DateTime('2026-08-05 03:00:00'),
+        ]);
+        $walkIn = $this->legacyReservation([
+            'source' => 'walk_in', 'status' => 'checked_in', 'created' => new DateTime('2026-08-10 01:00:00'),
+            'checked_in_at' => new DateTime('2026-08-10 01:00:00'),
+        ]);
+        $cancelled = $this->legacyReservation([
+            'source' => 'agoda', 'status' => 'cancelled', 'created' => new DateTime('2026-08-12 01:00:00'),
+            'cancelled_at' => new DateTime('2026-08-13 01:00:00'),
+        ]);
+        // A past stay typed in on 20 Aug for 15–17 Aug: its moments are the stay's dates.
+        $pastStay = $this->legacyReservation([
+            'source' => 'walk_in', 'status' => 'checked_out', 'created' => new DateTime('2026-08-20 04:00:00'),
+            'checked_in_at' => new DateTime('2026-08-14 16:00:00'), 'checked_out_at' => new DateTime('2026-08-16 16:00:00'),
+        ]);
+        $undated = $this->legacyReservation(['source' => 'agoda', 'status' => 'booked']);
+        $this->connection->execute('UPDATE reservations SET created = NULL WHERE id = ?', [$undated]);
+
+        $added = $this->backfill();
+        $this->assertSame(4, $added['reservation_created_events']);
+        $this->assertSame(1, $added['reservation_checked_in_events'], 'walk-ins and past stays were created checked in');
+        $this->assertSame(2, $added['reservation_checked_out_events']);
+        $this->assertSame(1, $added['reservation_cancelled_events']);
+        $this->assertSame(8, $added['reservation_index']);
+
+        $this->assertSame(['booked', 'checked_in', 'checked_out'], $this->reservationTypes($booking));
+        $this->assertSame(['walked_in'], $this->reservationTypes($walkIn));
+        $this->assertSame(['booked', 'cancelled'], $this->reservationTypes($cancelled));
+        $this->assertSame(['checked_out', 'walked_in'], $this->reservationTypes($pastStay), 'each at the time the row recorded');
+        $this->assertSame([], $this->reservationTypes($undated), 'no time recorded: nothing invented');
+
+        $events = $this->getTableLocator()->get('ReservationEvents')->find()
+            ->where(['property_id' => $this->propertyId])->all()->toList();
+        foreach ($events as $event) {
+            $this->assertNull($event->actor_id, 'no actor: receptionist_id is only "last touched by"');
+            $this->assertNull($event->actor_role);
+            $this->assertNull($event->reason);
+            $this->assertNull($event->room_id, 'the room at the time was not recorded');
+            $this->assertSame('import', $event->source);
+            $this->assertStringStartsWith('import-reservations-' . $event->reservation_id . '-', $event->correlation_id);
+            $this->assertSame($this->deskId, (int)$event->snapshot['last_touched_by_before_step_8']);
+            $this->assertSame('B-3', $event->snapshot['room_at_import']);
+        }
+        $created = $this->getTableLocator()->get('ReservationEvents')->find()
+            ->where(['reservation_id' => $booking, 'event_type' => 'booked'])->firstOrFail();
+        $this->assertSame('2026-08-01 02:00:00', $created->occurred_at->format('Y-m-d H:i:s'));
+        $pastEvents = $this->getTableLocator()->get('ReservationEvents')->find()
+            ->where(['reservation_id' => $pastStay])->all()->toList();
+        foreach ($pastEvents as $event) {
+            $this->assertTrue($event->changes['backdated_entry'], 'a stay entered after the fact says so');
+        }
+
+        // Idempotent, and the check is complete.
+        $again = $this->backfill();
+        foreach (['reservation_created_events', 'reservation_checked_in_events', 'reservation_checked_out_events', 'reservation_cancelled_events', 'reservation_index'] as $step) {
+            $this->assertSame(0, $again[$step], "$step on a second run");
+        }
+        $check = (new ActivityBackfill($this->connection))->check($this->propertyId)[$this->propertyId];
+        $this->assertTrue($check['complete']);
+        $this->assertSame(5, $check['reservations']);
+        $this->assertSame(1, $check['reservations_undated']);
+        $this->assertSame(8, $check['reservation_imported']);
+    }
+
+    public function testReservationEventsRecordedLiveAreNotDoubled(): void
+    {
+        $this->callAs($this->deskToken, 'POST', '/api/reservations', [
+            'room_id' => $this->insertRow('Rooms', [
+                'property_id' => $this->propertyId, 'room_number' => 'B-9', 'room_type' => 'Twin', 'status' => 'available',
+            ]),
+            'source' => 'walk_in', 'guest_name' => 'Live Guest', 'check_out' => (new DateTime('+2 days'))->format('Y-m-d'),
+        ]);
+        $this->assertResponseCode(201, (string)$this->_response->getBody());
+        $id = (int)$this->responseJson()['reservation']['id'];
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/cancel");
+        $this->assertResponseOk((string)$this->_response->getBody());
+
+        $added = $this->backfill();
+        foreach (['reservation_created_events', 'reservation_checked_in_events', 'reservation_checked_out_events', 'reservation_cancelled_events', 'reservation_index'] as $step) {
+            $this->assertSame(0, $added[$step], "$step: live events are never imported again");
+        }
+        $this->assertSame(['walked_in', 'cancelled'], $this->reservationTypes($id));
     }
 }

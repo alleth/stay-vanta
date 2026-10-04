@@ -221,6 +221,17 @@ Rules (decided 2026-10-04):
 - **Money stays in `invoice_events`**: a check-out's room charge, a cancellation's reversals and
   refund share the action's correlation id with its reservation event; nothing is copied.
 - **`reservations.receptionist_id` is legacy** (R6): still stamped for one release, never the actor.
+- **Timeline and feed** (part 2): `GET /reservations/{id}/history` merges these events with the
+  invoice events of the reservation's money; Operations → Activity shows every type but `edited`.
+  Staff actions today count distinct requests per actor across all ledgers (`activity_index`).
+- **History before step 8** (`BackfillReservationEvents`, `bin/cake activity_backfill`): a creation
+  event at `created` (`walked_in` for a walk-in, `booked` otherwise), `checked_in` at
+  `checked_in_at` (not for walk-ins and past stays, created checked in), `checked_out` at
+  `checked_out_at`, `cancelled` at `cancelled_at`. Actor, role, reason and room are NULL; the
+  snapshot keeps `receptionist_id` as `last_touched_by_before_step_8`, the room and status as
+  `room_at_import` / `status_at_import`; a stay whose moments predate its `created` is flagged
+  `backdated_entry`. Edits, corrections, discount changes and deletions before step 8 were never
+  recorded and aren't imported; a reservation with no `created` is left out and counted.
 
 ## Planned
 

@@ -80,6 +80,7 @@ class PermissionMatrixApiTest extends TestCase
         ['GET', '/api/reservations', 'front_desk.reservation.view'],
         ['GET', '/api/reservations/stats', 'front_desk.reservation.view'],
         ['POST', '/api/reservations', 'front_desk.reservation.manage'],
+        ['GET', '/api/reservations/{id}/history', 'front_desk.reservation.view'],
         ['PATCH', '/api/reservations/{id}', 'front_desk.reservation.manage'],
         ['PUT', '/api/reservations/{id}', 'front_desk.reservation.manage'],
         ['POST', '/api/reservations/{id}/{transition}', 'front_desk.reservation.manage'],

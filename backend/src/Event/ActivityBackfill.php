@@ -47,6 +47,9 @@ final class ActivityBackfill
         // Invoice steps only once invoice_events exists: on a fresh database
         // the step 5 migration runs this before step 6 creates that table.
         $invoices = $this->hasInvoiceEvents();
+        // Reservation steps only once reservation_events exists (step 8), for
+        // the same reason.
+        $reservations = $this->hasReservationEvents();
         $added = [
             // Events first: index rows are made from them.
             'placed_events' => $this->inBatches('food_orders', $propertyId, $this->placedEventsSql()),
@@ -60,6 +63,17 @@ final class ActivityBackfill
                 ? $this->inBatches('invoices', $propertyId, $this->invoiceSettledSql()) : 0,
             'invoice_index' => $invoices
                 ? $this->inBatches('invoice_events', $propertyId, $this->invoiceIndexSql()) : 0,
+            // Creation first: the check-in step reads it.
+            'reservation_created_events' => $reservations
+                ? $this->inBatches('reservations', $propertyId, $this->reservationCreatedSql()) : 0,
+            'reservation_checked_in_events' => $reservations
+                ? $this->inBatches('reservations', $propertyId, $this->reservationCheckedInSql()) : 0,
+            'reservation_checked_out_events' => $reservations
+                ? $this->inBatches('reservations', $propertyId, $this->reservationCheckedOutSql()) : 0,
+            'reservation_cancelled_events' => $reservations
+                ? $this->inBatches('reservations', $propertyId, $this->reservationCancelledSql()) : 0,
+            'reservation_index' => $reservations
+                ? $this->inBatches('reservation_events', $propertyId, $this->reservationIndexSql()) : 0,
         ];
         // Auditable: what this run added (anything already recorded was skipped).
         $parts = [];
@@ -104,6 +118,26 @@ final class ActivityBackfill
                     AND NOT EXISTS (SELECT 1 FROM activity_index a WHERE a.event_table = 'invoice_events'
                         AND a.event_id = e.id)) AS invoice_unindexed"
             : '0 AS invoices_unopened, 0 AS lines_unrecorded, 0 AS settled_unrecorded, 0 AS invoice_unindexed';
+        $reservationLedger = $this->hasReservationEvents()
+            ? "(SELECT COUNT(*) FROM reservations r WHERE r.property_id = p.id AND r.created IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM reservation_events e WHERE e.reservation_id = r.id
+                        AND e.event_type IN ('booked', 'walked_in', 'backdated'))) AS reservations_uncreated,
+                (SELECT COUNT(*) FROM reservations r WHERE r.property_id = p.id AND r.checked_in_at IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM reservation_events e WHERE e.reservation_id = r.id
+                        AND e.event_type IN ('checked_in', 'walked_in', 'backdated'))) AS check_ins_unrecorded,
+                (SELECT COUNT(*) FROM reservations r WHERE r.property_id = p.id AND r.checked_out_at IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM reservation_events e WHERE e.reservation_id = r.id
+                        AND e.event_type IN ('checked_out', 'backdated'))) AS check_outs_unrecorded,
+                (SELECT COUNT(*) FROM reservations r WHERE r.property_id = p.id AND r.cancelled_at IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM reservation_events e WHERE e.reservation_id = r.id
+                        AND e.event_type IN ('cancelled', 'cancelled_after_payment'))) AS cancels_unrecorded,
+                (SELECT COUNT(*) FROM reservation_events e WHERE e.property_id = p.id
+                    AND NOT EXISTS (SELECT 1 FROM activity_index a WHERE a.event_table = 'reservation_events'
+                        AND a.event_id = e.id)) AS reservation_unindexed,
+                (SELECT COUNT(*) FROM reservation_events e WHERE e.property_id = p.id
+                    AND e.source = 'import') AS reservation_imported"
+            : '0 AS reservations_uncreated, 0 AS check_ins_unrecorded, 0 AS check_outs_unrecorded, '
+                . '0 AS cancels_unrecorded, 0 AS reservation_unindexed, 0 AS reservation_imported';
         $rows = $this->connection->execute(
             "SELECT p.id,
                 (SELECT COUNT(*) FROM stock_movements m WHERE m.property_id = p.id) AS stock,
@@ -123,7 +157,11 @@ final class ActivityBackfill
                     WHERE i.property_id = p.id AND l.created IS NULL) AS lines_undated,
                 (SELECT COUNT(*) FROM invoices i WHERE i.property_id = p.id AND i.status = 'settled'
                     AND i.settled_at IS NULL) AS settled_undated,
-                $invoiceLedger
+                (SELECT COUNT(*) FROM reservations r WHERE r.property_id = p.id) AS reservations,
+                (SELECT COUNT(*) FROM reservations r WHERE r.property_id = p.id AND r.created IS NULL)
+                    AS reservations_undated,
+                $invoiceLedger,
+                $reservationLedger
             FROM properties p $where ORDER BY p.id",
         )->fetchAll('assoc');
 
@@ -139,13 +177,20 @@ final class ActivityBackfill
                 && $counts['invoices_unopened'] === 0
                 && $counts['lines_unrecorded'] === 0
                 && $counts['settled_unrecorded'] === 0
-                && $counts['invoice_unindexed'] === 0;
+                && $counts['invoice_unindexed'] === 0
+                && $counts['reservations_uncreated'] === 0
+                && $counts['check_ins_unrecorded'] === 0
+                && $counts['check_outs_unrecorded'] === 0
+                && $counts['cancels_unrecorded'] === 0
+                && $counts['reservation_unindexed'] === 0;
             $result[$id] = $counts + ['complete' => $complete];
 
             $line = sprintf(
                 'activity backfill check, property %d: stock %d/%d indexed (%d undated), orders %d/%d placed, '
                 . '%d/%d indexed (%d undated); invoices %d: %d unopened, %d lines unrecorded, '
-                . '%d settled unrecorded, %d events unindexed (undated: %d invoices, %d lines, %d settlements)',
+                . '%d settled unrecorded, %d events unindexed (undated: %d invoices, %d lines, %d settlements); '
+                . 'reservations %d (%d undated, %d imported events): %d uncreated, %d check-ins, '
+                . '%d check-outs, %d cancellations unrecorded, %d events unindexed',
                 $id,
                 $counts['stock_indexed'],
                 $counts['stock'],
@@ -163,6 +208,14 @@ final class ActivityBackfill
                 $counts['invoices_undated'],
                 $counts['lines_undated'],
                 $counts['settled_undated'],
+                $counts['reservations'],
+                $counts['reservations_undated'],
+                $counts['reservation_imported'],
+                $counts['reservations_uncreated'],
+                $counts['check_ins_unrecorded'],
+                $counts['check_outs_unrecorded'],
+                $counts['cancels_unrecorded'],
+                $counts['reservation_unindexed'],
             );
             $complete ? Log::info($line) : Log::warning($line . ' — INCOMPLETE');
         }
@@ -368,6 +421,143 @@ final class ActivityBackfill
                 e__PROPERTY__
                 AND NOT EXISTS (
                     SELECT 1 FROM activity_index a WHERE a.event_table = 'invoice_events' AND a.event_id = e.id
+                )";
+    }
+
+    /**
+     * Whether step 8's reservation ledger exists yet (see run()).
+     */
+    private function hasReservationEvents(): bool
+    {
+        return in_array('reservation_events', $this->connection->getSchemaCollection()->listTables(), true);
+    }
+
+    /**
+     * The columns every imported reservation event shares: no actor, no role,
+     * no reason, source `import`, a correlation id naming the row and step,
+     * the time the reservation row recorded, and a snapshot of what's known
+     * now (the guest, room and dates at import, the status at import, and
+     * `receptionist_id` labelled for what it is: whoever touched the row last
+     * before step 8, never the actor). The room column stays NULL: the room
+     * at the time wasn't recorded.
+     */
+    private function reservationEventSql(
+        string $type,
+        string $occurredAt,
+        string $suffix,
+        string $changes,
+        string $statusAfter,
+        string $where,
+    ): string {
+        return "INSERT INTO reservation_events
+                (property_id, reservation_id, event_type, actor_id, actor_role, source, reason, changes, snapshot,
+                 correlation_id, occurred_at, corrects_event_id, room_id, status_after, created)
+            SELECT r.property_id, r.id, $type, NULL, NULL, 'import', NULL, $changes,
+                JSON_OBJECT('guest_id', r.guest_id, 'guest_name', g.full_name, 'room_at_import', rm.room_number,
+                    'check_in', r.check_in, 'check_out', r.check_out, 'status_at_import', r.status,
+                    'total_guests', r.total_guests,
+                    'last_touched_by_before_step_8', r.receptionist_id),
+                CONCAT('import-reservations-', r.id, '-$suffix'), $occurredAt, NULL, NULL, $statusAfter,
+                UTC_TIMESTAMP()
+            FROM reservations r
+            LEFT JOIN guests g ON g.id = r.guest_id
+            LEFT JOIN rooms rm ON rm.id = r.room_id
+            WHERE r.id BETWEEN :from AND :to
+                r__PROPERTY__
+                AND $where";
+    }
+
+    /**
+     * A creation event for every reservation without one, at its `created`:
+     * `walked_in` for a walk-in (created checked in), `booked` otherwise. A
+     * stay whose check-in is earlier than its creation was entered after the
+     * fact: flagged `backdated_entry`, never given a reason it didn't record.
+     */
+    private function reservationCreatedSql(): string
+    {
+        return $this->reservationEventSql(
+            "CASE WHEN r.source = 'walk_in' THEN 'walked_in' ELSE 'booked' END",
+            'r.created',
+            'created',
+            "CASE WHEN r.checked_in_at IS NOT NULL AND r.checked_in_at < r.created
+                THEN JSON_OBJECT('backdated_entry', TRUE) ELSE NULL END",
+            'NULL',
+            "r.created IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM reservation_events e WHERE e.reservation_id = r.id
+                    AND e.event_type IN ('booked', 'walked_in', 'backdated'))",
+        );
+    }
+
+    /**
+     * A `checked_in` at `checked_in_at`, unless the reservation already has
+     * one, or was created checked in (a walk-in or a backdated stay: its
+     * creation event says so).
+     */
+    private function reservationCheckedInSql(): string
+    {
+        return $this->reservationEventSql(
+            "'checked_in'",
+            'r.checked_in_at',
+            'checked_in',
+            "CASE WHEN r.checked_in_at < r.created THEN JSON_OBJECT('backdated_entry', TRUE) ELSE NULL END",
+            "'checked_in'",
+            "r.checked_in_at IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM reservation_events e WHERE e.reservation_id = r.id
+                    AND e.event_type IN ('checked_in', 'walked_in', 'backdated'))",
+        );
+    }
+
+    /**
+     * A `checked_out` at `checked_out_at`, unless recorded already or the
+     * stay was entered as a past stay after step 8 (its `backdated` event).
+     */
+    private function reservationCheckedOutSql(): string
+    {
+        return $this->reservationEventSql(
+            "'checked_out'",
+            'r.checked_out_at',
+            'checked_out',
+            "CASE WHEN r.checked_out_at < r.created THEN JSON_OBJECT('backdated_entry', TRUE) ELSE NULL END",
+            "'checked_out'",
+            "r.checked_out_at IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM reservation_events e WHERE e.reservation_id = r.id
+                    AND e.event_type IN ('checked_out', 'backdated'))",
+        );
+    }
+
+    /**
+     * A `cancelled` at `cancelled_at`. Whether money had been taken, and why
+     * it was cancelled, weren't recorded: always the plain type, no reason.
+     */
+    private function reservationCancelledSql(): string
+    {
+        return $this->reservationEventSql(
+            "'cancelled'",
+            'r.cancelled_at',
+            'cancelled',
+            'NULL',
+            "'cancelled'",
+            "r.cancelled_at IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM reservation_events e WHERE e.reservation_id = r.id
+                    AND e.event_type IN ('cancelled', 'cancelled_after_payment'))",
+        );
+    }
+
+    /**
+     * An index row for every reservation event without one.
+     */
+    private function reservationIndexSql(): string
+    {
+        return "INSERT INTO activity_index
+                (property_id, occurred_at, actor_id, subject_type, subject_id, event_table, event_id,
+                 event_type, correlation_id, summary, created)
+            SELECT e.property_id, e.occurred_at, e.actor_id, 'reservation', e.reservation_id,
+                'reservation_events', e.id, e.event_type, e.correlation_id, e.snapshot, UTC_TIMESTAMP()
+            FROM reservation_events e
+            WHERE e.id BETWEEN :from AND :to
+                e__PROPERTY__
+                AND NOT EXISTS (
+                    SELECT 1 FROM activity_index a WHERE a.event_table = 'reservation_events' AND a.event_id = e.id
                 )";
     }
 }

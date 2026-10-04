@@ -23,7 +23,7 @@ class StockMovementsController extends AppController
         $movements = $this->fetchTable('StockMovements');
         $query = $this->scopeToProperty(
             $movements->find()
-                ->contain(['InventoryItems', 'Receptionist'])
+                ->contain(['InventoryItems', 'Receptionist' => self::USER_BRIEF])
                 ->orderBy(['StockMovements.created' => 'DESC'])
                 ->limit(200),
         );

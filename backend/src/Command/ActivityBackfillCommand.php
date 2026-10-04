@@ -54,7 +54,9 @@ class ActivityBackfillCommand extends Command
             $incomplete += $ok ? 0 : 1;
             $io->out(sprintf(
                 'property %d: stock %d/%d indexed, orders %d/%d placed and %d indexed; invoices %d (%d unopened, '
-                . '%d lines unrecorded, %d settled unrecorded, %d events unindexed)%s',
+                . '%d lines unrecorded, %d settled unrecorded, %d events unindexed); reservations %d '
+                . '(%d imported events; %d uncreated, %d check-ins, %d check-outs, %d cancellations '
+                . 'unrecorded, %d events unindexed)%s',
                 $id,
                 $c['stock_indexed'],
                 $c['stock'],
@@ -66,6 +68,13 @@ class ActivityBackfillCommand extends Command
                 $c['lines_unrecorded'],
                 $c['settled_unrecorded'],
                 $c['invoice_unindexed'],
+                $c['reservations'],
+                $c['reservation_imported'],
+                $c['reservations_uncreated'],
+                $c['check_ins_unrecorded'],
+                $c['check_outs_unrecorded'],
+                $c['cancels_unrecorded'],
+                $c['reservation_unindexed'],
                 $ok ? '' : '  <- INCOMPLETE',
             ));
         }

@@ -184,6 +184,7 @@ class PropertyIsolationApiTest extends TestCase
             '/api/inventory-items/' . $this->b['item'],
             '/api/food-orders/' . $this->b['order'],
             '/api/invoices/' . $this->b['invoice'],
+            '/api/reservations/' . $this->b['reservation'] . '/history',
         ];
         foreach ($urls as $url) {
             $this->callAs($this->adminToken, 'GET', $url);

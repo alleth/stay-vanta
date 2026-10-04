@@ -18,6 +18,15 @@ use RuntimeException;
  */
 class FoodOrdersController extends AppController
 {
+    /** What a sale is answered with: its lines, discounts, guest, room and who placed it (id and name). */
+    private const ORDER_CONTAIN = [
+        'Guests',
+        'Rooms',
+        'Receptionist' => self::USER_BRIEF,
+        'FoodOrderItems' => ['FoodMenuItems'],
+        'FoodOrderDiscounts',
+    ];
+
     /**
      * GET /api/food-orders[?status=open]
      */
@@ -27,9 +36,7 @@ class FoodOrdersController extends AppController
         $orders = $this->fetchTable('FoodOrders');
         $query = $this->scopeToProperty(
             $orders->find()
-                ->contain([
-                    'Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems'], 'FoodOrderDiscounts',
-                ])
+                ->contain(self::ORDER_CONTAIN)
                 ->orderBy(['FoodOrders.created' => 'DESC']),
         );
 
@@ -89,7 +96,7 @@ class FoodOrdersController extends AppController
         $this->authorize(Permissions::POS_SALE_VIEW);
         $orders = $this->fetchTable('FoodOrders');
         $order = $this->scopeToProperty($orders->find()->where(['FoodOrders.id' => $id]))
-            ->contain(['Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems'], 'FoodOrderDiscounts'])
+            ->contain(self::ORDER_CONTAIN)
             ->firstOrFail();
 
         $this->set('order', $order);
@@ -202,9 +209,7 @@ class FoodOrdersController extends AppController
     private function respondWith(int $orderId, int $status): void
     {
         $orders = $this->fetchTable('FoodOrders');
-        $order = $orders->get($orderId, contain: [
-            'Guests', 'Rooms', 'Receptionist', 'FoodOrderItems' => ['FoodMenuItems'], 'FoodOrderDiscounts',
-        ]);
+        $order = $orders->get($orderId, contain: self::ORDER_CONTAIN);
 
         $this->response = $this->response->withStatus($status);
         $this->set('order', $order);

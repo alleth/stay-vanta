@@ -32,6 +32,15 @@ use RuntimeException;
  */
 class ReservationsController extends AppController
 {
+    /** What a reservation is answered with ("Receptionist" is legacy: last touched by, id and name). */
+    private const RESERVATION_CONTAIN = [
+        'Rooms',
+        'Guests',
+        'Receptionist' => self::USER_BRIEF,
+        'ReservationDiscounts',
+        'ReservationExtraCharges',
+    ];
+
     /** Downpayment collected up front on an advance booking: 50% of the total. */
     private const DOWNPAYMENT_RATE = 0.5;
 
@@ -62,14 +71,23 @@ class ReservationsController extends AppController
     {
         $this->authorize(Permissions::FRONT_DESK_RESERVATION_VIEW);
         $reservations = $this->fetchTable('Reservations');
+        // `deleted=only` (build step 8): a Manager's read-only "Deleted" view.
+        $onlyDeleted = $this->request->getQuery('deleted') === 'only';
+        if ($onlyDeleted && !$this->can(Permissions::FRONT_DESK_RESERVATION_DELETE)) {
+            throw new ForbiddenException('Only a Manager can see deleted reservations.');
+        }
         $query = $this->scopeToProperty(
-            $reservations->find()
+            $reservations->find('all', withDeleted: $onlyDeleted)
                 // ReservationDiscounts rides along because quote() prices from
                 // it — without it every row would cost one extra query.
-                ->contain(['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts', 'ReservationExtraCharges'])
+                ->contain(self::RESERVATION_CONTAIN)
                 // id breaks ties so a page boundary never repeats or skips a row.
                 ->orderBy(['Reservations.check_in' => 'DESC', 'Reservations.id' => 'DESC']),
         );
+
+        if ($onlyDeleted) {
+            $query->where(['Reservations.deleted_at IS NOT' => null]);
+        }
 
         $status = $this->request->getQuery('status');
         if ($status !== null) {
@@ -1127,6 +1145,129 @@ class ReservationsController extends AppController
         $this->respondWithReservation($reservation, 200);
     }
 
+    /** Invoice line sources that belong to a reservation. */
+    private const RESERVATION_LINE_SOURCES = [
+        'reservation',
+        'early_check_in',
+        'downpayment',
+        'downpayment_credit',
+        'downpayment_refund',
+    ];
+
+    /** Invoice events that concern the whole invoice holding a reservation's charges. */
+    private const INVOICE_WIDE_EVENTS = [
+        InvoiceEventsTable::SETTLED,
+        InvoiceEventsTable::SETTLED_ON_CREATION,
+        InvoiceEventsTable::REFUNDED,
+        InvoiceEventsTable::REFUNDED_ON_CANCEL,
+        InvoiceEventsTable::REFUND_RECORDED,
+    ];
+
+    /**
+     * GET /api/reservations/{id}/history (build step 8) → {reservation_id, deleted, history}
+     *
+     * The reservation's timeline, oldest first: its reservation_events and
+     * the invoice events of its money (room charge, extras, early check-in,
+     * downpayment and credit, their reversals, the settlement of the invoice
+     * holding them, refunds). Each item says who (null with `recorded: false`
+     * for history imported from before step 8, never a guess), when, why and
+     * what changed. A Manager may open a deleted reservation's history.
+     */
+    public function history(int $id): void
+    {
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_VIEW);
+        $withDeleted = $this->can(Permissions::FRONT_DESK_RESERVATION_DELETE);
+        $reservation = $this->scopeToProperty(
+            $this->fetchTable('Reservations')->find('all', withDeleted: $withDeleted)
+                ->where(['Reservations.id' => $id]),
+        )->firstOrFail();
+
+        $reservationEvents = $this->fetchTable('ReservationEvents')->find()
+            ->where(['reservation_id' => $id])->all()->toList();
+
+        $lines = $this->fetchTable('InvoiceLines')->find()
+            ->select(['id', 'invoice_id', 'description', 'reverses_line_id'])
+            ->where(['source_id' => $id, 'source_type IN' => self::RESERVATION_LINE_SOURCES])
+            ->disableHydration()->all()->toList();
+        $lineIds = array_map(fn($l) => (int)$l['id'], $lines);
+        $invoiceIds = array_values(array_unique(array_map(fn($l) => (int)$l['invoice_id'], $lines)));
+        if ($lineIds !== []) {
+            $lines = array_merge($lines, $this->fetchTable('InvoiceLines')->find()
+                ->select(['id', 'invoice_id', 'description', 'reverses_line_id'])
+                ->where(['reverses_line_id IN' => $lineIds])
+                ->disableHydration()->all()->toList());
+        }
+        $descriptions = array_column($lines, 'description', 'id');
+
+        $invoiceEvents = [];
+        if ($invoiceIds !== []) {
+            $invoiceEvents = $this->fetchTable('InvoiceEvents')->find()
+                ->where(['OR' => [
+                    ['invoice_line_id IN' => array_keys($descriptions)],
+                    ['invoice_id IN' => $invoiceIds, 'event_type IN' => self::INVOICE_WIDE_EVENTS],
+                ]])
+                ->all()->toList();
+        }
+
+        $actorIds = array_values(array_unique(array_filter(array_map(
+            fn($e) => $e->actor_id,
+            array_merge($reservationEvents, $invoiceEvents),
+        ))));
+        $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+        $actor = fn($e) => $e->actor_id !== null ? ($names[$e->actor_id] ?? null) : null;
+
+        $history = [];
+        foreach ($reservationEvents as $e) {
+            $history[] = [
+                'id' => 'reservation-event-' . $e->id,
+                'source' => 'reservation',
+                'event' => $e->event_type,
+                'at' => $e->occurred_at,
+                'actor' => $actor($e),
+                'recorded' => $e->source !== 'import',
+                'reason' => $e->reason,
+                'changes' => $e->changes,
+                'status_after' => $e->status_after,
+                'correlation_id' => $e->correlation_id,
+                '_order' => [$e->occurred_at?->getTimestamp() ?? 0, 0, (int)$e->id],
+            ];
+        }
+        foreach ($invoiceEvents as $e) {
+            $history[] = [
+                'id' => 'invoice-event-' . $e->id,
+                'source' => 'invoice',
+                'event' => $e->event_type,
+                'at' => $e->occurred_at,
+                'actor' => $actor($e),
+                'recorded' => $e->source !== 'import',
+                'reason' => $e->reason,
+                'invoice_id' => (int)$e->invoice_id,
+                'line' => $e->invoice_line_id !== null ? ($descriptions[$e->invoice_line_id] ?? null) : null,
+                'amount' => $e->amount !== null ? round((float)$e->amount, 2) : null,
+                'method' => $e->method,
+                'invoice_number' => $e->invoice_number,
+                'or_number' => $e->or_number,
+                'correlation_id' => $e->correlation_id,
+                '_order' => [$e->occurred_at?->getTimestamp() ?? 0, 1, (int)$e->id],
+            ];
+        }
+        // Oldest first; within one moment the reservation's own event leads.
+        usort($history, fn($a, $b) => $a['_order'] <=> $b['_order']);
+        $history = array_map(function (array $item): array {
+            unset($item['_order']);
+
+            return $item;
+        }, $history);
+
+        $this->set([
+            'reservation_id' => (int)$reservation->id,
+            'deleted' => $reservation->deleted_at !== null,
+            'history' => $history,
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['reservation_id', 'deleted', 'history']);
+    }
+
     /**
      * POST /api/reservations/{id}/payment  { payment_status: unpaid|paid }
      *
@@ -2010,7 +2151,7 @@ class ReservationsController extends AppController
         $reservations = $this->fetchTable('Reservations');
         $full = $reservations->get(
             $reservation->id,
-            contain: ['Rooms', 'Guests', 'Receptionist', 'ReservationDiscounts', 'ReservationExtraCharges'],
+            contain: self::RESERVATION_CONTAIN,
         );
         $full->set('quote', $reservations->quote($full, $this->resolveBaseRate((int)$full->property_id, $full->room_id)));
         $chargeInvoice = $this->roomChargeStatuses([(int)$full->id])[(int)$full->id] ?? null;

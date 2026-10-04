@@ -96,6 +96,11 @@ its first 8 characters as the **Reference** on error alerts.
     cash movement (`collected` = cash in, `invoices`/`pos` its parts, `net` = Net Collected).
     `pos.trend` and `pos.today.paid` are paid sales net of POS refunds.
   - Every aggregate is summed in PHP from plain row fetches (no `GROUP BY`).
+- Feed lines of `type: reservation` (step 8): `event` (booked, walked_in, backdated, corrected,
+  discount_changed, checked_in, checked_out, cancelled, cancelled_after_payment, deleted; a plain
+  `edited` stays in the reservation's history), `reservation_id`, `guest`, `room`, dates, `reason`,
+  `recorded`, `backdated_entry`, `changed` (which discounts). `staff.members[].actions_today` counts
+  the distinct requests each person made today that recorded anything in any ledger.
 - `GET /api/operations/activity[?page=N]` (**Manager only**, own property; old `/api/reports/activity`) — the full feed behind the
   Dashboard's Staff card ("View all activity"): the same merged stock-movement + food-order
   events as `operations.activity`, newest first, 25 per page → `{activity, page, has_more}`.
@@ -222,6 +227,16 @@ its first 8 characters as the **Reference** on error alerts.
   `checked_in_at`/`checked_out_at` follow their dates, and a checked-in guest's room change moves
   the occupied flag. **400 for any status once the room charge's invoice is settled.** An edit that
   changes nothing is 400 ("Nothing to change") and records nothing (step 8).
+- `GET /api/reservations/{id}/history` (step 8) → `{reservation_id, deleted, history}`: the
+  reservation's timeline, oldest first — its `reservation_events` (`source: reservation`; `event`,
+  `at`, `actor`, `recorded` (false = imported from before step 8, actor unknown), `reason`,
+  `changes` before/after, `status_after`, `correlation_id`) and the invoice events of its money
+  (`source: invoice`: its lines, their reversals, the invoice's settlement and refunds; `amount`,
+  `line`, `method`, SI/OR numbers). Within one request the reservation event leads. Managers may
+  open a deleted reservation's history; anyone else gets 404.
+- `GET /api/reservations?deleted=only` — **Manager only** (403 otherwise): the read-only list of
+  soft-deleted reservations.
+- Embedded staff (`receptionist`, `last_receptionist`) carry `{id, name}` only (step 8).
 - `DELETE /api/reservations/{id}` `{reason}` — **admin only** (403), any status, **soft** (step 8):
   sets `deleted_at`, keeps the row, its `reservation_discounts` and extras, records `deleted` with
   the whole reservation; 404 afterwards. 400 without a reason, and once anything has been

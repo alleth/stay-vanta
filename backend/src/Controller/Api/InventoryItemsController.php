@@ -42,7 +42,7 @@ class InventoryItemsController extends AppController
         $query = $this->scopeToProperty(
             $items->find()
                 ->where(['InventoryItems.deleted_at IS' => null])
-                ->contain(['InventoryCategories', 'LastReceptionist'])
+                ->contain(['InventoryCategories', 'LastReceptionist' => self::USER_BRIEF])
                 ->orderBy(['InventoryItems.name' => 'ASC'])
         );
         // select() with explicit fields turns off the query's normal
@@ -90,7 +90,7 @@ class InventoryItemsController extends AppController
                 $kids = $this->scopeToProperty(
                     $items->find()
                         ->where(['InventoryItems.parent_id IN' => $parentIds, 'InventoryItems.deleted_at IS' => null])
-                        ->contain(['InventoryCategories', 'LastReceptionist'])
+                        ->contain(['InventoryCategories', 'LastReceptionist' => self::USER_BRIEF])
                         ->orderBy(['InventoryItems.name' => 'ASC'])
                 )->all();
                 foreach ($kids as $kid) {
@@ -119,7 +119,7 @@ class InventoryItemsController extends AppController
         $item = $this->scopeToProperty(
             $items->find()->where(['InventoryItems.id' => $id, 'InventoryItems.deleted_at IS' => null])
         )
-            ->contain(['InventoryCategories', 'LastReceptionist'])
+            ->contain(['InventoryCategories', 'LastReceptionist' => self::USER_BRIEF])
             ->firstOrFail();
 
         $this->set('item', $item);

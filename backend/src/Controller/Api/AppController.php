@@ -31,6 +31,13 @@ use Cake\Utility\Text;
  */
 class AppController extends Controller
 {
+    /**
+     * How a staff member is embedded in another record (who placed a sale,
+     * last touched a reservation or moved stock): id and display name only,
+     * never the account's other fields (build step 8).
+     */
+    protected const USER_BRIEF = ['fields' => ['id', 'name']];
+
     protected ?User $currentUser = null;
 
     /**

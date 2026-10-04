@@ -393,4 +393,105 @@ class ReservationEventsApiTest extends TestCase
             'correlation_id' => $requestId, 'event_type' => 'line_added',
         ]), 'the room charge posted by the check-out shares its request id');
     }
+
+    // ---- Part 2: timeline, feed, staff actions, the Deleted view ---------
+
+    public function testTheTimelineShowsTheReservationAndItsMoneyInOrder(): void
+    {
+        $this->callAs($this->deskToken, 'POST', '/api/reservations', [
+            'room_id' => $this->roomId, 'source' => 'walk_in', 'guest_name' => 'Timeline Guest', 'check_out' => $this->day(1),
+        ]);
+        $id = (int)$this->responseJson()['reservation']['id'];
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/check-out");
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $checkOutRequest = $this->_response->getHeaderLine('X-Request-Id');
+        $invoiceId = (int)$this->getTableLocator()->get('InvoiceLines')->find()
+            ->where(['source_type' => 'reservation', 'source_id' => $id])->firstOrFail()->invoice_id;
+        $this->callAs($this->deskToken, 'POST', "/api/invoices/$invoiceId/settle");
+        $this->assertResponseOk();
+
+        $this->callAs($this->deskToken, 'GET', "/api/reservations/$id/history");
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $body = $this->responseJson();
+        $this->assertSame($id, $body['reservation_id']);
+        $this->assertFalse($body['deleted']);
+        $timeline = array_map(fn($h) => $h['source'] . ':' . $h['event'], $body['history']);
+        $this->assertSame(
+            ['reservation:walked_in', 'reservation:checked_out', 'invoice:line_added', 'invoice:settled'],
+            array_values(array_filter($timeline, fn($t) => $t !== 'invoice:opened')),
+            'its own events and its money, oldest first; within the check-out, the reservation event leads',
+        );
+        $byEvent = array_column($body['history'], null, 'event');
+        $this->assertStringContainsString('resv-desk', (string)$byEvent['walked_in']['actor']);
+        $this->assertTrue($byEvent['walked_in']['recorded']);
+        $this->assertSame($checkOutRequest, $byEvent['checked_out']['correlation_id']);
+        $this->assertSame($checkOutRequest, $byEvent['line_added']['correlation_id'], 'one action, one request id');
+        $this->assertEquals(1000, $byEvent['line_added']['amount']);
+        $this->assertNotNull($byEvent['line_added']['line']);
+    }
+
+    public function testDeletedReservationsAreAManagersReadOnlyView(): void
+    {
+        $id = $this->booking($this->roomId);
+        $this->callAs($this->adminToken, 'DELETE', "/api/reservations/$id", ['reason' => 'Duplicate booking']);
+        $this->assertResponseOk();
+
+        $this->callAs($this->adminToken, 'GET', '/api/reservations?deleted=only');
+        $this->assertResponseOk();
+        $this->assertSame([$id], array_map('intval', array_column($this->responseJson()['reservations'], 'id')));
+        $this->callAs($this->deskToken, 'GET', '/api/reservations?deleted=only');
+        $this->assertResponseCode(403);
+
+        $this->callAs($this->adminToken, 'GET', "/api/reservations/$id/history");
+        $this->assertResponseOk();
+        $this->assertTrue($this->responseJson()['deleted']);
+        $this->assertSame(['booked', 'deleted'], array_column($this->responseJson()['history'], 'event'));
+        $this->assertSame('Duplicate booking', $this->responseJson()['history'][1]['reason']);
+        $this->callAs($this->deskToken, 'GET', "/api/reservations/$id/history");
+        $this->assertResponseCode(404, 'Front Desk Staff never see a deleted reservation');
+    }
+
+    public function testReservationEventsJoinTheActivityFeed(): void
+    {
+        $id = $this->booking($this->roomId);
+        $this->callAs($this->deskToken, 'PATCH', "/api/reservations/$id", ['total_guests' => 2]);
+        $this->callAs($this->deskToken, 'PATCH', "/api/reservations/$id", ['discount_amount' => 150, 'reason' => 'Referred by a regular']);
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/check-in");
+        $this->assertResponseOk();
+
+        $this->callAs($this->adminToken, 'GET', '/api/operations/activity');
+        $this->assertResponseOk();
+        $lines = array_values(array_filter(
+            $this->responseJson()['activity'],
+            fn($e) => $e['type'] === 'reservation' && $e['reservation_id'] === $id,
+        ));
+        $this->assertSame(['checked_in', 'discount_changed', 'booked'], array_column($lines, 'event'), 'newest first; a plain edit stays out');
+        $this->assertSame('E-1', $lines[0]['room']);
+        $this->assertStringContainsString('resv-desk', (string)$lines[0]['actor']);
+        $this->assertSame('Referred by a regular', $lines[1]['reason']);
+        $this->assertContains('discount_amount', $lines[1]['changed']);
+    }
+
+    public function testStaffActionsCountEveryRequestOnceAcrossLedgers(): void
+    {
+        $id = $this->booking($this->roomId);
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/check-in");
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/check-out");
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$id/check-out"); // refused: records nothing
+
+        $this->callAs($this->adminToken, 'GET', '/api/operations/today');
+        $this->assertResponseOk();
+        $members = array_column($this->responseJson()['operations']['staff']['members'], null, 'id');
+        $this->assertSame(3, $members[$this->userIdFor($this->deskToken)]['actions_today'], 'book, check in, check out');
+        $this->assertSame(0, $members[$this->userIdFor($this->adminToken)]['actions_today']);
+    }
+
+    public function testEmbeddedStaffCarryOnlyTheirName(): void
+    {
+        $this->booking($this->roomId);
+        $this->callAs($this->adminToken, 'GET', '/api/reservations?limit=25');
+        $this->assertResponseOk();
+        $receptionist = $this->responseJson()['reservations'][0]['receptionist'];
+        $this->assertSame(['id', 'name'], array_keys($receptionist), 'no token expiry or other account fields');
+    }
 }

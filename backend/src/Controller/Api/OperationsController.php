@@ -5,9 +5,10 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
-use App\Model\Finance\Collections;
 use App\Model\Entity\Reservation;
+use App\Model\Finance\Collections;
 use App\Model\Table\InvoiceEventsTable;
+use App\Model\Table\ReservationEventsTable;
 use Cake\Http\Exception\BadRequestException;
 
 /**
@@ -35,6 +36,24 @@ class OperationsController extends AppController
         InvoiceEventsTable::REFUND_RECORDED,
         InvoiceEventsTable::REFUNDED,
         InvoiceEventsTable::REFUNDED_ON_CANCEL,
+    ];
+
+    /**
+     * Reservation events shown in the activity feed (build step 8): the
+     * lifecycle and discount changes. A plain `edited` stays in the
+     * reservation's own history (R5).
+     */
+    private const FEED_RESERVATION_EVENTS = [
+        ReservationEventsTable::BOOKED,
+        ReservationEventsTable::WALKED_IN,
+        ReservationEventsTable::BACKDATED,
+        ReservationEventsTable::CORRECTED,
+        ReservationEventsTable::DISCOUNT_CHANGED,
+        ReservationEventsTable::CHECKED_IN,
+        ReservationEventsTable::CHECKED_OUT,
+        ReservationEventsTable::CANCELLED,
+        ReservationEventsTable::CANCELLED_AFTER_PAYMENT,
+        ReservationEventsTable::DELETED,
     ];
 
     /** The trailing window for the sales trend, top sellers and most-used stock. */
@@ -494,10 +513,13 @@ class OperationsController extends AppController
     }
 
     /**
-     * Active staff accounts and how many ledgered actions each took today.
-     * Only rows that carry a true per-action actor count: stock movements and
-     * food orders. (A reservation's receptionist_id is re-stamped on every
-     * edit and transition, so it can't say who did what, when.)
+     * Active staff accounts and how many actions each took today: the
+     * distinct requests they made that recorded anything in any ledger
+     * (activity_index: stock, POS sales, invoices and, since step 8,
+     * reservations). One action is one request, however many events it
+     * wrote: a sale that moves three stock items, or a check-out that posts
+     * its room charge, counts once. Imported history has no actor and never
+     * counts.
      */
     private function staffSummary(int $propertyId, string $dayStart, string $dayEnd): array
     {
@@ -508,18 +530,21 @@ class OperationsController extends AppController
             ->disableHydration()
             ->all();
 
-        $actions = [];
-        foreach (['StockMovements', 'FoodOrders'] as $table) {
-            $rows = $this->fetchTable($table)->find()
-                ->select(['receptionist_id'])
-                ->where(['property_id' => $propertyId, 'created >=' => $dayStart, 'created <' => $dayEnd])
-                ->disableHydration()
-                ->all();
-            foreach ($rows as $row) {
-                $id = (int)$row['receptionist_id'];
-                $actions[$id] = ($actions[$id] ?? 0) + 1;
-            }
+        $requests = [];
+        $rows = $this->fetchTable('ActivityIndex')->find()
+            ->select(['actor_id', 'correlation_id'])
+            ->where([
+                'property_id' => $propertyId,
+                'actor_id IS NOT' => null,
+                'occurred_at >=' => $dayStart,
+                'occurred_at <' => $dayEnd,
+            ])
+            ->disableHydration()
+            ->all();
+        foreach ($rows as $row) {
+            $requests[(int)$row['actor_id']][(string)$row['correlation_id']] = true;
         }
+        $actions = array_map('count', $requests);
 
         $list = [];
         foreach ($users as $u) {
@@ -595,6 +620,7 @@ class OperationsController extends AppController
                     ['event_table' => 'stock_movements'],
                     ['event_table' => 'food_order_events', 'event_type IN' => ['placed', 'refunded']],
                     ['event_table' => 'invoice_events', 'event_type IN' => self::FEED_INVOICE_EVENTS],
+                    ['event_table' => 'reservation_events', 'event_type IN' => self::FEED_RESERVATION_EVENTS],
                 ],
             ])
             ->orderBy(['occurred_at' => 'DESC'])
@@ -617,7 +643,12 @@ class OperationsController extends AppController
         $orderIds = [];
         $invoiceEventIds = [];
         $saleRefundIds = [];
+        $reservationEventIds = [];
         foreach ($rows as $row) {
+            if ($row['event_table'] === 'reservation_events') {
+                $reservationEventIds[] = (int)$row['event_id'];
+                continue;
+            }
             if ($row['event_table'] === 'stock_movements') {
                 $movementIds[] = (int)$row['event_id'];
             } elseif ($row['event_table'] === 'food_order_events' && $row['event_type'] === 'refunded') {
@@ -630,17 +661,18 @@ class OperationsController extends AppController
         }
         $invoiceLines = $this->invoiceFeedLines($invoiceEventIds);
         $saleRefundLines = $this->saleRefundFeedLines($saleRefundIds);
+        $reservationLines = $this->reservationFeedLines($reservationEventIds);
         $movements = $movementIds === [] ? [] : $this->fetchTable('StockMovements')->find()
             ->contain([
                 'InventoryItems' => ['fields' => ['id', 'name', 'unit']],
-                'Receptionist' => ['fields' => ['id', 'name']],
+                'Receptionist' => self::USER_BRIEF,
             ])
             ->where(['StockMovements.id IN' => $movementIds])
             ->all()
             ->indexBy('id')
             ->toArray();
         $orders = $orderIds === [] ? [] : $this->fetchTable('FoodOrders')->find()
-            ->contain(['Rooms' => ['fields' => ['id', 'room_number']], 'Receptionist' => ['fields' => ['id', 'name']]])
+            ->contain(['Rooms' => ['fields' => ['id', 'room_number']], 'Receptionist' => self::USER_BRIEF])
             ->where(['FoodOrders.id IN' => $orderIds])
             ->all()
             ->indexBy('id')
@@ -662,6 +694,12 @@ class OperationsController extends AppController
                         'unit' => $m->inventory_item?->unit,
                         'reason' => $m->reason,
                     ];
+                }
+                continue;
+            }
+            if ($row['event_table'] === 'reservation_events') {
+                if (isset($reservationLines[(int)$row['event_id']])) {
+                    $events[] = $reservationLines[(int)$row['event_id']];
                 }
                 continue;
             }
@@ -775,6 +813,51 @@ class OperationsController extends AppController
                 'amount' => round(-(float)$e->amount, 2),
                 'method' => $e->method,
                 'reason' => $e->reason,
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Feed lines for reservation events (build step 8): what happened, when,
+     * who (null and `recorded: false` for history imported from before step
+     * 8, never a guess), the guest and room as the event recorded them, the
+     * reason, and for a discount change which discounts changed.
+     *
+     * @param list<int> $eventIds reservation_events ids on this page.
+     * @return array<int, array<string, mixed>> Feed line per event id.
+     */
+    private function reservationFeedLines(array $eventIds): array
+    {
+        if ($eventIds === []) {
+            return [];
+        }
+        $events = $this->fetchTable('ReservationEvents')->find()->where(['id IN' => $eventIds])->all()->toList();
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($e) => $e->actor_id, $events))));
+        $actors = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        $lines = [];
+        foreach ($events as $e) {
+            $snapshot = (array)$e->snapshot;
+            $changes = (array)$e->changes;
+            $lines[(int)$e->id] = [
+                'type' => 'reservation',
+                'id' => 'reservation-event-' . $e->id,
+                'at' => $e->occurred_at,
+                'actor' => $e->actor_id !== null ? ($actors[$e->actor_id] ?? null) : null,
+                'recorded' => $e->source !== 'import',
+                'event' => $e->event_type,
+                'reservation_id' => (int)$e->reservation_id,
+                'guest' => $snapshot['guest_name'] ?? null,
+                'room' => $snapshot['room'] ?? $snapshot['room_at_import'] ?? null,
+                'check_in' => $snapshot['check_in'] ?? null,
+                'check_out' => $snapshot['check_out'] ?? null,
+                'reason' => $e->reason,
+                'backdated_entry' => !empty($changes['backdated_entry']),
+                'changed' => $e->event_type === ReservationEventsTable::DISCOUNT_CHANGED
+                    ? array_keys($changes) : null,
             ];
         }
 
