@@ -109,6 +109,14 @@ Carry these into steps 6–10:
 
 ## Smaller items
 
+- [ ] **Staging database sleeps when idle (observed 2026-10-04, not a blocker).** Railway stops the
+  staging MySQL container about 10 minutes after its last activity ("Received SHUTDOWN from user
+  <via user signal>") and wakes it on the next request, which takes about 45 s; requests in that
+  window get 500 "MySQL server has gone away". It cost one false alarm during the 7c-1 check (every
+  money endpoint 500, rerun clean once MySQL was ready). Either turn off sleeping for the staging
+  MySQL service, or before a staging comparison wake it and wait for "ready for connections" in its
+  log. Production has shown no sleeping.
+
 - [ ] **Staff accounts can name a property that doesn't exist.** `POST /api/users` as the Platform
   Owner accepts any `property_id` (found 2026-10-03: a timed-out property creation left
   `property_id` 0 in a script, and two staging accounts were created bound to it; they're
