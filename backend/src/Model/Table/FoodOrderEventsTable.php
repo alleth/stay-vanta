@@ -22,10 +22,16 @@ class FoodOrderEventsTable extends Table
     public const CANCELLED = 'cancelled';
     /** A served and paid sale reversed: pos.sale.cancel_paid, with a reason. */
     public const CANCELLED_AFTER_PAYMENT = 'cancelled_after_payment';
+    /**
+     * Money returned for a paid sale when it's cancelled ("Was money returned
+     * to the guest?" yes), with the cancellation's reason and the method
+     * (build step 7c, written from 7c-2). Cancelling and refunding are separate.
+     */
+    public const REFUNDED = 'refunded';
 
-    public const TYPES = [self::PLACED, self::SERVED, self::CANCELLED, self::CANCELLED_AFTER_PAYMENT];
+    public const TYPES = [self::PLACED, self::SERVED, self::CANCELLED, self::CANCELLED_AFTER_PAYMENT, self::REFUNDED];
 
-    public const REQUIRES_REASON = [self::CANCELLED_AFTER_PAYMENT];
+    public const REQUIRES_REASON = [self::CANCELLED_AFTER_PAYMENT, self::REFUNDED];
 
     /**
      * Accepted without a reason until the compatibility window closes (the

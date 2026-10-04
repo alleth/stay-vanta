@@ -32,6 +32,19 @@ class InvoiceEventsTable extends Table
      * refund line on the downpayment invoice.
      */
     public const REFUND_RECORDED = 'refund_recorded';
+    /**
+     * Money returned against a settled invoice by a Manager
+     * (finance.invoice.refund), with a reason and method; never a line, never
+     * a change to the invoice (build step 7c, written from 7c-2).
+     */
+    public const REFUNDED = 'refunded';
+    /**
+     * The downpayment refund when an advance booking is cancelled (the
+     * policy share, recorded in `changes`), with its method (from 7c-2).
+     */
+    public const REFUNDED_ON_CANCEL = 'refunded_on_cancel';
+    /** Cash out: what Collections counts as Refunded. */
+    public const REFUND_TYPES = [self::REFUNDED, self::REFUNDED_ON_CANCEL];
 
     public const TYPES = [
         self::OPENED,
@@ -41,9 +54,11 @@ class InvoiceEventsTable extends Table
         self::SETTLED,
         self::SETTLED_ON_CREATION,
         self::REFUND_RECORDED,
+        self::REFUNDED,
+        self::REFUNDED_ON_CANCEL,
     ];
 
-    public const REQUIRES_REASON = [self::LINE_REVERSED];
+    public const REQUIRES_REASON = [self::LINE_REVERSED, self::REFUNDED];
 
     public const REASON_GRACE = [];
 

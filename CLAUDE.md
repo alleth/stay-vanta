@@ -485,6 +485,9 @@ would make the key attacker-controlled.
 - **One calculation: `App\Model\Finance\Collections`** (build step 7a) — `collected($from, $to)`,
   `collectedOn($day)`, `byPeriod()`, `settledInvoices()`, `paidSales()`, `outstanding()`. Finance
   and Operations read every Collected/Outstanding figure from it; never write a second money query.
+  **7c-1:** `cashMovement()` / `cashIn()` / `refunded()` (cash in, cash out, net, each on the day
+  the money moved) exist beside them but no report reads them until 7c-2; `App\Model\Finance\Restatement`
+  (`bin/cake cash_restatement`) lists what the switch changes.
   `CollectionsEquivalenceTest` holds it to the pre-7a queries (retire that reference deliberately
   when step 7b changes the meaning; don't edit it to match).
 - **Hotel revenue = collected**: Σ settled `invoices.total` (by `settled_at`, stamped in

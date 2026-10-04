@@ -108,7 +108,7 @@ records its own `redacted` event; it's the only sanctioned change to a ledger ro
 
 ### food_order_events (`FoodOrderEvents`)
 
-POS sales. Subject `food_order_id`; activity subject `food_order`. Typed column: `amount`.
+POS sales. Subject `food_order_id`; activity subject `food_order`. Typed columns: `amount`, `method` (refunds).
 
 | Event type | Requires reason | Reason grace | Recorded when |
 |---|---|---|---|
@@ -116,6 +116,7 @@ POS sales. Subject `food_order_id`; activity subject `food_order`. Typed column:
 | `served` | | | An open sale is served |
 | `cancelled` | | | A sale is cancelled, other than below |
 | `cancelled_after_payment` | yes | yes | A served and paid sale is cancelled (`pos.sale.cancel_paid`) |
+| `refunded` | yes | | Money is returned for a paid sale on its cancellation ("Was money returned?" yes): `amount` negative, `method`. Written from step 7c-2 |
 
 Grace for `cancelled_after_payment` ends in the cleanup release after step 5.
 
@@ -149,7 +150,7 @@ on each write, so the columns stay nullable in the schema while new writes can't
 ### invoice_events (`InvoiceEvents`)
 
 Finance: invoices (build step 6). Subject `invoice_id`; activity subject `invoice`. Typed columns:
-`amount`, `total_after`, `invoice_line_id`, `invoice_number`, `or_number`. Snapshot: guest id and
+`amount`, `method` (refunds), `total_after`, `invoice_line_id`, `invoice_number`, `or_number`. Snapshot: guest id and
 display name, reservation, status, total. Recorded only by `InvoicesTable`, each change locked
 (`FOR UPDATE`), checked, made and recorded in one transaction.
 
@@ -161,7 +162,9 @@ display name, reservation, status, total. Recorded only by `InvoicesTable`, each
 | `line_reversed_on_cancel` | | | A line's source was cancelled (a sale, a reservation's charges) |
 | `settled` | | | An invoice is settled, once; carries the SI/OR numbers |
 | `settled_on_creation` | | | An invoice created settled (an advance booking's downpayment) |
-| `refund_recorded` | | | The one permitted change to a settled invoice: a downpayment refund on cancellation |
+| `refund_recorded` | | | The one permitted change to a settled invoice: a downpayment refund on cancellation. No longer written from step 7c-2 |
+| `refunded` | yes | | A Manager returns money against a settled invoice (`finance.invoice.refund`): `amount` negative, `method`; the invoice is untouched. Written from step 7c-2 |
+| `refunded_on_cancel` | | | The downpayment refund when an advance booking is cancelled (policy in `changes`): `amount` negative, `method`. Written from step 7c-2 |
 
 Rules (decided 2026-10-03):
 - **Lines are never deleted.** A reversed line stays, answered by a negative line with

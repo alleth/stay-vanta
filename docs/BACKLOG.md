@@ -77,11 +77,17 @@ downpayment refund on cancelling an advance booking adds a negative line to the 
 settled invoice (recorded as `refund_recorded` in `invoice_events`). Its effect is that the refund
 lowers Collected on the day the downpayment was collected, not the day the money went back.
 
-Evaluate together, with updated pinned figures (`CollectionFiguresApiTest`):
-- [ ] Refunds as money out on the day they happen (a refund record instead of a line on the
-  settled invoice), ending the exception.
-- [ ] Credit notes and adjustments after settlement (BIR rules, SI/OR booklets).
-- [ ] What "Collected" means for each, and how Finance reports show them.
+**Decided 2026-10-03 (7b review, D1–D8):** Collected = cash in, Refunded = cash out, Net Collected
+= the difference, each on the day the money moved; refunds are their own events (ending the
+exception); pre-7c downpayment refunds restated once to their own day; cancelled paid POS sales
+with no refund on record stay collected; refund method recorded; no backdating. Manager refunds
+on settled invoices (`finance.invoice.refund`) approved as S1.
+- [x] 7a: one shared calculation (`App\Model\Finance\Collections`), figures unchanged.
+- [ ] 7c-1: `method` columns, the cash-movement calculation beside today's, the restatement list
+  logged on deploy (`bin/cake cash_restatement`). No figure changes.
+- [ ] 7c-2: the switch (refund events, UI, reports), `APP_COLLECTED_MODEL=cash|historical` for
+  one release.
+- [ ] Deferred: credit notes (need a credit-memo booklet series) and voids (not built).
 
 ## Findings from the event foundation (step 5, decided 2026-10-03)
 
