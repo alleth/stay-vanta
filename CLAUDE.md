@@ -140,8 +140,11 @@ housekeeping, expenses, time keeping and configuration.
 **Today:** inventory (`stock_movements`), POS sales (`food_order_events`, step 5) and invoices
 (`invoice_events`, step 6, in production 2026-10-03; history from before is imported with no actor)
 meet it; reservations (`reservation_events`, soft delete) since step 8. `reservations.receptionist_id`
-is legacy ("last touched by", still stamped for one release, never the actor). Known gap: rate,
-promo, charge and menu-price changes record nobody (step 9).
+is legacy ("last touched by", still stamped for one release, never the actor). Configuration
+(`config_changes`, step 9, in production 2026-10-05, `b6ecca2`; rows from before carry one
+`baseline_recorded` with no actor). Known gaps: user accounts, roles and sign-ins (step 10,
+`access_events`); inventory item details (name, unit, category, threshold: only stock movements
+are ledgered); guest record edits; room status changes (future Rooms module, `room_events`).
 
 **Event recording standard** (all new ledgers; the shared foundation is build step 5):
 - **Tables:** `<subject>_events` (`reservation_events`, `invoice_events`, `food_order_events`,

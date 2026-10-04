@@ -147,6 +147,19 @@ Carry these into steps 6–10:
   leave them; add `existsIn` rules. Lesson for every data migration: a failure blocks the boot, so
   a backfill must report an unexpected row, not throw on it.
 
+- [ ] **Step 9 follow-ups (in production 2026-10-05, `b6ecca2`).**
+  - Production's baseline took 61 s for 186 rows (about a third of a second per row through the
+    public database proxy), and the API doesn't answer until migrations finish: the first request
+    after the deploy waited 24 s. Before a larger backfill runs on boot, batch its inserts (one
+    multi-row insert per table) or move it to a command run after the deploy; private networking
+    (below) would also help.
+  - Bookings made before the release have no fixed rate: they follow the live room rate until
+    their room charge is posted, and their price view says so. Nothing to do; it ends as they're
+    billed.
+  - Not yet audited: inventory item details (name, unit, category, low-stock threshold, tracking
+    type, soft delete), guest record edits, and room status changes. Each needs its own owner's
+    ledger (Inventory; Guests; the future Rooms module).
+
 - [ ] **A cancelled stay's invoice stays open at ₱0** and counts in the Outstanding *count*
   (the amount is right). Seen in step 9 QA: a walk-in's room charge posted, then the stay cancelled
   (reversed). Decide whether a fully reversed invoice should close or be left out of the count.
