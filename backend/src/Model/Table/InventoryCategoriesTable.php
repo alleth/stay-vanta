@@ -18,6 +18,12 @@ class InventoryCategoriesTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'inventory_category',
+            'defaultImpact' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+            'softDelete' => true,
+        ]);
 
         $this->setTable('inventory_categories');
         $this->setDisplayField('name');

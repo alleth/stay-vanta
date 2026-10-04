@@ -55,7 +55,7 @@ class RoomsController extends AppController
             'status' => $this->request->getData('status') ?? 'available',
         ]);
 
-        if (!$rooms->save($room)) {
+        if (!$rooms->save($room, $this->auditOptions())) {
             $this->validationFailed($room->getErrors());
 
             return;
@@ -93,7 +93,7 @@ class RoomsController extends AppController
             'status' => $this->request->getData('status'),
         ], ['accessibleFields' => ['property_id' => false]]);
 
-        if (!$rooms->save($room)) {
+        if (!$rooms->save($room, $this->auditOptions())) {
             $this->validationFailed($room->getErrors());
 
             return;
@@ -106,7 +106,8 @@ class RoomsController extends AppController
     /**
      * DELETE /api/rooms/{id} — owner/admin only, for removing a room created
      * with wrong details. Refused if the room has reservation history (that data
-     * must be preserved); any room-specific rates are removed with it.
+     * must be preserved). Soft-deleted (step 9): the room and its rates stay
+     * as history, hidden from lists.
      */
     public function delete(int $id): void
     {
@@ -123,9 +124,9 @@ class RoomsController extends AppController
             throw new BadRequestException('Cannot delete a room that has reservations. Set it to maintenance instead.');
         }
 
-        $rooms->getConnection()->transactional(function () use ($rooms, $room, $id): void {
-            $this->fetchTable('RoomRates')->deleteAll(['room_id' => $id]);
-            $rooms->deleteOrFail($room);
+        $rooms->getConnection()->transactional(function () use ($rooms, $room): void {
+            // Soft delete with a reason (step 9): the room and its rates stay as history.
+            $this->softDelete($rooms, $room);
         });
 
         $this->set('ok', true);

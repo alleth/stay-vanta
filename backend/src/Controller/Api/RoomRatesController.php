@@ -55,7 +55,7 @@ class RoomRatesController extends AppController
             'base_rate' => $this->request->getData('base_rate'),
         ]);
 
-        if (!$rates->save($rate)) {
+        if (!$rates->save($rate, $this->auditOptions())) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $rate->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);
@@ -87,7 +87,7 @@ class RoomRatesController extends AppController
             'room_id' => $this->request->getData('room_id') ?: null,
         ], ['accessibleFields' => ['property_id' => false]]);
 
-        if (!$rates->save($rate)) {
+        if (!$rates->save($rate, $this->auditOptions(true))) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $rate->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);

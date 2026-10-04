@@ -16,6 +16,18 @@ the browser via CORS). The same id prefixes the request's server log lines (`[re
 access-log line (`req:<id>`) and is the `correlation_id` of every event it records. The SPA shows
 its first 8 characters as the **Reference** on error alerts.
 
+## Configuration changes (build step 9)
+
+Every write to a configuration row — room rates, promo rates, booking sources, extra charges,
+rooms, receipt booklets, menu items (with recipe and options), inventory categories, property
+records — records one `config_changes` row (who, role, reason, before/after, impact: `price`,
+`booking`, `operational`, `administrative`; see `docs/EVENTS.md`). On those endpoints:
+- changing a **price** (a room rate, promo multiplier, extra-charge amount, menu or option price,
+  subscription fee) needs `reason` (400 without; nothing saved);
+- **deleting** needs `reason` and is a soft delete (the row is kept, hidden from lists);
+- an edit that changes nothing is 400 "Nothing to change" (rooms excepted: their edits include
+  occupancy status, which is operational and not audited).
+
 ## Auth
 - `POST /api/auth/login` (public) · `GET /api/auth/me` · `POST /api/auth/logout`
 - The `user` object both login and `me` return carries `permissions`: the sorted list of

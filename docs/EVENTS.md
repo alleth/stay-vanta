@@ -233,9 +233,48 @@ Rules (decided 2026-10-04):
   `backdated_entry`. Edits, corrections, discount changes and deletions before step 8 were never
   recorded and aren't imported; a reservation with no `created` is left out and counted.
 
+### config_changes (`ConfigChanges`)
+
+Configuration (build step 9, approved 2026-10-04 as C1–C9 plus impact classes). One shared ledger
+for every configuration table: room rates, promo rates, booking sources, extra charges, rooms,
+receipt booklets, menu items (with their recipe and options), inventory categories, property
+records. Subject `entity_id` with `entity_type` (`room_rate`, `promo_rate`, `booking_source`,
+`extra_charge`, `room`, `receipt_series`, `menu_item`, `inventory_category`, `property`); the
+activity-index row's subject type is the entity type. Typed columns: `entity_type`, `entity_id`,
+`impact`. `changes`: `{after: …}` on creation, `{before: …}` on deletion, `{field: {before,
+after}}` on an update (a menu item's `recipe`, `options` and `option_prices` included). Snapshot:
+`{label}` (the row's name, room number, source…). Written only by `ConfigAuditBehavior`, inside the
+save's own transaction.
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `created` | | | A configuration row is added |
+| `updated` | | | Audited fields change; **a reason is required when the impact is `price`** (enforced by `ConfigAuditBehavior`) |
+| `deleted` | yes | | A row is soft-deleted (`deleted_at`): every value kept |
+| `baseline_recorded` | | | Import: the row as it stood when the audit began (no actor) |
+
+Impact classes (highest of the changed fields; a creation or deletion takes the entity's own):
+`price` (feeds a price: room rate, promo multiplier and its source/room, extra-charge amount, menu
+and option prices, subscription fee) > `booking` (what can be booked: rooms, booking sources, a
+charge switched on or off) > `operational` (how the property runs: room number and type, rate
+descriptions, menu names, recipes and availability, subscription status) > `administrative`
+(names and records: receipt booklets, inventory categories, labels).
+
+Rules (decided 2026-10-04):
+- **No actor, no save:** a save that changes an audited field must carry `eventContext` (jobs and
+  auto-seeding pass a system context: the built-in early check-in charge is recorded with
+  `source: system`). Ignored fields are operational and need none: a room's `status` (the future
+  Rooms module, C5) and a receipt booklet's `next_number` (usage).
+- **Soft delete only** (C3): a hard delete is refused; deleted rows are hidden from top-level
+  queries unless `withDeleted`, but still load through associations (a reservation keeps its
+  deleted room's number). No restore.
+- **No empty change:** an edit that changes nothing is refused ("Nothing to change") and records
+  nothing.
+- **Side effects are their own changes, in the same request:** a booking source created by a
+  promo-rate save; each sub-category detached when its parent category is deleted.
+
 ## Planned
 
 | Ledger | Build step |
 |---|---|
-| `config_changes` (ConfigAuditBehavior) | 9 |
 | `access_events` | 10 |

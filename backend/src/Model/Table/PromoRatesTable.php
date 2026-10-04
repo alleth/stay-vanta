@@ -19,6 +19,18 @@ class PromoRatesTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'promo_rate',
+            'defaultImpact' => ConfigChangesTable::IMPACT_PRICE,
+            'impacts' => [
+                'multiplier' => ConfigChangesTable::IMPACT_PRICE,
+                'source' => ConfigChangesTable::IMPACT_PRICE,
+                'room_id' => ConfigChangesTable::IMPACT_PRICE,
+            ],
+            'labelFields' => ['source'],
+            'softDelete' => true,
+        ]);
 
         $this->setTable('promo_rates');
         $this->setDisplayField('source');

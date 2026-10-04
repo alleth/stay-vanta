@@ -83,7 +83,7 @@ class ReceiptSeriesController extends AppController
         $entity->set('next_number', (int)$start);
         $entity->set('pad_length', strlen($start));
 
-        if (!$table->save($entity)) {
+        if (!$table->save($entity, $this->auditOptions())) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $entity->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);
@@ -111,7 +111,7 @@ class ReceiptSeriesController extends AppController
         if ($active !== null) {
             $series->set('is_active', (bool)$active);
         }
-        $table->saveOrFail($series);
+        $table->saveOrFail($series, $this->auditOptions(true));
 
         $this->set('series', $series);
         $this->viewBuilder()->setOption('serialize', ['series']);
@@ -139,7 +139,8 @@ class ReceiptSeriesController extends AppController
             );
         }
 
-        $table->deleteOrFail($series);
+        // Soft delete with a reason (step 9).
+        $this->softDelete($table, $series);
 
         $this->set('ok', true);
         $this->viewBuilder()->setOption('serialize', ['ok']);

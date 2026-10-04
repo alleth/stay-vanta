@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Model\Table;
 
+use App\Event\EventContext;
 use Cake\ORM\Table;
 use Cake\Validation\Validator;
 use InvalidArgumentException;
@@ -27,6 +28,15 @@ class BookingSourcesTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'booking_source',
+            'defaultImpact' => ConfigChangesTable::IMPACT_BOOKING,
+            'impacts' => [
+                'code' => ConfigChangesTable::IMPACT_BOOKING,
+                'name' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+            ],
+        ]);
 
         $this->setTable('booking_sources');
         $this->setDisplayField('name');
@@ -96,7 +106,7 @@ class BookingSourcesTable extends Table
      * @throws \InvalidArgumentException On a blank name or "Walk-in" (that's
      *   the fixed non-OTA constant, never a real row).
      */
-    public function resolveOrCreate(int $propertyId, string $name): string
+    public function resolveOrCreate(int $propertyId, string $name, EventContext $context): string
     {
         $name = trim($name);
         if ($name === '') {
@@ -120,7 +130,8 @@ class BookingSourcesTable extends Table
             'name' => $name,
             'code' => $this->slugFor($name, $propertyId),
         ]);
-        $this->saveOrFail($source);
+        // Recorded in config_changes with the promo-rate save's request (step 9).
+        $this->saveOrFail($source, ['eventContext' => $context]);
 
         return $source->code;
     }

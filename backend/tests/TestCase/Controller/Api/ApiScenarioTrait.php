@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
 
+use App\Event\EventContext;
 use App\Model\Table\UsersTable;
 use Cake\I18n\DateTime;
 
@@ -50,7 +51,7 @@ trait ApiScenarioTrait
      * test rows through the connection, the one place that may.
      */
     private const LEDGER_TABLES = [
-        'activity_index', 'food_order_events', 'stock_movements', 'invoice_events', 'reservation_events',
+        'activity_index', 'food_order_events', 'stock_movements', 'invoice_events', 'reservation_events', 'config_changes',
     ];
 
     protected function createProperty(string $name): int
@@ -59,7 +60,7 @@ trait ApiScenarioTrait
         $property = $properties->saveOrFail($properties->newEntity([
             'name' => $name,
             'subscription_status' => 'active',
-        ]));
+        ]), ['eventContext' => EventContext::system(null, 'test-fixture')]);
         $this->scenarioPropertyIds[] = (int)$property->id;
 
         return (int)$property->id;
@@ -154,7 +155,11 @@ trait ApiScenarioTrait
     {
         $repo = $this->getTableLocator()->get($table);
         $entity = $repo->newEntity($data, ['validate' => false, 'accessibleFields' => ['*' => true]]);
-        $repo->saveOrFail($entity, ['checkRules' => false]);
+        // Configuration rows are audited (step 9): fixtures are made by the system.
+        $repo->saveOrFail($entity, [
+            'checkRules' => false,
+            'eventContext' => EventContext::system($data['property_id'] ?? null, 'test-fixture'),
+        ]);
 
         return (int)$entity->id;
     }

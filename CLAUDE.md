@@ -186,6 +186,11 @@ promo, charge and menu-price changes record nobody (step 9).
   backdate, correction, cancellation after payment, discount override, void, reversal.
 - **Feed:** every ledger also writes one row to `activity_index` in the same transaction;
   Operations → Activity pages that one table.
+- **Configuration audit (step 9, built):** save configuration rows with
+  `$this->auditOptions()` (or `auditOptions(true)` on edits) and delete them with
+  `$this->softDelete()`; `ConfigAuditBehavior` refuses a save of an audited field without an
+  `eventContext`, a price change or deletion without a reason, and any hard delete. Fields it
+  ignores (`rooms.status`, `receipt_series.next_number`) are operational.
 - **Configuration audit** is a `ConfigAuditBehavior` on the configuration tables (room rates,
   promo rates, extra charges, rooms, booking sources, receipt series, menu items): it diffs changed
   fields and writes `config_changes`, and refuses to save without an actor. Audit follows the data,

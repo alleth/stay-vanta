@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Model\Table;
 
+use App\Event\EventContext;
 use App\Model\Entity\ExtraCharge;
 use Cake\ORM\Table;
 use Cake\Validation\Validator;
@@ -18,6 +19,18 @@ class ExtraChargesTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'extra_charge',
+            'defaultImpact' => ConfigChangesTable::IMPACT_PRICE,
+            'impacts' => [
+                'amount' => ConfigChangesTable::IMPACT_PRICE,
+                'is_active' => ConfigChangesTable::IMPACT_BOOKING,
+                'name' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+                'code' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+            ],
+            'softDelete' => true,
+        ]);
 
         $this->setTable('extra_charges');
         $this->setDisplayField('name');
@@ -64,7 +77,10 @@ class ExtraChargesTable extends Table
                 'amount' => 0,
                 'is_active' => true,
             ]);
-            $this->saveOrFail($charge);
+            // Created by the system, not by whoever opened the list (step 9).
+            $this->saveOrFail($charge, [
+                'eventContext' => EventContext::system($propertyId, 'seed-early-check-in'),
+            ]);
         }
 
         return $charge;

@@ -65,7 +65,7 @@ class InventoryCategoriesController extends AppController
             'parent_id' => $this->request->getData('parent_id'),
         ]);
 
-        if (!$categories->save($category)) {
+        if (!$categories->save($category, $this->auditOptions())) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $category->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);
@@ -100,8 +100,13 @@ class InventoryCategoriesController extends AppController
         }
 
         $categories->getConnection()->transactional(function () use ($categories, $category, $id): void {
-            $categories->updateAll(['parent_id' => null], ['parent_id' => $id]);
-            $categories->deleteOrFail($category);
+            // Each detached sub-category is its own recorded change (step 9).
+            foreach ($categories->find()->where(['parent_id' => $id])->all() as $child) {
+                $child->set('parent_id', null);
+                $categories->saveOrFail($child, $this->auditOptions());
+            }
+            // Soft delete with a reason (step 9).
+            $this->softDelete($categories, $category);
         });
 
         $this->set('ok', true);

@@ -17,6 +17,16 @@ class RoomRatesTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'room_rate',
+            'defaultImpact' => ConfigChangesTable::IMPACT_PRICE,
+            'impacts' => [
+                'base_rate' => ConfigChangesTable::IMPACT_PRICE,
+                'room_id' => ConfigChangesTable::IMPACT_PRICE,
+                'description' => ConfigChangesTable::IMPACT_OPERATIONAL,
+            ],
+        ]);
 
         $this->setTable('room_rates');
         $this->setDisplayField('id');

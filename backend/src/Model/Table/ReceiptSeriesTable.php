@@ -25,6 +25,15 @@ class ReceiptSeriesTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'receipt_series',
+            'defaultImpact' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+            // The running counter moves with every receipt issued: usage, not configuration.
+            'ignore' => ['next_number'],
+            'labelFields' => ['prefix', 'type'],
+            'softDelete' => true,
+        ]);
 
         $this->setTable('receipt_series');
         $this->setDisplayField('id');

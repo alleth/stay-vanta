@@ -61,7 +61,7 @@ class ExtraChargesController extends AppController
             'is_active' => (bool)($this->request->getData('is_active') ?? true),
         ]);
 
-        if (!$charges->save($charge)) {
+        if (!$charges->save($charge, $this->auditOptions())) {
             $this->validationFailed($charge->getErrors());
 
             return;
@@ -95,7 +95,7 @@ class ExtraChargesController extends AppController
 
         $charges->patchEntity($charge, $data, ['accessibleFields' => ['property_id' => false, 'code' => false]]);
 
-        if (!$charges->save($charge)) {
+        if (!$charges->save($charge, $this->auditOptions(true))) {
             $this->validationFailed($charge->getErrors());
 
             return;
@@ -120,7 +120,8 @@ class ExtraChargesController extends AppController
             throw new BadRequestException('The early check-in charge is built in and cannot be deleted.');
         }
 
-        $charges->deleteOrFail($charge);
+        // Soft delete with a reason (step 9).
+        $this->softDelete($charges, $charge);
 
         $this->set('deleted', true);
         $this->viewBuilder()->setOption('serialize', ['deleted']);

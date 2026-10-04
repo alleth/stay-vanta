@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
 
+use App\Event\EventContext;
 use App\Model\BusinessTime;
 use App\Model\Table\UsersTable;
 use Cake\I18n\DateTime;
@@ -28,6 +29,16 @@ class ReservationDiscountsApiTest extends TestCase
     use IntegrationTestTrait;
     use LocatorAwareTrait;
 
+    /**
+     * Save options for configuration fixtures: a system actor (build step 9).
+     *
+     * @return array<string, mixed>
+     */
+    private static function fixture(): array
+    {
+        return ['eventContext' => EventContext::system(null, 'test-fixture')];
+    }
+
     private int $propertyId;
     private int $roomId;
     private string $token;
@@ -41,7 +52,7 @@ class ReservationDiscountsApiTest extends TestCase
         $rates = $this->getTableLocator()->get('RoomRates');
         $users = $this->getTableLocator()->get('Users');
 
-        $property = $properties->saveOrFail($properties->newEntity(['name' => 'Discounts API Resort']));
+        $property = $properties->saveOrFail($properties->newEntity(['name' => 'Discounts API Resort']), self::fixture());
         $this->propertyId = (int)$property->id;
 
         $room = $rooms->saveOrFail($rooms->newEntity([
@@ -49,14 +60,14 @@ class ReservationDiscountsApiTest extends TestCase
             'room_number' => 'DISC-1',
             'room_type' => 'Deluxe',
             'status' => 'available',
-        ]));
+        ]), self::fixture());
         $this->roomId = (int)$room->id;
 
         $rates->saveOrFail($rates->newEntity([
             'property_id' => $this->propertyId,
             'room_id' => $this->roomId,
             'base_rate' => 1500.0,
-        ]));
+        ]), self::fixture());
 
         [$token, $digest] = UsersTable::issueToken();
         $this->token = $token;
@@ -109,6 +120,11 @@ class ReservationDiscountsApiTest extends TestCase
         foreach (['Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'Users'] as $name) {
             $this->getTableLocator()->get($name)->deleteAll(['property_id' => $this->propertyId]);
         }
+        // Ledger rows refuse ORM deletes: clear them through the connection.
+        $connection = $this->getTableLocator()->get('Properties')->getConnection();
+        foreach (['activity_index', 'config_changes', 'reservation_events', 'invoice_events'] as $ledger) {
+            $connection->delete($ledger, ['property_id' => $this->propertyId]);
+        }
         $this->getTableLocator()->get('Properties')->deleteAll(['id' => $this->propertyId]);
 
         parent::tearDown();
@@ -159,7 +175,7 @@ class ReservationDiscountsApiTest extends TestCase
             'property_id' => $this->propertyId,
             'code' => 'agoda',
             'name' => 'Agoda',
-        ]));
+        ]), self::fixture());
 
         $this->post('/api/reservations', json_encode([
             'room_id' => $this->roomId,
@@ -239,7 +255,7 @@ class ReservationDiscountsApiTest extends TestCase
                 'property_id' => $this->propertyId,
                 'code' => 'agoda',
                 'name' => 'Agoda',
-            ]));
+            ]), self::fixture());
         }
 
         // Not re-signed here: setUp() already signed the test's first request,

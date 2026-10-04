@@ -114,7 +114,8 @@ class EventLedgerBehavior extends Behavior
      * @param string $type One of the table's TYPES.
      * @param \Cake\Datasource\EntityInterface $row The new ledger row, not yet saved.
      * @param \Cake\Datasource\EntityInterface $subject The record it's about (has property_id).
-     * @param array<string, mixed> $options `snapshot` and `summary` to use instead of the table's.
+     * @param array<string, mixed> $options `snapshot` and `summary` to use instead of the table's,
+     *   `subjectType` for the index row when the ledger covers several.
      * @return \Cake\Datasource\EntityInterface The stored row.
      */
     public function write(
@@ -189,7 +190,8 @@ class EventLedgerBehavior extends Behavior
             'property_id' => $propertyId,
             'occurred_at' => $context->now,
             'actor_id' => $context->actorId,
-            'subject_type' => $this->getConfig('subjectType'),
+            // One ledger may cover several subject types (config_changes, step 9).
+            'subject_type' => $options['subjectType'] ?? $this->getConfig('subjectType'),
             'subject_id' => (int)$subject->get('id'),
             'event_table' => $table->getTable(),
             'event_id' => (int)$row->get('id'),

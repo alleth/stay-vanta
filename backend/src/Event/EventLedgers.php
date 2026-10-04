@@ -15,5 +15,7 @@ final class EventLedgers
         'StockMovements' => 'inventory_item',
         'InvoiceEvents' => 'invoice',
         'ReservationEvents' => 'reservation',
+        // One ledger for every configuration table; each index row names its entity type.
+        'ConfigChanges' => 'configuration',
     ];
 }

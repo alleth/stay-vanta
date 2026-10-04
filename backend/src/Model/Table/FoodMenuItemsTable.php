@@ -19,6 +19,18 @@ class FoodMenuItemsTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'menu_item',
+            'defaultImpact' => ConfigChangesTable::IMPACT_PRICE,
+            'impacts' => [
+                'price' => ConfigChangesTable::IMPACT_PRICE,
+                'is_available' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                'name' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                'type' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                'inventory_item_id' => ConfigChangesTable::IMPACT_OPERATIONAL,
+            ],
+        ]);
 
         $this->setTable('food_menu_items');
         $this->setDisplayField('name');

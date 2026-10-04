@@ -20,6 +20,19 @@ class PropertiesTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'property',
+            'defaultImpact' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+            'impacts' => [
+                'subscription_fee' => ConfigChangesTable::IMPACT_PRICE,
+                'subscription_status' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                'subscription_expires_at' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                'is_active' => ConfigChangesTable::IMPACT_OPERATIONAL,
+            ],
+            // A property record is its own property.
+            'propertyField' => 'id',
+        ]);
 
         $this->setTable('properties');
         $this->setDisplayField('name');

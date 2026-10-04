@@ -11,10 +11,13 @@ use App\Middleware\CorrelationIdMiddleware;
 use App\Model\Entity\User;
 use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
+use Cake\Datasource\EntityInterface;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\Http\Exception\UnauthorizedException;
+use Cake\I18n\DateTime;
 use Cake\ORM\Query\SelectQuery;
+use Cake\ORM\Table;
 use Cake\Utility\Text;
 
 /**
@@ -225,6 +228,28 @@ class AppController extends Controller
         }
 
         return $this->eventContext;
+    }
+
+    /**
+     * Save options for a configuration row (build step 9): who is making
+     * the change, for ConfigAuditBehavior. `$refuseNoop` makes a save that
+     * changes nothing a 400 ("Nothing to change") that records nothing.
+     *
+     * @return array<string, mixed>
+     */
+    protected function auditOptions(bool $refuseNoop = false): array
+    {
+        return ['eventContext' => $this->eventContext()] + ($refuseNoop ? ['refuseNoop' => true] : []);
+    }
+
+    /**
+     * Soft-delete a configuration row (build step 9, C3): it stays, hidden
+     * from lists, and its `deleted` change keeps every value and the reason.
+     */
+    protected function softDelete(Table $table, EntityInterface $entity): void
+    {
+        $entity->set('deleted_at', new DateTime());
+        $table->saveOrFail($entity, $this->auditOptions());
     }
 
     /**

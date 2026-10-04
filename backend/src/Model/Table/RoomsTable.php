@@ -19,6 +19,20 @@ class RoomsTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // Every change is recorded in config_changes (build step 9).
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'room',
+            'defaultImpact' => ConfigChangesTable::IMPACT_BOOKING,
+            'impacts' => [
+                'room_number' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                'room_type' => ConfigChangesTable::IMPACT_OPERATIONAL,
+            ],
+            // Occupancy, cleaning and maintenance are operational state, kept
+            // by the future Rooms module (C5), not configuration.
+            'ignore' => ['status'],
+            'labelFields' => ['room_number'],
+            'softDelete' => true,
+        ]);
 
         $this->setTable('rooms');
         $this->setDisplayField('room_number');

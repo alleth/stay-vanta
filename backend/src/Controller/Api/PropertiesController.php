@@ -51,7 +51,7 @@ class PropertiesController extends AppController
             'subscription_fee' => $this->request->getData('subscription_fee') ?? 0,
         ]);
 
-        if (!$properties->save($property)) {
+        if (!$properties->save($property, $this->auditOptions())) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $property->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);
@@ -80,7 +80,7 @@ class PropertiesController extends AppController
             'fields' => ['name', 'type', 'address', 'is_active', 'subscription_status', 'subscription_expires_at', 'subscription_fee'],
         ]);
 
-        if (!$properties->save($property)) {
+        if (!$properties->save($property, $this->auditOptions(true))) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $property->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);

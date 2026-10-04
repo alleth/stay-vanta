@@ -65,7 +65,7 @@ class PromoRatesController extends AppController
             'multiplier' => $this->request->getData('multiplier'),
         ]);
 
-        if (!$promoRates->save($rate)) {
+        if (!$promoRates->save($rate, $this->auditOptions())) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $rate->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);
@@ -99,7 +99,7 @@ class PromoRatesController extends AppController
             'room_id' => $this->request->getData('room_id') ?: null,
         ], ['accessibleFields' => ['property_id' => false]]);
 
-        if (!$promoRates->save($rate)) {
+        if (!$promoRates->save($rate, $this->auditOptions(true))) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $rate->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);
@@ -123,7 +123,8 @@ class PromoRatesController extends AppController
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $this->scopeToProperty($promoRates->find()->where(['PromoRates.id' => $id]))->firstOrFail();
 
-        $promoRates->deleteOrFail($rate);
+        // Soft delete with a reason (step 9).
+        $this->softDelete($promoRates, $rate);
 
         $this->set('deleted', true);
         $this->viewBuilder()->setOption('serialize', ['deleted']);
@@ -136,7 +137,8 @@ class PromoRatesController extends AppController
     private function resolveSource(int $propertyId, string $sourceName): string
     {
         try {
-            return $this->fetchTable('BookingSources')->resolveOrCreate($propertyId, $sourceName);
+            return $this->fetchTable('BookingSources')
+                ->resolveOrCreate($propertyId, $sourceName, $this->eventContext());
         } catch (InvalidArgumentException $e) {
             throw new BadRequestException($e->getMessage());
         }

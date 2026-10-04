@@ -5,10 +5,13 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Model\Entity\FoodMenuItem;
+use App\Model\Table\ConfigChangesTable;
 use App\Model\Table\FoodMenuItemOptionGroupsTable;
 use App\Model\Table\FoodMenuItemsTable;
+use Cake\Datasource\EntityInterface;
 use Cake\Http\Exception\BadRequestException;
 use Cake\I18n\DateTime;
+use Cake\ORM\Table;
 
 /**
  * Food menu. Admins/owners manage items & prices; receptionists read them when
@@ -92,14 +95,11 @@ class FoodMenuItemsController extends AppController
             ),
         ]);
 
-        if (!$menu->save($item)) {
+        if (!$this->saveAudited($menu, $item, $ingredients, $optionGroups, false)) {
             $this->validationFailed($item->getErrors());
 
             return;
         }
-
-        $this->saveIngredients($item, $ingredients);
-        $this->saveOptionGroups($item, $optionGroups);
 
         $this->response = $this->response->withStatus(201);
         $this->set('menuItem', $this->reloadWithIngredients($item->id));
@@ -141,17 +141,101 @@ class FoodMenuItemsController extends AppController
             ),
         ], ['accessibleFields' => ['property_id' => false]]);
 
-        if (!$menu->save($item)) {
+        if (!$this->saveAudited($menu, $item, $ingredients, $optionGroups, true)) {
             $this->validationFailed($item->getErrors());
 
             return;
         }
 
-        $this->saveIngredients($item, $ingredients);
-        $this->saveOptionGroups($item, $optionGroups);
-
         $this->set('menuItem', $this->reloadWithIngredients($item->id));
         $this->viewBuilder()->setOption('serialize', ['menuItem']);
+    }
+
+    /**
+     * Save a menu item with its recipe and option groups as one recorded
+     * change (build step 9): the item's own fields and its child rows'
+     * before/after, in one transaction. Option prices are a price change
+     * (a reason is required); the recipe and option labels are operational.
+     *
+     * @param array<int, array{inventory_item_id: int, quantity: float}> $ingredients
+     * @param array<int, array<string, mixed>> $optionGroups
+     * @return bool False on a validation failure (nothing saved).
+     */
+    private function saveAudited(
+        Table $menu,
+        EntityInterface $item,
+        array $ingredients,
+        array $optionGroups,
+        bool $refuseNoop,
+    ): bool {
+        return (bool)$menu->getConnection()->transactional(
+            function () use ($menu, $item, $ingredients, $optionGroups, $refuseNoop): bool {
+                $before = $item->isNew()
+                    ? ['recipe' => [], 'options' => [], 'option_prices' => []]
+                    : $this->childrenOf((int)$item->id);
+                if (!$menu->save($item, $this->auditOptions() + ['auditDefer' => true])) {
+                    return false;
+                }
+                $this->saveIngredients($item, $ingredients);
+                $this->saveOptionGroups($item, $optionGroups);
+
+                $children = [];
+                foreach ($this->childrenOf((int)$item->id) as $key => $after) {
+                    $children[$key] = ['before' => $before[$key], 'after' => $after];
+                }
+                $menu->auditDeferred($item, $children, [
+                    'recipe' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                    'options' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                    'option_prices' => ConfigChangesTable::IMPACT_PRICE,
+                ], $refuseNoop);
+
+                return true;
+            },
+        );
+    }
+
+    /**
+     * A menu item's recipe and options as the audit compares them.
+     *
+     * @return array{recipe: list<array<string, mixed>>, options: list<array<string, mixed>>, option_prices: list<array<string, mixed>>}
+     */
+    private function childrenOf(int $itemId): array
+    {
+        $recipe = array_map(fn($r) => [
+            'inventory_item_id' => (int)$r['inventory_item_id'],
+            'quantity' => round((float)$r['quantity'], 4),
+        ], $this->fetchTable('FoodMenuItemIngredients')->find()
+            ->select(['inventory_item_id', 'quantity'])->where(['food_menu_item_id' => $itemId])
+            ->orderBy(['inventory_item_id' => 'ASC'])->disableHydration()->all()->toList());
+
+        $options = [];
+        $prices = [];
+        $groups = $this->fetchTable('FoodMenuItemOptionGroups')->find()
+            ->select(['id', 'name', 'kind'])->where(['food_menu_item_id' => $itemId])
+            ->orderBy(['id' => 'ASC'])->disableHydration()->all()->toList();
+        foreach ($groups as $group) {
+            $rows = $this->fetchTable('FoodMenuItemOptions')->find()
+                ->select(['label', 'price_delta', 'inventory_item_id'])
+                ->where(['food_menu_item_option_group_id' => $group['id']])
+                ->orderBy(['id' => 'ASC'])->disableHydration()->all()->toList();
+            $options[] = [
+                'group' => $group['name'],
+                'kind' => $group['kind'],
+                'options' => array_map(fn($o) => [
+                    'label' => $o['label'],
+                    'inventory_item_id' => $o['inventory_item_id'] !== null ? (int)$o['inventory_item_id'] : null,
+                ], $rows),
+            ];
+            foreach ($rows as $o) {
+                $prices[] = [
+                    'group' => $group['name'],
+                    'label' => $o['label'],
+                    'price_delta' => round((float)$o['price_delta'], 2),
+                ];
+            }
+        }
+
+        return ['recipe' => $recipe, 'options' => $options, 'option_prices' => $prices];
     }
 
     /**
@@ -398,7 +482,7 @@ class FoodMenuItemsController extends AppController
 
         $item->set('deleted_at', new DateTime());
         $item->set('is_available', false);
-        $menu->saveOrFail($item);
+        $menu->saveOrFail($item, $this->auditOptions());
 
         $this->set('ok', true);
         $this->viewBuilder()->setOption('serialize', ['ok']);
