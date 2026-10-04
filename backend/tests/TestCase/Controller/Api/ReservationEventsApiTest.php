@@ -173,9 +173,10 @@ class ReservationEventsApiTest extends TestCase
         }
         $this->assertSame('booked', $events[0]->status_after);
         $this->assertSame($this->day(0), $events[0]->changes['after']['check_in']);
-        $this->assertSame(['before' => 1, 'after' => 2], $events[1]->changes['total_guests']);
+        // MySQL stores JSON objects with its own key order: compare by key.
+        $this->assertEquals(['before' => 1, 'after' => 2], $events[1]->changes['total_guests']);
         $this->assertSame($editRequest, $events[1]->correlation_id);
-        $this->assertSame(['before' => 'booked', 'after' => 'checked_in'], $events[2]->changes['status']);
+        $this->assertEquals(['before' => 'booked', 'after' => 'checked_in'], $events[2]->changes['status']);
         $this->assertSame('checked_out', $events[3]->status_after);
 
         // The ledger is the source of truth: the event index has one row per event.
@@ -316,11 +317,11 @@ class ReservationEventsApiTest extends TestCase
 
         $event = $this->getTableLocator()->get('ReservationEvents')->find()
             ->where(['reservation_id' => $id, 'event_type' => 'discount_changed'])->firstOrFail();
-        $this->assertSame(
+        $this->assertEquals(
             [['discount_type' => 'senior', 'beneficiary_name' => 'Lola Ines', 'id_number' => 'SC-1']],
             $event->changes['beneficiaries']['before'],
         );
-        $this->assertSame(
+        $this->assertEquals(
             [['discount_type' => 'pwd', 'beneficiary_name' => 'Mang Ben', 'id_number' => 'PWD-9']],
             $event->changes['beneficiaries']['after'],
         );
