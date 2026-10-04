@@ -304,7 +304,9 @@ class ConfigAuditBehavior extends Behavior
             'id' => (int)$entity->get('id'),
             'property_id' => (int)$entity->get($this->getConfig('propertyField')),
         ]);
-        $ledger->write($context, $type, $row, $subject, [
+        /** @var \App\Model\Behavior\EventLedgerBehavior $ledgerBehavior */
+        $ledgerBehavior = $ledger->getBehavior('EventLedger');
+        $ledgerBehavior->write($context, $type, $row, $subject, [
             'snapshot' => ['label' => $this->labelOf($entity)],
             'subjectType' => $this->getConfig('entityType'),
         ]);

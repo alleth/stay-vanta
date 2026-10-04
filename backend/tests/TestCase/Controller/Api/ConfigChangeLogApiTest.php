@@ -144,8 +144,24 @@ class ConfigChangeLogApiTest extends TestCase
         // A row recorded live already has its own history: it gets no baseline.
         $this->callAs($this->adminToken, 'POST', '/api/room-rates', ['base_rate' => 900, 'description' => 'New']);
         $liveRate = (int)$this->responseJson()['roomRate']['id'];
+        // A row left behind by a property that no longer exists (no foreign
+        // keys): reported, never attributed, and it doesn't stop the import.
+        $noProperty = (int)$this->connection->execute('SELECT MAX(id) AS id FROM properties')->fetch('assoc')['id'] + 1000;
+        $this->connection->insert('room_rates', [
+            'property_id' => $noProperty, 'room_id' => null, 'base_rate' => 500, 'description' => 'Orphan',
+            'created' => '2026-01-15 02:00:00', 'modified' => '2026-01-15 02:00:00',
+        ]);
+        $orphan = (int)$this->connection->execute('SELECT MAX(id) AS id FROM room_rates')->fetch('assoc')['id'];
 
         $baseline = new ConfigBaseline($this->connection);
+        try {
+            $this->assertSame(0, $baseline->run($noProperty)['room_rate']);
+        } finally {
+            $this->connection->delete('room_rates', ['id' => $orphan]);
+        }
+        $this->assertSame(0, $this->getTableLocator()->get('ConfigChanges')->find()
+            ->where(['entity_type' => 'room_rate', 'entity_id' => $orphan])->count(), 'no property, no baseline');
+
         $added = $baseline->run($this->propertyId);
         $this->assertSame(1, $added['room_rate']);
         $this->assertSame(1, $added['extra_charge']);

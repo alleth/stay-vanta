@@ -56,6 +56,10 @@ final class ConfigBaseline
             return $added;
         }
         $locator = TableRegistry::getTableLocator();
+        $known = array_flip(array_map('intval', array_column(
+            $this->connection->execute('SELECT id FROM properties')->fetchAll('assoc'),
+            'id',
+        )));
         foreach (self::TABLES as $alias => $entityType) {
             $table = $locator->get($alias);
             $propertyColumn = $alias === 'Properties' ? 'id' : 'property_id';
@@ -72,8 +76,28 @@ final class ConfigBaseline
             if ($propertyId !== null) {
                 $query->where([$table->aliasField($propertyColumn) => $propertyId]);
             }
-            $rows = $query->all()->toList();
-            $this->connection->transactional(function () use ($table, $rows, $entityType): void {
+            $rows = [];
+            $unowned = [];
+            foreach ($query->all() as $row) {
+                // A row must name a property that exists to be attributed;
+                // one that doesn't is reported, never guessed at.
+                if (isset($known[(int)$row->get($propertyColumn)])) {
+                    $rows[] = $row;
+                } else {
+                    $unowned[] = $row->get('id');
+                }
+            }
+            if ($unowned !== []) {
+                Log::warning(sprintf(
+                    'config baseline: %d %s row(s) belong to no existing property, not recorded (ids %s)',
+                    count($unowned),
+                    $entityType,
+                    implode(', ', $unowned),
+                ));
+            }
+            /** @var \App\Model\Behavior\ConfigAuditBehavior $audit */
+            $audit = $table->getBehavior('ConfigAudit');
+            $this->connection->transactional(function () use ($audit, $rows, $entityType): void {
                 foreach ($rows as $row) {
                     $context = new EventContext(
                         null,
@@ -82,7 +106,7 @@ final class ConfigBaseline
                         "import-config-$entityType-" . $row->get('id'),
                         EventContext::SOURCE_IMPORT,
                     );
-                    $table->recordBaseline($context, $row);
+                    $audit->recordBaseline($context, $row);
                 }
             });
             $added[$entityType] = count($rows);
