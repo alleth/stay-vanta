@@ -12,5 +12,11 @@ export const createStaff = (data, propertyId) =>
 export const updateStaff = (id, data) =>
   client.patch(`/users/${id}`, data).then((r) => r.data.user)
 
-export const resetStaffPassword = (id, password) =>
-  client.post(`/users/${id}/reset-password`, { password }).then((r) => r.data)
+// Someone else's password needs { reason }; your own needs { current_password }
+// (step 10). Either way the person's session ends.
+export const resetStaffPassword = (id, password, extra = {}) =>
+  client.post(`/users/${id}/reset-password`, { password, ...extra }).then((r) => r.data)
+
+// A staff member's access history (Manager, step 10): same shape as mySignIns.
+export const staffAccessHistory = (id, page = 1) =>
+  client.get(`/users/${id}/access-history`, { params: { page } }).then((r) => r.data)

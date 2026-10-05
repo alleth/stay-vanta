@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Button, Badge } from './ui'
+import { Button, Badge, Dropdown, Modal } from './ui'
+import AccessHistory from './AccessHistory'
+import { mySignIns } from '../api/account'
 import BrandMark from './BrandMark'
 import ThemeToggle from './ThemeToggle'
 import { useAuth } from '../context/AuthContext'
@@ -27,6 +30,8 @@ export default function Layout() {
   // Every route under this layout is flat and listed in NAV except the Hub
   // itself at "/", which is the crumb trail's root and needs no second crumb.
   const current = NAV.find((item) => item.to === pathname)
+  // Your own sign-ins (step 10): everyone may see theirs.
+  const [showSignIns, setShowSignIns] = useState(false)
 
   function handleLogout() {
     logout()
@@ -46,9 +51,16 @@ export default function Layout() {
           </NavLink>
           <ThemeToggle className="ml-auto" />
           <div className="flex items-center gap-3 lg:border-l lg:border-line lg:pl-4">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-on-ink">
-              {initials(user?.name)}
-            </span>
+            <Dropdown
+              align="end"
+              toggle={(
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-on-ink"
+                  title="Your account">
+                  {initials(user?.name)}
+                </span>
+              )}>
+              <Dropdown.Item onClick={() => setShowSignIns(true)}>Your sign-ins</Dropdown.Item>
+            </Dropdown>
             <span className="hidden whitespace-nowrap text-sm sm:inline">
               {user?.name} <Badge bg="secondary" className="ml-1">{roleLabel(role)}</Badge>
             </span>
@@ -58,6 +70,22 @@ export default function Layout() {
           </div>
         </div>
       </header>
+
+      {showSignIns && (
+        <Modal show onHide={() => setShowSignIns(false)} centered>
+          <Modal.Header closeButton><Modal.Title>Your sign-ins</Modal.Title></Modal.Header>
+          <Modal.Body className="max-h-[65vh] overflow-y-auto">
+            <p className="mb-4 text-sm text-muted">
+              When and where your account was used, failed attempts on it, and changes others made to it.
+              If you don&apos;t recognise a sign-in, change your password and tell your Manager.
+            </p>
+            <AccessHistory load={mySignIns} />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setShowSignIns(false)}>Close</Button>
+          </Modal.Footer>
+        </Modal>
+      )}
 
       <main className="mx-auto w-full max-w-[1200px] grow px-4 py-6 lg:px-8 lg:py-12">
         {/* The trail belongs with the page it describes, not in the chrome —

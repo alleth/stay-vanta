@@ -2,20 +2,25 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Card, Table, Button, Badge, Modal, Form, Alert, Spinner,
 } from '../components/ui'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
+import { P } from '../auth/permissions'
 import {
-  listStaff, createStaff, updateStaff, resetStaffPassword,
+  listStaff, createStaff, updateStaff, resetStaffPassword, staffAccessHistory,
 } from '../api/staff'
+import ReasonModal from '../components/ReasonModal'
+import AccessHistory from '../components/AccessHistory'
 import { SkeletonTable } from '../components/Skeleton'
 import { roleLabel } from '../utils/roles'
-import { describeError } from '../utils/apiError'
 
 const ROLE_VARIANT = { admin: 'primary', receptionist: 'info' }
 
 export default function Staff() {
-  const { role, user } = useAuth()
+  const { role, user, can } = useAuth()
+  // A staff member's sign-ins and account history (step 10, Manager).
+  const canSeeHistory = can(P.STAFF_ACCESS_HISTORY_VIEW)
   const { propertyId } = useProperty()
   // Owners reset anyone; admins change their own password and reset their
   // receptionists, but not a peer admin's.
@@ -24,8 +29,9 @@ export default function Staff() {
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [pending, setPending] = useState(null) // id of the user whose status is updating
-  const [modal, setModal] = useState(null) // 'add' | { type: 'reset', user }
+  const [modal, setModal] = useState(null) // 'add' | { type: 'reset', user, self } | { type: 'history', user }
+  // The account being switched off or on: it asks why (step 10).
+  const [switching, setSwitching] = useState(null)
 
   const refresh = useCallback(async () => {
     if (!propertyId) return
@@ -45,18 +51,6 @@ export default function Staff() {
     refresh()
   }, [refresh])
 
-  async function toggleActive(u) {
-    setPending(u.id)
-    setError(null)
-    try {
-      await updateStaff(u.id, { is_active: !u.is_active })
-      await refresh()
-    } catch (ex) {
-      setError(describeError(ex, 'Could not update the account.'))
-    } finally {
-      setPending(null)
-    }
-  }
 
   if (!propertyId)
     return <Alert variant="info">Select or create a property to manage staff.</Alert>
@@ -103,6 +97,12 @@ export default function Staff() {
                       : <Badge bg="secondary">inactive</Badge>}
                   </td>
                   <td className="whitespace-nowrap text-right">
+                    {canSeeHistory && (
+                      <Button size="sm" variant="outline-secondary" className="mr-2"
+                        onClick={() => setModal({ type: 'history', user: u })}>
+                        History
+                      </Button>
+                    )}
                     {canSetPassword(u) && (
                       <Button size="sm" variant="outline-secondary" className="mr-2"
                         onClick={() => setModal({ type: 'reset', user: u, self: u.id === user?.id })}>
@@ -111,11 +111,8 @@ export default function Staff() {
                     )}
                     {u.id !== user?.id && (
                       <Button size="sm" variant={u.is_active ? 'outline-danger' : 'outline-success'}
-                        disabled={pending !== null}
-                        onClick={() => toggleActive(u)}>
-                        {pending === u.id
-                          ? <Spinner size="sm" />
-                          : (u.is_active ? 'Deactivate' : 'Reactivate')}
+                        onClick={() => setSwitching(u)}>
+                        {u.is_active ? 'Deactivate' : 'Reactivate'}
                       </Button>
                     )}
                   </td>
@@ -133,6 +130,29 @@ export default function Staff() {
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); refresh() }}
         />
+      )}
+      <ReasonModal show={switching !== null}
+        title={switching ? `${switching.is_active ? 'Deactivate' : 'Reactivate'} ${switching.name}` : ''}
+        description={switching && (switching.is_active
+          ? 'They are signed out at once and can’t sign in until the account is reactivated. Their history is kept.'
+          : 'They can sign in again with their password. No earlier session comes back.')}
+        confirmLabel={switching?.is_active ? 'Deactivate' : 'Reactivate'}
+        onHide={() => setSwitching(null)}
+        onConfirm={async (reason) => {
+          await updateStaff(switching.id, { is_active: !switching.is_active, reason })
+          setSwitching(null)
+          await refresh()
+        }} />
+      {modal?.type === 'history' && (
+        <Modal show onHide={() => setModal(null)} centered>
+          <Modal.Header closeButton><Modal.Title>{modal.user.name}</Modal.Title></Modal.Header>
+          <Modal.Body className="max-h-[65vh] overflow-y-auto">
+            <AccessHistory load={(page) => staffAccessHistory(modal.user.id, page)} />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setModal(null)}>Close</Button>
+          </Modal.Footer>
+        </Modal>
       )}
       {modal?.type === 'reset' && (
         <ResetPasswordModal
@@ -195,12 +215,23 @@ function AddStaffModal({ role, propertyId, onClose, onSaved }) {
 }
 
 function ResetPasswordModal({ user, self, onClose, onSaved }) {
+  const { logout } = useAuth()
+  const navigate = useNavigate()
   const [password, setPassword] = useState('')
+  // Your own: prove it's you. Someone else's: say why (step 10).
+  const [current, setCurrent] = useState('')
+  const [reason, setReason] = useState('')
   const [done, setDone] = useState(false)
   const { run, busy, err } = useSubmit(async () => {
-    await resetStaffPassword(user.id, password)
+    await resetStaffPassword(user.id, password, self ? { current_password: current } : { reason: reason.trim() })
     setDone(true)
   })
+  // Your session ended with the change: sign in again with the new password.
+  const finish = () => {
+    if (!self) { onSaved(); return }
+    logout()
+    navigate('/login')
+  }
 
   return (
     <Modal show onHide={onClose} centered>
@@ -212,19 +243,39 @@ function ResetPasswordModal({ user, self, onClose, onSaved }) {
           {err && <Alert variant="danger">{err}</Alert>}
           {done ? (
             <Alert variant="success" className="mb-0">
-              Password updated. {self ? 'You may need to sign in again.' : 'Any existing session for this user was revoked.'}
+              Password updated. {self
+                ? 'Sign in again with your new password.'
+                : 'They were signed out and sign in with the new password.'}
             </Alert>
           ) : (
-            <Form.Group>
-              <Form.Label>New {self ? '' : 'temporary '}password</Form.Label>
-              <Form.Control type="text" value={password} onChange={(e) => setPassword(e.target.value)}
-                minLength={8} required autoFocus placeholder="min 8 characters" />
-            </Form.Group>
+            <div className="grid gap-4">
+              {self && (
+                <Form.Group>
+                  <Form.Label>Current password</Form.Label>
+                  <Form.Control type="password" value={current} onChange={(e) => setCurrent(e.target.value)}
+                    required autoFocus autoComplete="current-password" />
+                </Form.Group>
+              )}
+              <Form.Group>
+                <Form.Label>New {self ? '' : 'temporary '}password</Form.Label>
+                <Form.Control type="text" value={password} onChange={(e) => setPassword(e.target.value)}
+                  minLength={8} required autoFocus={!self} placeholder="min 8 characters" />
+              </Form.Group>
+              {!self && (
+                <Form.Group>
+                  <Form.Label>Reason</Form.Label>
+                  <Form.Control as="textarea" rows={2} maxLength={500} value={reason}
+                    onChange={(e) => setReason(e.target.value)} required minLength={5}
+                    placeholder="e.g. Forgot their password" />
+                  <Form.Text>Saved in their account history and can’t be edited later.</Form.Text>
+                </Form.Group>
+              )}
+            </div>
           )}
         </Modal.Body>
         <Modal.Footer>
           {done ? (
-            <Button onClick={onSaved}>Done</Button>
+            <Button onClick={finish}>{self ? 'Sign in again' : 'Done'}</Button>
           ) : (
             <>
               <Button variant="secondary" onClick={onClose}>Cancel</Button>

@@ -142,8 +142,8 @@ housekeeping, expenses, time keeping and configuration.
 meet it; reservations (`reservation_events`, soft delete) since step 8. `reservations.receptionist_id`
 is legacy ("last touched by", still stamped for one release, never the actor). Configuration
 (`config_changes`, step 9, in production 2026-10-05, `b6ecca2`; rows from before carry one
-`baseline_recorded` with no actor). Known gaps: user accounts, roles and sign-ins (step 10,
-`access_events`); inventory item details (name, unit, category, threshold: only stock movements
+`baseline_recorded` with no actor). Accounts and sign-ins (`access_events`, step 10 part 1 =
+release 10a; memberships, roles and support access follow in 10b). Known gaps: inventory item details (name, unit, category, threshold: only stock movements
 are ledgered); guest record edits; room status changes (future Rooms module, `room_events`).
 
 **Event recording standard** (all new ledgers; the shared foundation is build step 5):
@@ -413,6 +413,13 @@ digest (`UsersTable::issueToken`/`hashToken`) — a plain hash is deliberate, th
 random. Passwords use `password_hash`/`password_verify` (`User::_setPassword`). For production,
 migrate to `cakephp/authentication`.
 
+**Every sign-in and account change is an access event** (step 10, `access_events`, catalog in
+`docs/EVENTS.md`): `AuthController` records sign-ins, failures (no actor: `EventContext::unauthenticated()`),
+lockouts, refusals and sign-outs; `UsersController` records account changes under a `FOR UPDATE` lock on the
+user row, with `recordAccess()`. Deactivating and setting a password end the person's session at once (A8,
+`SF-2026-002`); deactivating, reactivating and resetting someone else's password need a reason; your own
+change needs your current password. Platform events (the Platform Owner's own) have no property.
+
 `App\Auth\LoginThrottle` pauses an **email address** after 5 failed sign-ins for 900 s; counters
 live in the `login_throttle` cache config, whose `duration` must match `LOCKOUT_SECONDS`.
 Deliberately **not keyed on IP**: no trusted proxy is configured, so `clientIp()` is Railway's
@@ -461,6 +468,9 @@ would make the key attacker-controlled.
   It, and "Booked by" (`booked_by`), are the record of who did what; never show
   `reservation.receptionist` as the person responsible. `ReservationModal` asks for a reason in the
   form when the save needs one (a correction, a stay before today, a referral discount).
+- **Access history is `src/components/AccessHistory.jsx`** (step 10): your own from the header's
+  avatar menu ("Your sign-ins", `GET /auth/sign-ins`), a staff member's from Staff → History
+  (Manager). Wording in `utils/accessEvents.js`.
 - **Elevated actions ask why with `src/components/ReasonModal.jsx`** (`show`, `title`,
   `description`, `confirmLabel`, `onConfirm(reason)`, `onHide`) and send `reason` with the request.
 - **Configuration screens (step 9).** Deleting a configuration row asks why (`ReasonModal`); a

@@ -10,6 +10,7 @@ import { SkeletonTable } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
 import { refundMethodLabel } from '../../utils/refunds'
 import { eventLabel, fieldLabel, formatValue, subjectText } from '../../utils/configChanges'
+import { accessLabel } from '../../utils/accessEvents'
 
 // The Operations page's panels (Manager + Front Desk Staff), drawn from one
 // GET /operations/today payload. Every figure is today's, on the hotel's
@@ -606,7 +607,15 @@ function configText(e) {
   return [`${eventLabel(e.event)} ${subjectText(e)}`, ...fields].join(' · ') + why
 }
 
+// Account administration (build step 10): "Account deactivated · Ana Cruz
+// (Front Desk Staff) · “Left the hotel”". Sign-ins never appear here.
+function accessText(e) {
+  const person = e.person ? ` · ${e.person}${e.person_role ? ` (${roleLabel(e.person_role)})` : ''}` : ''
+  return `${accessLabel(e.event)}${person}${e.reason ? ` · “${e.reason}”` : ''}`
+}
+
 function activityText(e) {
+  if (e.type === 'access') return accessText(e)
   if (e.type === 'config') return configText(e)
   if (e.type === 'invoice') return invoiceText(e)
   if (e.type === 'reservation') return reservationText(e)
@@ -685,8 +694,8 @@ function ActivityModal({ onHide }) {
       <Modal.Header closeButton>
         <Modal.Title>Staff activity</Modal.Title>
         <p className="mb-0 text-xs text-muted">
-          Sales, stock, invoices, reservations and price changes, with who did each. Every setting change is in
-          Settings → Change log.
+          Sales, stock, invoices, reservations, price changes and staff accounts, with who did each. Every
+          setting change is in Settings → Change log; each person's sign-ins are under Staff → History.
         </p>
       </Modal.Header>
       <div className="max-h-[65vh] overflow-y-auto">
