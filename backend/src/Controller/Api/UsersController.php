@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Model\Entity\User;
+use App\Model\Table\AccessEventsTable;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -18,6 +19,13 @@ use Cake\Http\Exception\ForbiddenException;
  * - others : no access.
  *
  * Owners are never created or edited through this controller.
+ *
+ * Every change is recorded in access_events (build step 10) under a lock on
+ * the user row, in the same transaction: created, renamed, deactivated and
+ * reactivated (with a reason), password reset (someone else's, with a
+ * reason) or changed (your own, with your current password). Deactivating
+ * and setting a password end the person's session at once (A8), so
+ * reactivating an account never brings an old session back (F1).
  *
  * Access is staff.account.view / staff.account.manage (beforeFilter). Who may
  * manage whom stays a role rule, deliberately not a permission (see "Rules
@@ -37,9 +45,11 @@ class UsersController extends AppController
     {
         parent::beforeFilter($event);
 
-        $permission = $this->request->getParam('action') === 'index'
-            ? Permissions::STAFF_ACCOUNT_VIEW
-            : Permissions::STAFF_ACCOUNT_MANAGE;
+        $permission = match ($this->request->getParam('action')) {
+            'index' => Permissions::STAFF_ACCOUNT_VIEW,
+            'accessHistory' => Permissions::STAFF_ACCESS_HISTORY_VIEW,
+            default => Permissions::STAFF_ACCOUNT_MANAGE,
+        };
         $this->authorize($permission, 'Only Managers can manage staff.');
     }
 
@@ -81,7 +91,17 @@ class UsersController extends AppController
             'is_active' => true,
         ]);
 
-        if (!$users->save($user)) {
+        $saved = $users->getConnection()->transactional(function () use ($users, $user): bool {
+            if (!$users->save($user, ['atomic' => false])) {
+                return false;
+            }
+            $this->recordAccess($this->eventContext(), AccessEventsTable::ACCOUNT_CREATED, $user, [
+                'changes' => ['after' => $this->accountValues($user)],
+            ]);
+
+            return true;
+        });
+        if (!$saved) {
             $this->validationFailed($user->getErrors());
 
             return;
@@ -99,23 +119,60 @@ class UsersController extends AppController
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
         $users = $this->fetchTable('Users');
-        $user = $this->findManageable($id);
+        $this->findManageable($id);
+        $name = $this->request->getData('name');
+        $active = $this->request->getData('is_active');
 
-        $data = [];
-        if ($this->request->getData('name') !== null) {
-            $data['name'] = $this->request->getData('name');
-        }
-        if ($this->request->getData('is_active') !== null) {
-            $isActive = (bool)$this->request->getData('is_active');
-            // You can't lock yourself out by deactivating your own account.
-            if (!$isActive && $user->id === (int)$this->currentUser->id) {
-                throw new ForbiddenException('You cannot deactivate your own account.');
+        $user = $users->getConnection()->transactional(function () use ($users, $id, $name, $active): User {
+            // Lock, then check against the locked row (a second identical
+            // request finds nothing to change and records nothing).
+            $user = $this->lockUser($id);
+            $events = [];
+            $data = [];
+            if ($name !== null && (string)$name !== $user->name) {
+                $data['name'] = (string)$name;
+                $events[] = [
+                    AccessEventsTable::ACCOUNT_RENAMED,
+                    ['name' => ['before' => $user->name, 'after' => (string)$name]],
+                ];
             }
-            $data['is_active'] = $isActive;
-        }
-        $users->patchEntity($user, $data);
+            if ($active !== null && (bool)$active !== (bool)$user->is_active) {
+                $isActive = (bool)$active;
+                // You can't lock yourself out by deactivating your own account.
+                if (!$isActive && $user->id === (int)$this->currentUser->id) {
+                    throw new ForbiddenException('You cannot deactivate your own account.');
+                }
+                $data['is_active'] = $isActive;
+                $events[] = [
+                    $isActive ? AccessEventsTable::ACCOUNT_REACTIVATED : AccessEventsTable::ACCOUNT_DEACTIVATED,
+                    ['is_active' => ['before' => !$isActive, 'after' => $isActive]],
+                ];
+            }
+            if ($events === []) {
+                throw new BadRequestException('Nothing to change.');
+            }
+            $users->patchEntity($user, $data);
+            $sessionOpen = false;
+            if (($data['is_active'] ?? null) === false) {
+                // A8: a switched-off account's session ends now, so switching
+                // it back on can't revive it (F1).
+                $sessionOpen = $this->endSession($user);
+            }
+            if (!$users->save($user, ['atomic' => false])) {
+                return $user;
+            }
+            foreach ($events as [$type, $changes]) {
+                $this->recordAccess($this->eventContext(), $type, $user, ['changes' => $changes]);
+            }
+            if ($sessionOpen) {
+                $this->recordAccess($this->eventContext(), AccessEventsTable::SESSION_ENDED, $user, [
+                    'changes' => ['because' => AccessEventsTable::ACCOUNT_DEACTIVATED],
+                ]);
+            }
 
-        if (!$users->save($user)) {
+            return $user;
+        });
+        if ($user->getErrors()) {
             $this->validationFailed($user->getErrors());
 
             return;
@@ -152,14 +209,82 @@ class UsersController extends AppController
         if (strlen($password) < 8) {
             throw new BadRequestException('Password must be at least 8 characters.');
         }
+        // Your own password: prove it's you first (A10). Someone else's: a
+        // reset, which needs a reason (A5).
+        $own = $user->id === (int)$this->currentUser->id;
+        if ($own && !$user->verifyPassword((string)$this->request->getData('current_password'))) {
+            throw new BadRequestException('Your current password is not correct.');
+        }
 
-        $user->set('password', $password);
-        $user->set('api_token', null);
-        $user->set('token_expires', null);
-        $users->saveOrFail($user);
+        $users->getConnection()->transactional(function () use ($users, $id, $password, $own): void {
+            $user = $this->lockUser($id);
+            $user->set('password', $password);
+            // A8: setting a password ends the session; sign in again with it.
+            $sessionOpen = $this->endSession($user);
+            $users->saveOrFail($user, ['atomic' => false]);
+            $type = $own ? AccessEventsTable::PASSWORD_CHANGED : AccessEventsTable::PASSWORD_RESET;
+            $this->recordAccess($this->eventContext(), $type, $user);
+            if ($sessionOpen) {
+                $this->recordAccess($this->eventContext(), AccessEventsTable::SESSION_ENDED, $user, [
+                    'changes' => ['because' => $type],
+                ]);
+            }
+        });
 
         $this->set('ok', true);
         $this->viewBuilder()->setOption('serialize', ['ok']);
+    }
+
+    /**
+     * GET /api/users/{id}/access-history[?page=] → {events, page, has_more}
+     *
+     * A staff member's access history (step 10): their account changes, who
+     * made them and why, their sign-ins with device, failed attempts and
+     * lockouts. A Manager's, for the staff they manage (staff.access_history.view).
+     */
+    public function accessHistory(int $id): void
+    {
+        $this->request->allowMethod('get');
+        $this->respondWithAccessHistory((int)$this->findManageable($id)->id);
+    }
+
+    /**
+     * Re-read a user inside the transaction with a FOR UPDATE lock.
+     */
+    private function lockUser(int $id): User
+    {
+        /** @var \App\Model\Entity\User $user */
+        $user = $this->fetchTable('Users')->find()->where(['Users.id' => $id])->epilog('FOR UPDATE')->firstOrFail();
+
+        return $user;
+    }
+
+    /**
+     * End a person's session (revoke their token). True when one was open.
+     */
+    private function endSession(User $user): bool
+    {
+        $open = $user->api_token !== null && ($user->token_expires === null || !$user->token_expires->isPast());
+        $user->set('api_token', null);
+        $user->set('token_expires', null);
+
+        return $open;
+    }
+
+    /**
+     * An account's values for its creation event: never the password or the
+     * email address (contact details stay out of ledgers).
+     *
+     * @return array<string, mixed>
+     */
+    private function accountValues(User $user): array
+    {
+        return [
+            'name' => $user->name,
+            'role' => $user->role,
+            'property_id' => $user->property_id !== null ? (int)$user->property_id : null,
+            'is_active' => (bool)$user->is_active,
+        ];
     }
 
     /**

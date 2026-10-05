@@ -52,6 +52,7 @@ trait ApiScenarioTrait
      */
     private const LEDGER_TABLES = [
         'activity_index', 'food_order_events', 'stock_movements', 'invoice_events', 'reservation_events', 'config_changes',
+        'access_events',
     ];
 
     protected function createProperty(string $name): int
@@ -191,6 +192,9 @@ trait ApiScenarioTrait
             $locator->get('Properties')->deleteAll(['id' => $propertyId]);
         }
         if ($this->scenarioOwnerIds) {
+            // Platform events (step 10) have no property: cleared by person.
+            $locator->get('Users')->getConnection()
+                ->delete('access_events', ['subject_user_id IN' => $this->scenarioOwnerIds]);
             $locator->get('Users')->deleteAll(['id IN' => $this->scenarioOwnerIds]);
         }
         $this->scenarioPropertyIds = [];

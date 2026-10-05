@@ -15,8 +15,8 @@ Approved 2026-10-03. They explain the catalog; follow them when you add to it.
   invoices at a property you already belong to, nowhere else. "No property" never means "all
   properties" outside explicit platform permissions.
 - **Deny by default.** Every API action calls `authorize()`. The only exceptions are
-  `POST /auth/login`, `GET /auth/me` and `POST /auth/logout`. A user whose role isn't in the map
-  holds nothing.
+  `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` and `GET /auth/sign-ins` (your own access
+  history, step 10). A user whose role isn't in the map holds nothing.
 - **View and change are separate permissions** (`view` vs `manage`/`settle`/…).
 - **Names are `module.resource.action`** and follow the process's **future owning module** (the
   ownership table in CLAUDE.md), not today's screen. Once stored (Phase 2), a name never changes,
@@ -89,8 +89,9 @@ several properties.
 | `settings.change_log.view` | M | Manager, Property Owner | | Settings |
 | `staff.account.view` | PO, M | Manager, Property Owner | | Staff |
 | `staff.account.manage` | PO, M | Manager | | Staff |
+| `staff.access_history.view` | M | Manager, Property Owner | | Staff |
 
-38 permissions: 2 platform, 36 property.
+39 permissions: 2 platform, 37 property.
 
 ## Endpoint map
 
@@ -135,7 +136,8 @@ several properties.
 | `GET /platform/property-changes` | `platform.property.manage` | Changes to property records (fee, subscription, name), step 9 |
 | `GET /reservations/{id}/price` | `front_desk.reservation.view` | Where a booking's price comes from (step 9); who changed the configuration is named only with `settings.change_log.view` |
 | `GET /users` | `staff.account.view` | |
-| `POST /users`, `PATCH/PUT /users/{id}`, `POST /users/{id}/reset-password` | `staff.account.manage` | Rules kept: who may manage whom (below) |
+| `POST /users`, `PATCH/PUT /users/{id}`, `POST /users/{id}/reset-password` | `staff.account.manage` | Rules kept: who may manage whom (below). Deactivating, reactivating and resetting someone else's password need a reason; changing your own needs your current password (step 10) |
+| `GET /users/{id}/access-history` | `staff.access_history.view` | A staff member's access history (step 10), for the staff you manage |
 
 ## Rules that stay outside permissions
 

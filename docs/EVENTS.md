@@ -280,8 +280,55 @@ Rules (decided 2026-10-04):
 - **Side effects are their own changes, in the same request:** a booking source created by a
   promo-rate save; each sub-category detached when its parent category is deleted.
 
+### access_events (`AccessEvents`)
+
+Access (build step 10, approved 2026-10-05; part 1 = release 10a). Every change to who can get
+in, and every sign-in. Subject `subject_user_id`: the person whose access it is; the actor is
+whoever acted (the Manager who reset a password, the person signing in). Typed columns: `scope`
+(`property` | `platform`), `user_agent` and `client_address` (sign-ins only, as the edge
+reported them: kept to recognise a sign-in, never used to allow or refuse, A4). **Platform
+events** (the Platform Owner's own account and sign-ins) have no `property_id` (`scope =
+platform`, A2) and are never indexed. **Only account administration is indexed** for the feed
+(`FEED_TYPES`: created, deactivated, reactivated, password reset); sign-ins never are (A9).
+Snapshot: `{name, role}` of the person (never their email). Written by `AuthController` and
+`UsersController` (and `create_user`, as `system`), each under a `FOR UPDATE` lock on the user
+row, in the change's own transaction.
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `account_created` | | | An account is made (`changes.after`: name, role, property, active; never the email) |
+| `account_renamed` | | | Its name changes |
+| `account_deactivated` | yes | | It's switched off; its session ends in the same request (`session_ended`) |
+| `account_reactivated` | yes | | It's switched back on; no old session comes back (F1) |
+| `password_reset` | yes | | Someone sets another person's password; their session ends |
+| `password_changed` | | | A person changes their own, giving their current one (A10) |
+| `signed_in` | | | A successful sign-in (`changes.ended_other_session` when it replaced a session) |
+| `sign_in_failed` | | | A wrong password for an existing account; **no actor** (nobody was proven) |
+| `sign_in_locked` | | | The failure that paused the address (login throttle) |
+| `sign_in_refused` | | | The right password for an inactive account (answered as any failure) |
+| `signed_out` | | | The person signs out |
+| `session_ended` | | | A deactivation or a password set ended the person's session (`changes.because`) |
+
+Rules (decided 2026-10-05):
+- **A failed sign-in has no actor** and `source: web` (`EventContext::unauthenticated()`): the
+  one exception to "a web event has an actor". A failure for an address with no account isn't
+  stored (no subject, and the typed address could be a password, A3); the server log says one
+  happened, with the request id.
+- **Failed, locked and refused attempts are recorded best effort**: if the write fails, the
+  person still gets their answer and the log says so. A successful sign-in and its event are one
+  transaction.
+- **Nothing to change is refused**: deactivating an inactive account (a repeated request)
+  answers 400 and records nothing.
+- **History before step 10** (`AccessBackfill`, migration `BackfillAccountHistory`, A13): one
+  `account_created` per account, dated at its own `created`, no actor or reason, correlation
+  `import-users-<id>`, its active state at import in the snapshot. Deactivations, resets and
+  sign-ins before step 10 were never recorded and aren't invented. An account naming a property
+  that doesn't exist, or with no creation time, is reported and left out.
+- **Read by** your own account (`GET /auth/sign-ins`, everyone), a Manager for their staff
+  (`GET /users/{id}/access-history`, `staff.access_history.view`), and Operations → Activity
+  (account administration only).
+
 ## Planned
 
-| Ledger | Build step |
-|---|---|
-| `access_events` | 10 |
+Release 10b adds memberships, roles, permission grants, the platform flag and support access to
+`access_events` (step 10 proposal, section 3); no new ledger.

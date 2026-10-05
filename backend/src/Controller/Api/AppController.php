@@ -221,13 +221,111 @@ class AppController extends Controller
                 $this->currentUser?->id !== null ? (int)$this->currentUser->id : null,
                 $this->currentUser?->role,
                 $this->effectivePropertyId(),
-                (string)($this->request->getAttribute(CorrelationIdMiddleware::ATTRIBUTE) ?? Text::uuid()),
+                $this->correlationId(),
                 EventContext::SOURCE_WEB,
                 is_string($reason) ? $reason : null,
             );
         }
 
         return $this->eventContext;
+    }
+
+    /**
+     * This request's correlation id (CorrelationIdMiddleware), shared by
+     * every event it records.
+     */
+    protected function correlationId(): string
+    {
+        return (string)($this->request->getAttribute(CorrelationIdMiddleware::ATTRIBUTE) ?? Text::uuid());
+    }
+
+    /**
+     * Record an access event (build step 10, access_events) about `$subject`,
+     * the person whose access it is, in the caller's transaction.
+     * `$withDevice` adds the browser's user agent and the client address the
+     * edge reported (sign-ins, A4): kept to recognise a sign-in, never used to
+     * allow or refuse anyone.
+     *
+     * @param array<string, mixed> $options `changes`, `snapshot` (see EventLedgerBehavior::record()).
+     */
+    protected function recordAccess(
+        EventContext $context,
+        string $type,
+        EntityInterface $subject,
+        array $options = [],
+        bool $withDevice = false,
+    ): void {
+        if ($withDevice) {
+            $agent = substr($this->request->getHeaderLine('User-Agent'), 0, 255);
+            $options['columns'] = [
+                'user_agent' => $agent !== '' ? $agent : null,
+                'client_address' => $this->reportedClientAddress(),
+            ];
+        }
+        /** @var \App\Model\Table\AccessEventsTable $events */
+        $events = $this->fetchTable('AccessEvents');
+        $events->record($context, $type, $subject, $options);
+    }
+
+    /**
+     * One page of a person's access history (step 10), newest first, 25 a
+     * page → {events, page, has_more}. Who acted is named (a reset by a
+     * Manager, a deactivation); a failed attempt has nobody (`actor` null,
+     * `proven` false).
+     */
+    protected function respondWithAccessHistory(int $userId): void
+    {
+        $perPage = 25;
+        $page = min(200, max(1, (int)($this->request->getQuery('page') ?? 1)));
+        $rows = $this->fetchTable('AccessEvents')->find()
+            ->where(['subject_user_id' => $userId])
+            ->orderBy(['occurred_at' => 'DESC', 'id' => 'DESC'])
+            ->limit($perPage + 1)->offset(($page - 1) * $perPage)
+            ->all()->toList();
+        $hasMore = count($rows) > $perPage;
+        $rows = array_slice($rows, 0, $perPage);
+
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($r) => $r->actor_id, $rows))));
+        $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        $events = array_map(fn($r) => [
+            'id' => (int)$r->id,
+            'at' => $r->occurred_at,
+            'event' => $r->event_type,
+            'actor' => $r->actor_id !== null ? ($names[$r->actor_id] ?? null) : null,
+            'actor_role' => $r->actor_role,
+            'self' => $r->actor_id !== null && (int)$r->actor_id === $userId,
+            'proven' => $r->actor_id !== null || $r->source !== 'web',
+            'recorded' => $r->source !== 'import',
+            'source' => $r->source,
+            'reason' => $r->reason,
+            'changes' => $r->changes,
+            'user_agent' => $r->user_agent,
+            'client_address' => $r->client_address,
+            'scope' => $r->scope,
+        ], $rows);
+
+        $this->set(['events' => $events, 'page' => $page, 'has_more' => $hasMore]);
+        $this->viewBuilder()->setOption('serialize', ['events', 'page', 'has_more']);
+    }
+
+    /**
+     * The client address as the edge reported it: Railway's `X-Real-IP`,
+     * else the last `X-Forwarded-For` hop, else the connection. Informational
+     * only: headers can be forged, so nothing is ever allowed or refused on it
+     * (the login throttle is keyed on the address typed, for the same reason).
+     */
+    private function reportedClientAddress(): ?string
+    {
+        $real = trim($this->request->getHeaderLine('X-Real-IP'));
+        if ($real !== '') {
+            return substr($real, 0, 64);
+        }
+        $forwarded = array_filter(array_map('trim', explode(',', $this->request->getHeaderLine('X-Forwarded-For'))));
+        $address = $forwarded !== [] ? end($forwarded) : (string)$this->request->getEnv('REMOTE_ADDR');
+
+        return $address !== '' ? substr($address, 0, 64) : null;
     }
 
     /**

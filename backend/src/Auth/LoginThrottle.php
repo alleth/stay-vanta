@@ -54,8 +54,11 @@ final class LoginThrottle
     /**
      * Count one failed attempt, locking the address once it hits the limit.
      * Further failures while locked push the window out again.
+     *
+     * @return bool True when this failure locked the address (recorded as
+     *   sign_in_locked, step 10).
      */
-    public function recordFailure(string $email): void
+    public function recordFailure(string $email): bool
     {
         $key = $this->key($email);
         $entry = Cache::read($key, self::CACHE_CONFIG);
@@ -65,6 +68,8 @@ final class LoginThrottle
             'count' => $count,
             'locked_until' => $count >= self::MAX_ATTEMPTS ? time() + self::LOCKOUT_SECONDS : null,
         ], self::CACHE_CONFIG);
+
+        return $count === self::MAX_ATTEMPTS;
     }
 
     /**

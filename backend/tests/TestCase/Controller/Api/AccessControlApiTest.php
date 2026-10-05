@@ -280,7 +280,9 @@ class AccessControlApiTest extends TestCase
     public function testResettingAPasswordSignsThatUserOut(): void
     {
         $deskId = $this->userIdFor($this->receptionistToken);
-        $this->callAs($this->adminToken, 'POST', "/api/users/$deskId/reset-password", ['password' => 'newsecret1']);
+        $this->callAs($this->adminToken, 'POST', "/api/users/$deskId/reset-password", [
+            'password' => 'newsecret1', 'reason' => 'Forgot it',
+        ]);
         $this->assertResponseOk();
 
         $this->callAs($this->receptionistToken, 'GET', '/api/auth/me');

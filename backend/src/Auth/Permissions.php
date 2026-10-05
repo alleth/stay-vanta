@@ -76,6 +76,7 @@ final class Permissions
     // Staff
     public const STAFF_ACCOUNT_VIEW = 'staff.account.view';
     public const STAFF_ACCOUNT_MANAGE = 'staff.account.manage';
+    public const STAFF_ACCESS_HISTORY_VIEW = 'staff.access_history.view';
 
     /**
      * Every permission, in catalog order.
@@ -119,6 +120,7 @@ final class Permissions
         self::SETTINGS_CHANGE_LOG_VIEW,
         self::STAFF_ACCOUNT_VIEW,
         self::STAFF_ACCOUNT_MANAGE,
+        self::STAFF_ACCESS_HISTORY_VIEW,
     ];
 
     /**
@@ -210,6 +212,7 @@ final class Permissions
             self::OPERATIONS_STAFF_VIEW,
             self::FINANCE_ANALYTICS_VIEW,
             self::SETTINGS_CHANGE_LOG_VIEW,
+            self::STAFF_ACCESS_HISTORY_VIEW,
             self::FINANCE_INVOICE_REVERSE,
             self::FINANCE_INVOICE_REFUND,
             self::FRONT_DESK_RESERVATION_BACKDATE,

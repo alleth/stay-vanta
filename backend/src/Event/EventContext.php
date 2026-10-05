@@ -35,6 +35,7 @@ final class EventContext
      * @param string $source web | system | import.
      * @param string|null $reason Why, for actions that require one. Blank counts as none.
      * @param \Cake\I18n\DateTime|null $now Defaults to now.
+     * @param bool $unauthenticated A web request that proved nobody (a failed sign-in): no actor.
      */
     public function __construct(
         public readonly ?int $actorId,
@@ -44,6 +45,7 @@ final class EventContext
         public readonly string $source = self::SOURCE_WEB,
         ?string $reason = null,
         ?DateTime $now = null,
+        public readonly bool $unauthenticated = false,
     ) {
         if (trim($correlationId) === '') {
             throw new InvalidArgumentException('An event context needs a correlation id.');
@@ -51,8 +53,11 @@ final class EventContext
         if (!in_array($source, self::SOURCES, true)) {
             throw new InvalidArgumentException("Unknown event source '$source'.");
         }
-        if ($actorId === null && $source === self::SOURCE_WEB) {
+        if ($actorId === null && $source === self::SOURCE_WEB && !$unauthenticated) {
             throw new InvalidArgumentException('A web event needs an actor; only system or import work has none.');
+        }
+        if ($unauthenticated && $actorId !== null) {
+            throw new InvalidArgumentException('An unauthenticated event has no actor.');
         }
         $reason = $reason === null ? null : trim($reason);
         $this->reason = $reason === '' ? null : $reason;
@@ -69,6 +74,16 @@ final class EventContext
     }
 
     /**
+     * For a web request that proved nobody: a failed sign-in (build step 10).
+     * It happened through the web, but nobody is known to have acted, so it
+     * records no actor rather than guessing one.
+     */
+    public static function unauthenticated(?int $propertyId, string $correlationId): self
+    {
+        return new self(null, null, $propertyId, $correlationId, self::SOURCE_WEB, null, null, true);
+    }
+
+    /**
      * The same context with a reason. Everything else, including the clock
      * and the correlation id, is kept.
      */
@@ -82,6 +97,7 @@ final class EventContext
             $this->source,
             $reason,
             $this->now,
+            $this->unauthenticated,
         );
     }
 }

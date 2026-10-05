@@ -6,6 +6,29 @@ one fixed before release, so the pattern stays visible.
 
 ---
 
+## SF-2026-002 · Reactivating an account revived its old session
+
+| | |
+| --- | --- |
+| **Status** | Fixed on staging (release 10a); production when 10a is promoted |
+| **Severity** | Low: needs a deactivated account to be reactivated within 30 days, and a device that still holds its old token |
+| **Found** | 2026-10-05, while preparing the build step 10 proposal (reading `UsersController::edit()`) |
+| **Fixed** | Build step 10, part 1 (decision A8): deactivating revokes the token in the same transaction |
+| **Exploited** | Unknown: sign-ins weren't recorded before step 10, so it can't be shown either way |
+
+**What was wrong.** `PATCH /api/users/{id}` with `is_active: false` only flipped the flag. Every
+request checks `is_active`, so the account was blocked at once, but its sign-in token (valid 30
+days) stayed on the row. Reactivating the account within those 30 days made the old token valid
+again: any device still holding it, such as a shared front-desk computer, was signed back in
+without a password.
+
+**Fix.** Deactivation now ends the session: the token and its expiry are cleared under a lock on the
+user row, in the same transaction as the `account_deactivated` event, and a `session_ended` event
+records it. A password set by someone else does the same (it already cleared the token). Test:
+`AccessEventsApiTest::testDeactivatingNeedsAReasonEndsTheSessionAndReactivatingRevivesNothing`.
+
+---
+
 ## SF-2026-001 · POS orders could reference another hotel's guest, room or reservation
 
 | | |

@@ -34,9 +34,11 @@ class PermissionMatrixApiTest extends TestCase
 
     /**
      * Routes that need no permission: signing in, and what a signed-in user
-     * always needs (who am I, sign out).
+     * always needs (who am I, sign out, their own sign-ins).
      */
-    private const PUBLIC_ROUTES = ['POST /api/auth/login', 'GET /api/auth/me', 'POST /api/auth/logout'];
+    private const PUBLIC_ROUTES = [
+        'POST /api/auth/login', 'GET /api/auth/me', 'POST /api/auth/logout', 'GET /api/auth/sign-ins',
+    ];
 
     /**
      * [method, route template, permission, query string, body].
@@ -151,6 +153,7 @@ class PermissionMatrixApiTest extends TestCase
         ['PATCH', '/api/users/{id}', 'staff.account.manage'],
         ['PUT', '/api/users/{id}', 'staff.account.manage'],
         ['POST', '/api/users/{id}/reset-password', 'staff.account.manage'],
+        ['GET', '/api/users/{id}/access-history', 'staff.access_history.view'],
     ];
 
     private const MISSING_ID = '999999999';

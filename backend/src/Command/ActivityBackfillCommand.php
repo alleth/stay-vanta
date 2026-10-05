@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Event\AccessBackfill;
 use App\Event\ActivityBackfill;
 use App\Event\ConfigBaseline;
 use Cake\Command\Command;
@@ -96,6 +97,29 @@ class ActivityBackfillCommand extends Command
                 $c['unrecorded'],
                 $c['baselines'],
                 $c['recorded_changes'],
+                $c['complete'] ? '' : '  <- INCOMPLETE',
+            ));
+        }
+
+        // Account history (step 10): one account_created per account.
+        $access = new AccessBackfill($connection);
+        if (!$args->getOption('check-only')) {
+            $added = $access->run($propertyId);
+            $io->out(sprintf(
+                '%-24s %d added, %d not importable',
+                'account_created',
+                $added['account_created'],
+                $added['skipped'],
+            ));
+        }
+        foreach ($access->check($propertyId) as $id => $c) {
+            $incomplete += $c['complete'] ? 0 : 1;
+            $io->out(sprintf(
+                '%s: %d accounts, %d with no recorded creation, %d imported%s',
+                $id === 0 ? 'platform' : "property $id",
+                $c['accounts'],
+                $c['unrecorded'],
+                $c['imported'],
                 $c['complete'] ? '' : '  <- INCOMPLETE',
             ));
         }

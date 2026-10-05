@@ -49,6 +49,15 @@ Reading it:
 - The `user` object both login and `me` return carries `permissions`: the sorted list of
   `module.resource.action` names the user holds (`docs/PERMISSIONS.md`). It drives what the screens
   offer; the server checks every action itself.
+- **Recorded (step 10, `access_events`):** a sign-in (`signed_in`, with the browser's user agent
+  and the reported client address), a wrong password for an existing account (`sign_in_failed`, no
+  actor), the failure that pauses the address (`sign_in_locked`), the right password for an
+  inactive account (`sign_in_refused`; the answer is the same "Invalid credentials."), and a
+  sign-out (`signed_out`). A failure for an address with no account isn't stored.
+- `GET /api/auth/sign-ins[?page=]` — **anyone signed in, about themselves** (no permission, like
+  `/me`): their access history, newest first, 25 a page → `{events, page, has_more}`; each
+  `{id, at, event, actor, actor_role, self, proven (false = an attempt that proved nobody),
+  recorded (false = imported), source, reason, changes, user_agent, client_address, scope}`.
 
 ## Properties, Platform, Finance, Operations
 
@@ -137,6 +146,14 @@ Reading it:
 ## Staff
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate
   your own account**) · `POST /api/users/{id}/reset-password` (also nulls `api_token`).
+- **Step 10:** every change is an access event under a lock on the user row. Deactivating and
+  reactivating need `reason` (400 without; nothing saved); deactivating also ends the person's
+  session (`session_ended`), so reactivating never revives it. A request that changes nothing
+  (deactivating an inactive account) is 400 "Nothing to change". Resetting **someone else's**
+  password needs `reason`; changing **your own** needs `current_password` (400 "Your current
+  password is not correct."). Either way the person's session ends.
+- `GET /api/users/{id}/access-history[?page=]` — **Manager** (`staff.access_history.view`), for
+  the staff they manage (404 otherwise): the same shape as `/auth/sign-ins`.
   Owner & admin only; admins may change their own password & reset their receptionists, but not
   a peer admin's (see `UsersController::findManageable()`).
 

@@ -51,6 +51,11 @@ class EventLedgerBehavior extends Behavior
         // Column holding the event type, or null when the row implies it
         // (a stock movement's direction); activity_index always has it.
         'eventTypeColumn' => 'event_type',
+        // Whether a subject with no property is allowed: a platform event
+        // (access_events, step 10). Stored without a property, never indexed.
+        'platformEvents' => false,
+        // The event types that go to activity_index (the feed); null = all.
+        'indexTypes' => null,
     ];
 
     /**
@@ -163,11 +168,12 @@ class EventLedgerBehavior extends Behavior
             ));
         }
 
-        $propertyId = (int)$subject->get('property_id');
-        if ($propertyId === 0) {
+        $rawProperty = $subject->get('property_id');
+        $propertyId = $rawProperty === null ? null : (int)$rawProperty;
+        if ($propertyId === 0 || ($propertyId === null && !$this->getConfig('platformEvents'))) {
             throw new LogicException('An event subject must belong to a property.');
         }
-        if ($context->propertyId !== null && $context->propertyId !== $propertyId) {
+        if ($context->propertyId !== null && $propertyId !== null && $context->propertyId !== $propertyId) {
             throw new LogicException('An event cannot be recorded for another property than the request\'s.');
         }
 
@@ -190,6 +196,13 @@ class EventLedgerBehavior extends Behavior
         }
         $row->patch($stamp, ['guard' => false]);
         $table->saveOrFail($row, ['atomic' => false]);
+
+        // The feed is a property's: a platform event, or a type the ledger
+        // keeps out of it (a sign-in), has no index row.
+        $indexTypes = $this->getConfig('indexTypes');
+        if ($propertyId === null || ($indexTypes !== null && !in_array($type, $indexTypes, true))) {
+            return $row;
+        }
 
         $summary = $options['summary']
             ?? (method_exists($table, 'summaryOf') ? $table->summaryOf($subject, $type) : $snapshot);

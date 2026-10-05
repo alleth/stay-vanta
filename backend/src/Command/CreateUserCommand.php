@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Event\EventContext;
+use App\Model\Table\AccessEventsTable;
 use Cake\Command\Command;
 use Cake\Console\Arguments;
 use Cake\Console\ConsoleIo;
@@ -30,6 +32,11 @@ class CreateUserCommand extends Command
             ->addOption('property-id', ['help' => 'Property id (for admin/receptionist)']);
     }
 
+    /**
+     * @param \Cake\Console\Arguments $args The arguments.
+     * @param \Cake\Console\ConsoleIo $io The console.
+     * @return int
+     */
     public function execute(Arguments $args, ConsoleIo $io): int
     {
         $users = $this->fetchTable('Users');
@@ -43,7 +50,27 @@ class CreateUserCommand extends Command
             'is_active' => true,
         ]);
 
-        if (!$users->save($user)) {
+        // Recorded as the system: nobody signed in made it (step 10).
+        $saved = $users->getConnection()->transactional(function () use ($users, $user): bool {
+            if (!$users->save($user, ['atomic' => false])) {
+                return false;
+            }
+            $propertyId = $user->property_id !== null ? (int)$user->property_id : null;
+            /** @var \App\Model\Table\AccessEventsTable $events */
+            $events = $this->fetchTable('AccessEvents');
+            $context = EventContext::system($propertyId, 'create-user');
+            $events->record($context, AccessEventsTable::ACCOUNT_CREATED, $user, [
+                'changes' => ['after' => [
+                    'name' => $user->name,
+                    'role' => $user->role,
+                    'property_id' => $propertyId,
+                    'is_active' => true,
+                ]],
+            ]);
+
+            return true;
+        });
+        if (!$saved) {
             $io->error('Could not create user:');
             foreach ($user->getErrors() as $field => $errors) {
                 $io->error(sprintf('  %s: %s', $field, implode(', ', $errors)));

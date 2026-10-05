@@ -626,6 +626,9 @@ class OperationsController extends AppController
                     "event_table = 'config_changes' AND EXISTS (SELECT 1 FROM config_changes cc
                         WHERE cc.id = ActivityIndex.event_id AND cc.event_type != 'baseline_recorded'
                         AND ((cc.event_type = 'updated' AND cc.impact = 'price') OR cc.event_type = 'deleted'))",
+                    // Account administration (step 10, A9); only those types
+                    // are indexed, sign-ins never are.
+                    ['event_table' => 'access_events'],
                 ],
             ])
             ->orderBy(['occurred_at' => 'DESC'])
@@ -650,7 +653,12 @@ class OperationsController extends AppController
         $saleRefundIds = [];
         $reservationEventIds = [];
         $configChangeIds = [];
+        $accessEventIds = [];
         foreach ($rows as $row) {
+            if ($row['event_table'] === 'access_events') {
+                $accessEventIds[] = (int)$row['event_id'];
+                continue;
+            }
             if ($row['event_table'] === 'reservation_events') {
                 $reservationEventIds[] = (int)$row['event_id'];
                 continue;
@@ -673,6 +681,7 @@ class OperationsController extends AppController
         $saleRefundLines = $this->saleRefundFeedLines($saleRefundIds);
         $reservationLines = $this->reservationFeedLines($reservationEventIds);
         $configLines = $this->configFeedLines($configChangeIds);
+        $accessLines = $this->accessFeedLines($accessEventIds);
         $movements = $movementIds === [] ? [] : $this->fetchTable('StockMovements')->find()
             ->contain([
                 'InventoryItems' => ['fields' => ['id', 'name', 'unit']],
@@ -717,6 +726,12 @@ class OperationsController extends AppController
             if ($row['event_table'] === 'config_changes') {
                 if (isset($configLines[(int)$row['event_id']])) {
                     $events[] = $configLines[(int)$row['event_id']];
+                }
+                continue;
+            }
+            if ($row['event_table'] === 'access_events') {
+                if (isset($accessLines[(int)$row['event_id']])) {
+                    $events[] = $accessLines[(int)$row['event_id']];
                 }
                 continue;
             }
@@ -927,6 +942,46 @@ class OperationsController extends AppController
                 'impact' => $c->impact,
                 'reason' => $c->reason,
                 'fields' => $fields,
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Feed lines for account administration (build step 10): an account
+     * created, deactivated or reactivated, a password reset; who did it,
+     * whose account, and why.
+     *
+     * @param list<int> $eventIds access_events ids on this page.
+     * @return array<int, array<string, mixed>> Feed line per event id.
+     */
+    private function accessFeedLines(array $eventIds): array
+    {
+        if ($eventIds === []) {
+            return [];
+        }
+        $events = $this->fetchTable('AccessEvents')->find()->where(['id IN' => $eventIds])->all()->toList();
+        $ids = array_values(array_unique(array_filter(array_merge(
+            array_map(fn($e) => $e->actor_id, $events),
+            array_map(fn($e) => $e->subject_user_id, $events),
+        ))));
+        $names = $ids === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $ids])->all()->combine('id', 'name')->toArray();
+
+        $lines = [];
+        foreach ($events as $e) {
+            $lines[(int)$e->id] = [
+                'type' => 'access',
+                'id' => 'access-event-' . $e->id,
+                'at' => $e->occurred_at,
+                'actor' => $e->actor_id !== null ? ($names[$e->actor_id] ?? null) : null,
+                'recorded' => $e->source !== 'import',
+                'source' => $e->source,
+                'event' => $e->event_type,
+                'person' => $names[$e->subject_user_id] ?? ($e->snapshot['name'] ?? null),
+                'person_role' => $e->snapshot['role'] ?? null,
+                'reason' => $e->reason,
             ];
         }
 

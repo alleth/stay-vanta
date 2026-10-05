@@ -59,6 +59,7 @@ return function (RouteBuilder $routes): void {
         $builder->post('/auth/login', ['controller' => 'Auth', 'action' => 'login']);
         $builder->post('/auth/logout', ['controller' => 'Auth', 'action' => 'logout']);
         $builder->get('/auth/me', ['controller' => 'Auth', 'action' => 'me']);
+        $builder->get('/auth/sign-ins', ['controller' => 'Auth', 'action' => 'signIns']);
 
         // Properties (hotels & resorts).
         $builder->get('/properties', ['controller' => 'Properties', 'action' => 'index']);
@@ -96,6 +97,8 @@ return function (RouteBuilder $routes): void {
         $builder->put('/users/{id}', ['controller' => 'Users', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post('/users/{id}/reset-password', ['controller' => 'Users', 'action' => 'resetPassword'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->get('/users/{id}/access-history', ['controller' => 'Users', 'action' => 'accessHistory'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         // Inventory module.

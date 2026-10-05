@@ -217,6 +217,8 @@ class PropertyIsolationApiTest extends TestCase
             ['POST', '/api/food-orders/' . $b['order'] . '/refund', ['method' => 'cash', 'reason' => 'Not ours']],
             ['PATCH', '/api/users/' . $b['admin'], ['is_active' => false]],
             ['POST', '/api/users/' . $b['receptionist'] . '/reset-password', ['password' => 'hijacked1']],
+            // Step 10: another hotel's staff sign-ins.
+            ['GET', '/api/users/' . $b['receptionist'] . '/access-history', []],
         ];
         foreach ($attempts as [$method, $url, $body]) {
             $this->callAs($this->adminToken, $method, $url, $body);
