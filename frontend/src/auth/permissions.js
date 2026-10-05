@@ -43,6 +43,7 @@ export const P = {
   SETTINGS_CHANGE_LOG_VIEW: 'settings.change_log.view',
   STAFF_ACCOUNT_VIEW: 'staff.account.view',
   STAFF_ACCOUNT_MANAGE: 'staff.account.manage',
+  STAFF_ACCESS_HISTORY_VIEW: 'staff.access_history.view',
 }
 
 // What each stored role holds, for a session whose /auth/me predates
@@ -112,6 +113,7 @@ export const ROLE_FALLBACK = {
     P.OPERATIONS_STAFF_VIEW,
     P.FINANCE_ANALYTICS_VIEW,
     P.SETTINGS_CHANGE_LOG_VIEW,
+    P.STAFF_ACCESS_HISTORY_VIEW,
     P.FINANCE_INVOICE_REVERSE,
     P.FINANCE_INVOICE_REFUND,
     P.FRONT_DESK_RESERVATION_BACKDATE,
