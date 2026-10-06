@@ -40,8 +40,10 @@ export const createItem = (data, propertyId) =>
 export const updateItem = (id, data) =>
   client.patch(`/inventory-items/${id}`, data).then((r) => r.data.item)
 
-export const deleteItem = (id) =>
-  client.delete(`/inventory-items/${id}`).then((r) => r.data)
+// Soft delete with a reason (inventory follow-up, 2026-10-06). Refused (409,
+// with `in_use`) while a menu item, recipe or option still uses the item.
+export const deleteItem = (id, reason) =>
+  client.delete(`/inventory-items/${id}`, { data: { reason } }).then((r) => r.data)
 
 export const listMovements = (propertyId, params = {}) =>
   client.get('/stock-movements', { params: withProp(params, propertyId) }).then((r) => r.data.movements)

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\Permissions;
+use App\Event\ReasonRequiredException;
 use Cake\Http\Exception\BadRequestException;
 
 /**
@@ -174,7 +175,9 @@ class InventoryItemsController extends AppController
         $context = $this->eventContext();
         $saved = $items->getConnection()->transactional(
             function () use ($items, $item, $opening, $context, $trackingType): bool {
-                if (!$items->save($item, ['atomic' => false])) {
+                // Recorded as the item's creation (config_changes); the
+                // opening stock is a stock movement of the same request.
+                if (!$items->save($item, ['atomic' => false] + $this->auditOptions())) {
                     return false;
                 }
                 if ($opening > 0) {
@@ -257,7 +260,9 @@ class InventoryItemsController extends AppController
             $item->set('total_quantity', null);
         }
 
-        if (!$items->save($item)) {
+        // Each changed field is recorded with before and after (config_changes);
+        // a save that changes nothing is refused and records nothing.
+        if (!$items->save($item, $this->auditOptions(true))) {
             $this->response = $this->response->withStatus(422);
             $this->set('errors', $item->getErrors());
             $this->viewBuilder()->setOption('serialize', ['errors']);
@@ -270,11 +275,18 @@ class InventoryItemsController extends AppController
     }
 
     /**
-     * DELETE /api/inventory-items/{id}  (owner/admin)
+     * DELETE /api/inventory-items/{id} { reason }  (Manager)
      *
-     * Soft-delete: the item is hidden from inventory and from menu linking, but
-     * the row stays so its stock_movements (the accountability ledger) remain
-     * intact. Any menu items pointing at it are unlinked.
+     * Soft delete with a reason (G1, approved 2026-10-06): the row stays so
+     * its stock movements and history remain, and its deletion is recorded
+     * with every value it had. Lock, then check, then change, then record,
+     * in one transaction:
+     * - **still in use is refused (I1)**: while a menu item, a recipe or a
+     *   menu option still uses the item, nothing changes and the answer (409)
+     *   lists them, so the Manager removes each link in POS, where every
+     *   removal is recorded. Nothing is unlinked automatically;
+     * - **sub-items move to the top level (I2)**: each move is recorded as
+     *   that sub-item's change, under the deletion's reason and request.
      */
     public function delete(int $id): void
     {
@@ -283,23 +295,101 @@ class InventoryItemsController extends AppController
         $this->authorize(Permissions::INVENTORY_ITEM_MANAGE, 'Only Managers may delete inventory items.');
 
         $items = $this->fetchTable('InventoryItems');
-        $item = $this->scopeToProperty(
-            $items->find()->where(['InventoryItems.id' => $id, 'InventoryItems.deleted_at IS' => null])
+        $this->scopeToProperty(
+            $items->find()->where(['InventoryItems.id' => $id, 'InventoryItems.deleted_at IS' => null]),
         )->firstOrFail();
+        if ($this->eventContext()->reason === null) {
+            throw new ReasonRequiredException('Deleting an inventory item needs a reason.');
+        }
 
-        $items->getConnection()->transactional(function () use ($items, $item, $id): void {
-            $this->fetchTable('FoodMenuItems')->updateAll(
-                ['inventory_item_id' => null],
-                ['inventory_item_id' => $id]
-            );
-            // Its sub-items become top-level again (they keep their own stock).
-            $items->updateAll(['parent_id' => null], ['parent_id' => $id]);
-            $item->set('deleted_at', new \Cake\I18n\DateTime());
-            $items->saveOrFail($item);
+        $inUse = $items->getConnection()->transactional(function () use ($items, $id): array {
+            $item = $items->find()->where(['InventoryItems.id' => $id])->epilog('FOR UPDATE')->firstOrFail();
+            if ($item->deleted_at !== null) {
+                throw new BadRequestException('This item has already been deleted.');
+            }
+            $uses = $this->usesOf($id);
+            if ($uses !== []) {
+                return $uses;
+            }
+            $children = $items->find()
+                ->where(['InventoryItems.parent_id' => $id, 'InventoryItems.deleted_at IS' => null])
+                ->orderBy(['InventoryItems.id' => 'ASC'])
+                ->epilog('FOR UPDATE')
+                ->all();
+            foreach ($children as $child) {
+                $child->set('parent_id', null);
+                $items->saveOrFail($child, $this->auditOptions());
+            }
+            $item->set('deleted_at', $this->eventContext()->now);
+            $items->saveOrFail($item, $this->auditOptions());
+
+            return [];
         });
+
+        if ($inUse !== []) {
+            $this->response = $this->response->withStatus(409);
+            $this->set([
+                'message' => 'This item is still used by: ' . implode('; ', array_column($inUse, 'label'))
+                    . '. Remove these links in POS first, then delete it.',
+                'in_use' => $inUse,
+            ]);
+            $this->viewBuilder()->setOption('serialize', ['message', 'in_use']);
+
+            return;
+        }
 
         $this->set('ok', true);
         $this->viewBuilder()->setOption('serialize', ['ok']);
+    }
+
+    /**
+     * What still uses an inventory item (I1): menu items linked to it,
+     * recipes with it as an ingredient, and menu options that take it from
+     * stock, on menu items that aren't deleted.
+     *
+     * @return list<array{kind: string, menu_item_id: int, label: string}>
+     */
+    private function usesOf(int $itemId): array
+    {
+        $uses = [];
+        $menu = $this->fetchTable('FoodMenuItems')->find()
+            ->select(['id', 'name'])
+            ->where(['inventory_item_id' => $itemId, 'deleted_at IS' => null])
+            ->orderBy(['id' => 'ASC'])->all();
+        foreach ($menu as $m) {
+            $uses[] = ['kind' => 'menu_item', 'menu_item_id' => (int)$m->id, 'label' => "menu item “{$m->name}”"];
+        }
+        $recipes = $this->fetchTable('FoodMenuItemIngredients')->find()
+            ->contain(['FoodMenuItems' => fn($q) => $q->select(['id', 'name'])])
+            ->where([
+                'FoodMenuItemIngredients.inventory_item_id' => $itemId,
+                'FoodMenuItems.deleted_at IS' => null,
+            ])
+            ->orderBy(['FoodMenuItemIngredients.id' => 'ASC'])->all();
+        foreach ($recipes as $r) {
+            $uses[] = [
+                'kind' => 'recipe',
+                'menu_item_id' => (int)$r->food_menu_item->id,
+                'label' => "the recipe of “{$r->food_menu_item->name}”",
+            ];
+        }
+        $options = $this->fetchTable('FoodMenuItemOptions')->find()
+            ->contain(['FoodMenuItemOptionGroups.FoodMenuItems'])
+            ->where([
+                'FoodMenuItemOptions.inventory_item_id' => $itemId,
+                'FoodMenuItems.deleted_at IS' => null,
+            ])
+            ->orderBy(['FoodMenuItemOptions.id' => 'ASC'])->all();
+        foreach ($options as $o) {
+            $menuItem = $o->food_menu_item_option_group->food_menu_item;
+            $uses[] = [
+                'kind' => 'option',
+                'menu_item_id' => (int)$menuItem->id,
+                'label' => "the option “{$o->label}” on “{$menuItem->name}”",
+            ];
+        }
+
+        return $uses;
     }
 
     /**

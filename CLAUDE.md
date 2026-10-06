@@ -143,8 +143,10 @@ meet it; reservations (`reservation_events`, soft delete) since step 8. `reserva
 is legacy ("last touched by", still stamped for one release, never the actor). Configuration
 (`config_changes`, step 9, in production 2026-10-05, `b6ecca2`; rows from before carry one
 `baseline_recorded` with no actor). Accounts and sign-ins (`access_events`, step 10 part 1 =
-release 10a; memberships, roles and support access follow in 10b). Known gaps: inventory item details (name, unit, category, threshold: only stock movements
-are ledgered); guest record edits; room status changes (future Rooms module, `room_events`).
+release 10a; memberships, roles and support access follow in 10b). Inventory item records
+(name, unit, category, threshold, stock type, parent, deletion) since the inventory follow-up
+(2026-10-06, `config_changes`, entity `inventory_item`). Known gaps (final review G3–G8): guest
+record edits; room status changes (future Rooms module, `room_events`); the A11 retention routine.
 
 **Event recording standard** (all new ledgers; the shared foundation is build step 5):
 - **Tables:** `<subject>_events` (`reservation_events`, `invoice_events`, `food_order_events`,
@@ -190,7 +192,9 @@ are ledgered); guest record edits; room status changes (future Rooms module, `ro
 - **Feed:** every ledger also writes one row to `activity_index` in the same transaction;
   Operations → Activity pages that one table.
 - **Configuration audit (step 9, built):** `ConfigAuditBehavior` on the configuration tables
-  (room rates, promo rates, extra charges, rooms, booking sources, receipt series, menu items)
+  (room rates, promo rates, extra charges, rooms, booking sources, receipt series, menu items,
+  inventory categories and inventory items; on items `quantity`/`total_quantity` are ignored:
+  stock belongs to `stock_movements`)
   diffs changed fields into `config_changes`. Save rows with `$this->auditOptions()` (or
   `auditOptions(true)` on edits) and delete them with `$this->softDelete()`; the behavior refuses a
   save of an audited field without an `eventContext`, a price change or deletion without a reason,

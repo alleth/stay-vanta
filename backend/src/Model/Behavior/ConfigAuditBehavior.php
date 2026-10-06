@@ -227,12 +227,14 @@ class ConfigAuditBehavior extends Behavior
      */
     public function recordBaseline(EventContext $context, EntityInterface $entity): void
     {
-        $this->write(
-            $context,
-            $entity,
-            ConfigChangesTable::BASELINE_RECORDED,
-            ['after' => $this->valuesOf($entity, false)],
-        );
+        $after = $this->valuesOf($entity, false);
+        // A row already deleted when the audit began says so, with the time
+        // its `deleted_at` recorded: who deleted it, and why, were never
+        // recorded, so no `deleted` event is made up for it.
+        if ($entity->has('deleted_at') && $entity->get('deleted_at') !== null) {
+            $after['deleted_at'] = $this->normalize('deleted_at', $entity->get('deleted_at'));
+        }
+        $this->write($context, $entity, ConfigChangesTable::BASELINE_RECORDED, ['after' => $after]);
     }
 
     /**

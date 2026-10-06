@@ -13,6 +13,7 @@ export const ENTITY_LABELS = {
   receipt_series: 'Receipt booklet',
   menu_item: 'Menu item',
   inventory_category: 'Inventory category',
+  inventory_item: 'Inventory item',
   property: 'Property',
 }
 
@@ -53,7 +54,12 @@ const FIELD_LABELS = {
   end_number: 'Last number',
   pad_length: 'Digits',
   kind: 'Kind',
-  parent_id: 'Parent category',
+  parent_id: 'Parent',
+  unit: 'Unit',
+  reorder_level: 'Low-stock threshold',
+  inventory_category_id: 'Category',
+  tracking_type: 'Stock type',
+  deleted_at: 'Deleted on',
   subscription_fee: 'Subscription fee',
   subscription_status: 'Subscription',
   subscription_expires_at: 'Subscription ends',

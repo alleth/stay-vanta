@@ -6,6 +6,7 @@ namespace App\Command;
 use App\Event\AccessBackfill;
 use App\Event\ActivityBackfill;
 use App\Event\ConfigBaseline;
+use App\Event\InventoryLinkReport;
 use App\Event\MembershipImport;
 use Cake\Command\Command;
 use Cake\Console\Arguments;
@@ -156,6 +157,24 @@ class ActivityBackfillCommand extends Command
                     $c['imported'],
                     $c['complete'] ? '' : '  <- INCOMPLETE',
                 ));
+        }
+
+        // Menu items, recipes and options still using a deleted inventory item
+        // (I3): reported for a Manager to fix in POS, never repaired here.
+        $broken = (new InventoryLinkReport($connection))->report($propertyId);
+        foreach ($broken as $b) {
+            $io->out(sprintf(
+                'property %d: menu item %d "%s" (%s) uses deleted inventory item %d "%s"  <- FIX IN POS',
+                $b['property_id'],
+                $b['menu_item_id'],
+                $b['menu_item'],
+                $b['kind'],
+                $b['inventory_item_id'],
+                $b['inventory_item'],
+            ));
+        }
+        if ($broken === []) {
+            $io->out('inventory links: none broken');
         }
 
         return $incomplete === 0 ? static::CODE_SUCCESS : static::CODE_ERROR;

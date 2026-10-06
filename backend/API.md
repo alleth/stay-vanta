@@ -221,9 +221,13 @@ Reading it:
 - `PUT|PATCH /api/inventory-items/{id}` — **owner/admin only**; fixes category/`tracking_type`
   etc., never touches quantity. `parent_id` (sub-item) is one level deep, consumables only
   (`InventoryItemsController::assertValidParent()`).
-- `DELETE /api/inventory-items/{id}` — **owner/admin only**; **soft-delete** (`deleted_at`):
-  hidden from inventory/menu linking, `stock_movements` kept, menu items unlinked, its sub-items
-  become top-level again.
+- `DELETE /api/inventory-items/{id}` `{reason}` — **Manager**; **soft-delete** (`deleted_at`):
+  hidden from inventory/menu linking, `stock_movements` kept. `reason` required (400 without;
+  nothing changes). **Refused with 409** `{message, in_use: [{kind: menu_item|recipe|option,
+  menu_item_id, label}]}` while a menu item, a recipe or a menu option still uses it: nothing is
+  unlinked automatically (I1). Its sub-items move to the top level, each recorded under the
+  deletion's reason (I2). Creating and editing items are recorded too (`config_changes`,
+  `inventory_item`); an edit that changes nothing is 400.
 - `GET /api/stock-movements[?inventory_item_id=]` · `POST /api/stock-movements` — manual move is
   **owner/admin only**; optional `note` (what was restocked). Receptionists' stock-out happens via
   Food & Orders, which records the movement internally stamped to them.

@@ -11,8 +11,8 @@ import {
   listCategories, createCategory, deleteCategory,
   listItems, listItemsPage, createItem, updateItem, deleteItem, listMovements, recordMovement,
 } from '../api/inventory'
-import { describeError } from '../utils/apiError'
 import ReasonModal from '../components/ReasonModal'
+import ConfigHistory from '../components/settings/ConfigHistory'
 
 const KINDS = ['food_stock', 'hygiene', 'linen', 'utensil', 'other']
 
@@ -67,7 +67,6 @@ export default function Inventory() {
   const [modal, setModal] = useState(null) // 'category' | 'categories' | 'item' | 'move'
   const [moveTarget, setMoveTarget] = useState(null)
   const [editTarget, setEditTarget] = useState(null) // item being edited (null = new)
-  const [pending, setPending] = useState(null) // key of the in-flight inline action
 
   const loadBase = useCallback(async () => {
     if (!propertyId) return
@@ -164,19 +163,10 @@ export default function Inventory() {
 
   const openMove = (item, action) => { setMoveTarget({ item, action }); setModal('move') }
 
-  async function doDeleteItem(item) {
-    if (!window.confirm(`Delete "${item.name}"? It will be removed from inventory; its stock history is kept.`)) return
-    setPending(`item-${item.id}`)
-    setError(null)
-    try {
-      await deleteItem(item.id)
-      refresh()
-    } catch (ex) {
-      setError(describeError(ex, 'Could not delete the item.'))
-    } finally {
-      setPending(null)
-    }
-  }
+  // Deleting asks why, and is refused while a menu item, recipe or option
+  // still uses the item: the dialog then lists them (inventory follow-up).
+  const [deletingItem, setDeletingItem] = useState(null)
+  const doDeleteItem = (item) => setDeletingItem(item)
 
   if (!propertyId)
     return <Alert variant="info">Select or create a property to manage inventory.</Alert>
@@ -338,11 +328,7 @@ export default function Inventory() {
                         </td>
                         <td className="whitespace-nowrap text-right">
                           {(canAdjustStock || canManageItems) && (
-                            <Dropdown
-                              align="end"
-                              disabled={pending === `item-${it.id}`}
-                              toggle={pending === `item-${it.id}` ? <Spinner size="sm" /> : undefined}
-                            >
+                            <Dropdown align="end">
                               {canAdjustStock && Object.entries(reusable ? REUSABLE_ACTIONS : CONSUMABLE_ACTIONS).map(([key, a]) => (
                                 <Dropdown.Item key={key} onClick={() => openMove(it, key)}>
                                   <span className={a.direction === 'in'
@@ -428,6 +414,17 @@ export default function Inventory() {
           </div>
         </div>
       )}
+
+      <ReasonModal show={deletingItem !== null}
+        title={deletingItem ? `Delete ${deletingItem.name}` : ''}
+        description="It disappears from inventory; its stock history stays, and its sub-items move to the top level. If a menu item, recipe or option still uses it, remove those links in POS first."
+        confirmLabel="Delete item"
+        onHide={() => setDeletingItem(null)}
+        onConfirm={async (reason) => {
+          await deleteItem(deletingItem.id, reason)
+          setDeletingItem(null)
+          refresh()
+        }} />
 
       {modal === 'category' && (
         <CategoryModal
@@ -575,6 +572,8 @@ function CategoriesModal({ categories, propertyId, onClose, onChanged }) {
 
 function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onSaved }) {
   const editing = Boolean(item)
+  // The item's history: who changed what, and when (Managers only).
+  const { can } = useAuth()
   const [form, setForm] = useState({
     inventory_category_id: item?.inventory_category_id ?? categories[0]?.id ?? '',
     parent_id: item?.parent_id ?? '',
@@ -670,6 +669,9 @@ function ItemModal({ propertyId, categories, item, defaultTracking, onClose, onS
               </Form.Group>
             )}
           </div>
+          {editing && can(P.SETTINGS_CHANGE_LOG_VIEW) && (
+            <ConfigHistory entityType="inventory_item" entityId={item.id} propertyId={propertyId} />
+          )}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>

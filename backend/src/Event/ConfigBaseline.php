@@ -34,6 +34,8 @@ final class ConfigBaseline
         'ReceiptSeries' => 'receipt_series',
         'FoodMenuItems' => 'menu_item',
         'InventoryCategories' => 'inventory_category',
+        // Inventory follow-up (G1, 2026-10-06).
+        'InventoryItems' => 'inventory_item',
     ];
 
     /**

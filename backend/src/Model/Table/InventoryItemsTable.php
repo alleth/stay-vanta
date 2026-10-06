@@ -17,6 +17,27 @@ class InventoryItemsTable extends Table
     public function initialize(array $config): void
     {
         parent::initialize($config);
+        // What an item is (name, unit, category, low-stock threshold, stock
+        // type, parent) is recorded in config_changes (inventory follow-up,
+        // approved 2026-10-06 as G1/I1–I3). How much there is belongs to the
+        // stock ledger: quantities change only through
+        // StockMovementsTable::record(), so they're never audited here.
+        // Deleting is a soft delete with a reason; rows are filtered by hand
+        // (`deleted_at IS NULL`) as before, so `softDelete` stays off and no
+        // existing query changes.
+        $this->addBehavior('ConfigAudit', [
+            'entityType' => 'inventory_item',
+            'defaultImpact' => ConfigChangesTable::IMPACT_OPERATIONAL,
+            'impacts' => [
+                'name' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+                'unit' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+                'inventory_category_id' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+                'parent_id' => ConfigChangesTable::IMPACT_ADMINISTRATIVE,
+                'reorder_level' => ConfigChangesTable::IMPACT_OPERATIONAL,
+                'tracking_type' => ConfigChangesTable::IMPACT_OPERATIONAL,
+            ],
+            'ignore' => ['quantity', 'total_quantity', 'last_receptionist_id'],
+        ]);
 
         $this->setTable('inventory_items');
         $this->setDisplayField('name');
