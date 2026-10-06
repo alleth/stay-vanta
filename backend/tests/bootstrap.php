@@ -15,8 +15,12 @@ declare(strict_types=1);
  * @license   https://opensource.org/licenses/mit-license.php MIT License
  */
 
+use App\Event\MembershipImport;
+use Cake\Cache\Cache;
 use Cake\Chronos\Chronos;
 use Cake\Core\Configure;
+use Cake\Datasource\ConnectionManager;
+use Cake\ORM\TableRegistry;
 use Cake\TestSuite\ConnectionHelper;
 use Migrations\TestSuite\Migrator;
 
@@ -58,3 +62,14 @@ ConnectionHelper::addTestAliases();
 // (new SchemaLoader())->loadSqlFiles('./tests/schema.sql', 'test');
 
 (new Migrator())->run();
+
+// Data migrations load tables while the schema is still changing (a fresh
+// database runs every migration in this one process), so forget what they
+// described. The Migrator then emptied every table, including the role
+// presets (step 10b) that the application treats as reference data: put
+// them back (idempotent).
+TableRegistry::getTableLocator()->clear();
+Cache::clear('_cake_model_');
+/** @var \Cake\Database\Connection $testConnection */
+$testConnection = ConnectionManager::get('test');
+(new MembershipImport($testConnection))->seedRoles();

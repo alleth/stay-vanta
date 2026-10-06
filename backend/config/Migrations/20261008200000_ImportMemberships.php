@@ -2,7 +2,9 @@
 declare(strict_types=1);
 
 use App\Event\MembershipImport;
+use Cake\Cache\Cache;
 use Cake\Datasource\ConnectionManager;
+use Cake\ORM\TableRegistry;
 use Migrations\BaseMigration;
 
 /**
@@ -18,6 +20,12 @@ class ImportMemberships extends BaseMigration
      */
     public function up(): void
     {
+        // An earlier data migration in this process may have described
+        // access_events before CreateMemberships added its columns (a fresh
+        // database runs them all at once): forget those descriptions.
+        TableRegistry::getTableLocator()->clear();
+        Cache::clear('_cake_model_');
+
         /** @var \Cake\Database\Connection $connection */
         $connection = ConnectionManager::get('default');
         $import = new MembershipImport($connection);
