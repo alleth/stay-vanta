@@ -189,16 +189,15 @@ are ledgered); guest record edits; room status changes (future Rooms module, `ro
   backdate, correction, cancellation after payment, discount override, void, reversal.
 - **Feed:** every ledger also writes one row to `activity_index` in the same transaction;
   Operations → Activity pages that one table.
-- **Configuration audit (step 9, built):** save configuration rows with
-  `$this->auditOptions()` (or `auditOptions(true)` on edits) and delete them with
-  `$this->softDelete()`; `ConfigAuditBehavior` refuses a save of an audited field without an
-  `eventContext`, a price change or deletion without a reason, and any hard delete. Fields it
-  ignores (`rooms.status`, `receipt_series.next_number`) are operational.
-- **Configuration audit** is a `ConfigAuditBehavior` on the configuration tables (room rates,
-  promo rates, extra charges, rooms, booking sources, receipt series, menu items): it diffs changed
-  fields and writes `config_changes`, and refuses to save without an actor. Audit follows the data,
-  not the screen, so menu prices are audited even though the menu stays in POS.
-- **Step 5 (in progress) — the foundation exists:** `App\Event\EventContext`
+- **Configuration audit (step 9, built):** `ConfigAuditBehavior` on the configuration tables
+  (room rates, promo rates, extra charges, rooms, booking sources, receipt series, menu items)
+  diffs changed fields into `config_changes`. Save rows with `$this->auditOptions()` (or
+  `auditOptions(true)` on edits) and delete them with `$this->softDelete()`; the behavior refuses a
+  save of an audited field without an `eventContext`, a price change or deletion without a reason,
+  and any hard delete. Fields it ignores (`rooms.status`, `receipt_series.next_number`) are
+  operational. Audit follows the data, not the screen, so menu prices are audited even though the
+  menu stays in POS.
+- **Step 5 (done) — the shared foundation:** `App\Event\EventContext`
   (`AppController::eventContext()`), `EventLedgerBehavior` + `AppendOnlyBehavior` /
   `AppendOnlyTableTrait`, `activity_index` (`ActivityIndexTable::forCorrelation()`),
   `food_order_events`, `authorizeElevated()`, and `CorrelationIdMiddleware` (one id per request,
@@ -225,8 +224,8 @@ are ledgered); guest record edits; room status changes (future Rooms module, `ro
   deletes.
 
 ### Permission strategy
-- **Phase 1 (build step 4, no DB change) — done:** `App\Auth\Permissions` defines the 35
-  `module.resource.action` constants and a fixed map from each role value to its permissions; the
+- **Phase 1 (build step 4, no DB change) — done:** `App\Auth\Permissions` defines the
+  `module.resource.action` constants (39 as of step 10) and a fixed map from each role value to its permissions; the
   approved catalog, design rules and endpoint map are **`docs/PERMISSIONS.md`** (the source of
   truth; `PermissionsTest` keeps code and document identical). **Every API action calls
   `$this->authorize(Permissions::X)`** first (after `allowMethod()`); data-dependent checks use
@@ -245,10 +244,19 @@ are ledgered); guest record edits; room status changes (future Rooms module, `ro
 - **Adding an endpoint or permission:** add the catalog row and endpoint-map row to
   `docs/PERMISSIONS.md`, the constant (and grants) to `Permissions`, and a probe to
   `PermissionMatrixApiTest::PROBES` — `testEveryApiRouteHasAProbe` fails on an unmapped route.
-- **Phase 2 (DB):** `roles`, `role_permissions`, `property_memberships` (user × property × role).
-  A migration seeds the three presets and one membership per user; `users.role` and
-  `users.property_id` stay as a fallback for one release. The platform owner becomes a platform
-  flag, not a property role. The request's property is resolved from the membership.
+- **Phase 2 (DB, build step 10b; part 1 built):** `roles` (presets `admin` Manager,
+  `receptionist` Front Desk Staff), `role_permissions` (seeded from `Permissions::ROLE_GRANTS`,
+  which stays as the presets' definition), `property_memberships` (user × property × role,
+  `started_at`/`ended_at`, never deleted) and the platform flag `users.is_platform`.
+  `App\Auth\AccessResolver` gives each request an `Access` (permissions, property, role code,
+  platform) from the active membership or the flag; `AppController::access()` holds it, and
+  `boundPropertyId()` / `effectivePropertyId()` / `permissions()` read it. New accounts get a
+  membership in the same transaction (`membership_granted`); the import (`MembershipImport`)
+  made the rest. `users.role` / `users.property_id` are still written for one release, and an
+  account that never had a membership falls back to them (logged as "membership fallback used";
+  remove it once those lines stop). No active membership and no flag = no access, and sign-in is
+  refused. Test users get their membership from `ApiScenarioTrait::makeUser()`. Parts 2–3 (the
+  Platform Owner losing the † grants, support access, subscription enforcement): the 10b proposal.
 - **Phase 3:** editable roles in Settings (audited), new starter roles (Property Owner,
   Housekeeping, Storekeeper…), multi-property switcher; drop the old user columns.
 - **Rules for code written now:** resolve the property through `effectivePropertyId()` /
@@ -318,7 +326,8 @@ hotel's data:
   use `ApiScenarioTrait` (`createProperty()`, `makeUser()`, `callAs()`, `insertRow()`,
   `cleanupScenario()` in `tearDown()`). There are no fixtures, and the auth header must be
   re-applied before *every* request (`callAs()` does it; request config doesn't survive a request).
-- Still untested: stock-movement arithmetic and invoice settlement flows (receipt numbering).
+- Still untested: stock-movement arithmetic (settlement and receipt numbering are covered by
+  `SettlementApiTest`).
 
 ### Frontend (`cd frontend`)
 - `npm run dev` (http://localhost:5173, proxies `/api` → backend) · `npm run build` ·
@@ -430,7 +439,7 @@ would make the key attacker-controlled.
 - `src/api/client.js` is the single axios instance (token from localStorage `stayvanta_token`;
   base URL `VITE_API_BASE_URL` or `/api`). **Pages never call axios directly**: each module has a
   thin wrapper (`inventory.js`, `frontdesk.js`, `guests.js`, `food.js`, `operations.js`, `finance.js`,
-  `platform.js`, `staff.js`)
+  `settings.js`, `platform.js`, `staff.js`, `account.js`)
   with one function per endpoint unwrapping `r.data.<key>`; owners pass `propertyId` through its
   local `withProp()` helper. Add new calls there.
 - `AuthContext` (`useAuth()` → `{user, role, loading, login, logout}`, resolves the token via

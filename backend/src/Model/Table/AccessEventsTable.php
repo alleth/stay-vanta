@@ -51,6 +51,14 @@ class AccessEventsTable extends Table
     public const SIGNED_OUT = 'signed_out';
     /** A deactivation or password change ended the person's session (same request). */
     public const SESSION_ENDED = 'session_ended';
+    // Memberships (Permissions Phase 2, step 10b)
+    /** A person gets a role at a property (a new account, or added to a property). */
+    public const MEMBERSHIP_GRANTED = 'membership_granted';
+    /** Import: a membership made from the account's own role and property. */
+    public const MEMBERSHIP_IMPORTED = 'membership_imported';
+    // Platform
+    /** The platform flag is set (for today's Platform Owner, by the import). */
+    public const PLATFORM_ACCESS_GRANTED = 'platform_access_granted';
 
     public const TYPES = [
         self::ACCOUNT_CREATED,
@@ -65,6 +73,9 @@ class AccessEventsTable extends Table
         self::SIGN_IN_REFUSED,
         self::SIGNED_OUT,
         self::SESSION_ENDED,
+        self::MEMBERSHIP_GRANTED,
+        self::MEMBERSHIP_IMPORTED,
+        self::PLATFORM_ACCESS_GRANTED,
     ];
 
     public const REQUIRES_REASON = [

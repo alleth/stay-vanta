@@ -5,6 +5,14 @@ in the code on 2026-10-03, so the grants below reproduce today's behavior exactl
 `App\Auth\Permissions` exists, the code becomes authoritative and a test keeps this file in step
 with it.
 
+**Phase 2 (build step 10b, part 1):** the grants live in data. `roles` holds the two presets
+(stored codes `admin` and `receptionist`, never renamed), `role_permissions` their grants, seeded
+from `Permissions::ROLE_GRANTS` (which stays as the presets' definition; `MembershipsApiTest`
+fails if the data drifts from it), and `property_memberships` who holds which role where. A request's
+property and permissions come from the person's active membership (`App\Auth\AccessResolver`), or
+from the platform flag. A grant is added by a migration (`MembershipImport::seedRoles()` adds only
+what's missing) until Phase 3 makes roles editable.
+
 ## Permission design rules
 
 Approved 2026-10-03. They explain the catalog; follow them when you add to it.

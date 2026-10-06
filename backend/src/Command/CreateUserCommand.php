@@ -9,6 +9,7 @@ use Cake\Command\Command;
 use Cake\Console\Arguments;
 use Cake\Console\ConsoleIo;
 use Cake\Console\ConsoleOptionParser;
+use LogicException;
 
 /**
  * Create a user from the CLI. Handy for seeding the first platform owner:
@@ -67,6 +68,31 @@ class CreateUserCommand extends Command
                     'is_active' => true,
                 ]],
             ]);
+            // Where its access comes from (step 10b): the platform flag for
+            // an owner, else a membership at its property.
+            if ($user->role === 'owner') {
+                $user->set('is_platform', true);
+                $users->saveOrFail($user, ['atomic' => false]);
+                $events->record($context, AccessEventsTable::PLATFORM_ACCESS_GRANTED, $user);
+            } elseif ($propertyId !== null) {
+                /** @var \App\Model\Table\RolesTable $roles */
+                $roles = $this->fetchTable('Roles');
+                $roleId = $roles->idFor((string)$user->role);
+                if ($roleId === null) {
+                    throw new LogicException("No role '{$user->role}' to grant (are the presets seeded?).");
+                }
+                $memberships = $this->fetchTable('PropertyMemberships');
+                $membership = $memberships->saveOrFail($memberships->newEntity([
+                    'user_id' => (int)$user->id,
+                    'property_id' => $propertyId,
+                    'role_id' => $roleId,
+                    'started_at' => $context->now,
+                ], ['accessibleFields' => ['*' => true]]), ['atomic' => false]);
+                $events->record($context, AccessEventsTable::MEMBERSHIP_GRANTED, $user, [
+                    'changes' => ['after' => ['property_id' => $propertyId, 'role' => $user->role]],
+                    'columns' => ['membership_id' => (int)$membership->id, 'role_id' => $roleId],
+                ]);
+            }
 
             return true;
         });

@@ -6,6 +6,7 @@ namespace App\Command;
 use App\Event\AccessBackfill;
 use App\Event\ActivityBackfill;
 use App\Event\ConfigBaseline;
+use App\Event\MembershipImport;
 use Cake\Command\Command;
 use Cake\Console\Arguments;
 use Cake\Console\ConsoleIo;
@@ -122,6 +123,39 @@ class ActivityBackfillCommand extends Command
                 $c['imported'],
                 $c['complete'] ? '' : '  <- INCOMPLETE',
             ));
+        }
+
+        // Memberships and the platform flag (step 10b).
+        $memberships = new MembershipImport($connection);
+        if (!$args->getOption('check-only')) {
+            $added = $memberships->run($propertyId);
+            $io->out(sprintf(
+                '%-24s %d memberships, %d platform flags added, %d not importable',
+                'memberships',
+                $added['memberships'],
+                $added['platform'],
+                $added['skipped'],
+            ));
+        }
+        foreach ($memberships->check($propertyId) as $id => $c) {
+            $incomplete += $c['complete'] ? 0 : 1;
+            $io->out($id === 0
+                ? sprintf(
+                    'platform: %d owner accounts, %d flagged, %d grants recorded%s',
+                    $c['owners'],
+                    $c['flagged'],
+                    $c['granted'],
+                    $c['complete'] ? '' : '  <- INCOMPLETE',
+                )
+                : sprintf(
+                    'property %d: %d staff accounts, %d with no membership, %d active memberships, %d imported%s',
+                    $id,
+                    $c['accounts'],
+                    $c['without_membership'],
+                    $c['active_memberships'],
+                    $c['imported'],
+                    $c['complete'] ? '' : '  <- INCOMPLETE',
+                ));
         }
 
         return $incomplete === 0 ? static::CODE_SUCCESS : static::CODE_ERROR;

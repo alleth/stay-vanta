@@ -48,11 +48,14 @@ Reading it:
 - `POST /api/auth/login` (public) · `GET /api/auth/me` · `POST /api/auth/logout`
 - The `user` object both login and `me` return carries `permissions`: the sorted list of
   `module.resource.action` names the user holds (`docs/PERMISSIONS.md`). It drives what the screens
-  offer; the server checks every action itself.
+  offer; the server checks every action itself. Since step 10b, `role`, `property_id` and
+  `permissions` come from the person's active membership (`property_memberships` and its role's
+  grants), and `platform` (bool) says whether they sign in to the platform (the platform flag).
 - **Recorded (step 10, `access_events`):** a sign-in (`signed_in`, with the browser's user agent
   and the reported client address), a wrong password for an existing account (`sign_in_failed`, no
   actor), the failure that pauses the address (`sign_in_locked`), the right password for an
-  inactive account (`sign_in_refused`; the answer is the same "Invalid credentials."), and a
+  inactive account, or for one with no active membership (`sign_in_refused`, `changes.because =
+  no_membership` for the latter; the answer is the same "Invalid credentials."), and a
   sign-out (`signed_out`). A failure for an address with no account isn't stored.
 - `GET /api/auth/sign-ins[?page=]` — **anyone signed in, about themselves** (no permission, like
   `/me`): their access history, newest first, 25 a page → `{events, page, has_more}`; each

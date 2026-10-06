@@ -3,8 +3,9 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Auth\Access;
+use App\Auth\AccessResolver;
 use App\Auth\LoginThrottle;
-use App\Auth\Permissions;
 use App\Event\EventContext;
 use App\Model\Entity\User;
 use App\Model\Table\AccessEventsTable;
@@ -88,6 +89,23 @@ class AuthController extends AppController
             return;
         }
 
+        // The right password, but nowhere to work: no active membership and
+        // no platform flag (an ended membership, step 10b). Answered as any
+        // failure, recorded with why.
+        $access = (new AccessResolver())->resolve($user);
+        if (!$access->hasAccess()) {
+            $locked = $throttle->recordFailure($email);
+            $this->recordSignInAttempt($this->contextFor($user), AccessEventsTable::SIGN_IN_REFUSED, $user, [
+                'changes' => ['because' => 'no_membership'],
+            ]);
+            if ($locked) {
+                $this->recordSignInAttempt($this->contextFor($user), AccessEventsTable::SIGN_IN_LOCKED, $user);
+            }
+            $this->refuse();
+
+            return;
+        }
+
         // A correct password clears the slate, so a few mistyped attempts
         // before it never accumulate toward a lockout.
         $throttle->clear($email);
@@ -120,7 +138,7 @@ class AuthController extends AppController
 
         $this->set([
             'token' => $token,
-            'user' => $this->publicUser($user),
+            'user' => $this->publicUser($user, $access),
         ]);
         $this->viewBuilder()->setOption('serialize', ['token', 'user']);
     }
@@ -131,7 +149,7 @@ class AuthController extends AppController
     public function me(): void
     {
         $this->request->allowMethod('get');
-        $this->set('user', $this->publicUser($this->currentUser));
+        $this->set('user', $this->publicUser($this->currentUser, $this->access()));
         $this->viewBuilder()->setOption('serialize', ['user']);
     }
 
@@ -195,12 +213,12 @@ class AuthController extends AppController
      * gets their answer if it can't be written, and the log says so (with
      * the request id).
      */
-    private function recordSignInAttempt(EventContext $context, string $type, User $user): void
+    private function recordSignInAttempt(EventContext $context, string $type, User $user, array $options = []): void
     {
         try {
             $this->fetchTable('AccessEvents')->getConnection()->transactional(
-                function () use ($context, $type, $user): void {
-                    $this->recordAccess($context, $type, $user, [], true);
+                function () use ($context, $type, $user, $options): void {
+                    $this->recordAccess($context, $type, $user, $options, true);
                 },
             );
         } catch (Throwable $e) {
@@ -223,17 +241,19 @@ class AuthController extends AppController
      *
      * @return array<string, mixed>
      */
-    private function publicUser(User $user): array
+    private function publicUser(User $user, Access $access): array
     {
         return [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'role' => $user->role,
-            'property_id' => $user->property_id,
+            // Their role and property come from the membership (step 10b).
+            'role' => $access->roleCode ?? $user->role,
+            'property_id' => $access->propertyId,
+            'platform' => $access->platform,
             // What the screens may offer. Convenience only: every action
             // checks its permission on the server.
-            'permissions' => Permissions::forRole($user->role)->toArray(),
+            'permissions' => $access->permissions->toArray(),
         ];
     }
 }

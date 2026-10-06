@@ -308,6 +308,9 @@ row, in the change's own transaction.
 | `sign_in_refused` | | | The right password for an inactive account (answered as any failure) |
 | `signed_out` | | | The person signs out |
 | `session_ended` | | | A deactivation or a password set ended the person's session (`changes.because`) |
+| `membership_granted` | | | A person gets a role at a property: a new account (`UsersController`, `create_user`) (`membership_id`, `role_id`; `changes.after`: property, role) |
+| `membership_imported` | | | Import (step 10b): a membership made from the account's `users.role` / `users.property_id`; **no actor** |
+| `platform_access_granted` | | | The platform flag is set: `create_user` for an owner, or the import for today's Platform Owner (platform scope) |
 
 Rules (decided 2026-10-05):
 - **A failed sign-in has no actor** and `source: web` (`EventContext::unauthenticated()`): the
@@ -324,11 +327,24 @@ Rules (decided 2026-10-05):
   `import-users-<id>`, its active state at import in the snapshot. Deactivations, resets and
   sign-ins before step 10 were never recorded and aren't invented. An account naming a property
   that doesn't exist, or with no creation time, is reported and left out.
+- **Memberships (step 10b, Permissions Phase 2).** Access is read from the person's active
+  membership (`property_memberships`: user × property × role, never deleted, ended with
+  `ended_at`) and its role's `role_permissions`, or from the platform flag (`users.is_platform`).
+  Typed columns `membership_id` and `role_id`. The role presets and their grants are seeded from
+  `Permissions::ROLE_GRANTS` by migration with **no event**: they are code a migration ships, not
+  something a person did (Phase 3 makes roles editable, and audited). A sign-in with the right
+  password but no active membership is `sign_in_refused` with `changes.because = no_membership`.
+- **Membership import** (`MembershipImport`, migration `ImportMemberships`): one
+  `membership_imported` per Manager or Front Desk account with an existing property and no
+  membership, dated at the import, no actor or reason, correlation `import-users-<id>`; the
+  membership's `started_at` is the account's own `created`; inactive accounts keep their
+  membership (nobody ended it) and say `active_at_import` in the snapshot. One
+  `platform_access_granted` per owner account. Idempotent; re-run with `bin/cake activity_backfill`.
 - **Read by** your own account (`GET /auth/sign-ins`, everyone), a Manager for their staff
   (`GET /users/{id}/access-history`, `staff.access_history.view`), and Operations → Activity
   (account administration only).
 
 ## Planned
 
-Release 10b adds memberships, roles, permission grants, the platform flag and support access to
-`access_events` (step 10 proposal, section 3); no new ledger.
+Release 10b, parts 2 and 3, adds role changes, membership ends and support access to
+`access_events` (10b proposal, section 7); no new ledger.

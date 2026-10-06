@@ -43,7 +43,7 @@ trait ApiScenarioTrait
     private const PROPERTY_SCOPED_TABLES = [
         'FoodOrders', 'Invoices', 'Reservations', 'Guests', 'FoodMenuItems',
         'InventoryItems', 'InventoryCategories', 'ReceiptSeries', 'ExtraCharges', 'PromoRates',
-        'BookingSources', 'RoomRates', 'Rooms', 'Users',
+        'BookingSources', 'RoomRates', 'Rooms', 'PropertyMemberships', 'Users',
     ];
 
     /**
@@ -90,6 +90,21 @@ trait ApiScenarioTrait
         $users->saveOrFail($user);
         if ($propertyId === null) {
             $this->scenarioOwnerIds[] = (int)$user->id;
+        }
+        // Where their access comes from (step 10b): the platform flag, or a
+        // membership with their role at the property.
+        if ($propertyId === null && $role === 'owner') {
+            $users->updateAll(['is_platform' => true], ['id' => $user->id]);
+        } elseif ($propertyId !== null) {
+            $roleId = $this->getTableLocator()->get('Roles')->idFor($role);
+            if ($roleId !== null) {
+                $this->insertRow('PropertyMemberships', [
+                    'user_id' => (int)$user->id,
+                    'property_id' => $propertyId,
+                    'role_id' => $roleId,
+                    'started_at' => new DateTime(),
+                ]);
+            }
         }
 
         return $token;
@@ -195,6 +210,7 @@ trait ApiScenarioTrait
             // Platform events (step 10) have no property: cleared by person.
             $locator->get('Users')->getConnection()
                 ->delete('access_events', ['subject_user_id IN' => $this->scenarioOwnerIds]);
+            $locator->get('PropertyMemberships')->deleteAll(['user_id IN' => $this->scenarioOwnerIds]);
             $locator->get('Users')->deleteAll(['id IN' => $this->scenarioOwnerIds]);
         }
         $this->scenarioPropertyIds = [];

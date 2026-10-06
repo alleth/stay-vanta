@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Test\TestCase\Controller\Api;
 
 use App\Test\TestSuite\PermissionCatalog;
+use Cake\I18n\DateTime;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\Routing\Router;
 use Cake\TestSuite\IntegrationTestTrait;
@@ -303,14 +304,41 @@ class PermissionMatrixApiTest extends TestCase
 
     /**
      * Deny by default: a signed-in user whose role grants nothing (a role
-     * value the map doesn't know, standing in for any future role before it's
-     * mapped) is refused by every route except the always-allowed ones.
+     * with no grants, standing in for any future role before it's given
+     * any) is refused by every route except the always-allowed ones.
      */
     public function testAUserWithNoPermissionsIsRefusedEverywhere(): void
     {
         $token = $this->makeUser($this->propertyId, 'receptionist', 'matrix-none-' . uniqid() . '@example.test');
-        $this->getTableLocator()->get('Users')->updateAll(['role' => 'unmapped'], ['id' => $this->userIdFor($token)]);
+        $roles = $this->getTableLocator()->get('Roles');
+        $empty = $roles->saveOrFail($roles->newEntity(
+            ['code' => 'test-none-' . uniqid(), 'name' => 'No grants', 'scope' => 'property'],
+            ['accessibleFields' => ['*' => true]],
+        ));
+        $this->getTableLocator()->get('PropertyMemberships')
+            ->updateAll(['role_id' => $empty->id], ['user_id' => $this->userIdFor($token)]);
+        try {
+            $this->assertRefusedEverywhere($token);
+        } finally {
+            $roles->delete($empty);
+        }
+    }
 
+    /**
+     * An account whose membership has ended holds nothing at all, whatever
+     * its role column still says (step 10b).
+     */
+    public function testAUserWhoseMembershipEndedIsRefusedEverywhere(): void
+    {
+        $token = $this->makeUser($this->propertyId, 'admin', 'matrix-ended-' . uniqid() . '@example.test');
+        $this->getTableLocator()->get('PropertyMemberships')
+            ->updateAll(['ended_at' => new DateTime()], ['user_id' => $this->userIdFor($token)]);
+
+        $this->assertRefusedEverywhere($token);
+    }
+
+    private function assertRefusedEverywhere(string $token): void
+    {
         $this->callAs($token, 'GET', '/api/auth/me');
         $this->assertResponseOk();
         $this->assertSame([], $this->responseJson()['user']['permissions']);

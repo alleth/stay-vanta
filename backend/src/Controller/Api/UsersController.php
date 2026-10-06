@@ -9,6 +9,7 @@ use App\Model\Table\AccessEventsTable;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
+use LogicException;
 
 /**
  * Staff management.
@@ -98,6 +99,7 @@ class UsersController extends AppController
             $this->recordAccess($this->eventContext(), AccessEventsTable::ACCOUNT_CREATED, $user, [
                 'changes' => ['after' => $this->accountValues($user)],
             ]);
+            $this->grantMembership($user);
 
             return true;
         });
@@ -269,6 +271,33 @@ class UsersController extends AppController
         $user->set('token_expires', null);
 
         return $open;
+    }
+
+    /**
+     * Give a new account its role at its property (step 10b): the membership
+     * its access is read from, recorded as `membership_granted` in the
+     * caller's transaction. `users.role` / `users.property_id` are still
+     * written for one release, so a rollback keeps working.
+     */
+    private function grantMembership(User $user): void
+    {
+        /** @var \App\Model\Table\RolesTable $roles */
+        $roles = $this->fetchTable('Roles');
+        $roleId = $roles->idFor((string)$user->role);
+        if ($roleId === null) {
+            throw new LogicException("No role '{$user->role}' to grant (are the presets seeded?).");
+        }
+        $memberships = $this->fetchTable('PropertyMemberships');
+        $membership = $memberships->saveOrFail($memberships->newEntity([
+            'user_id' => (int)$user->id,
+            'property_id' => (int)$user->property_id,
+            'role_id' => $roleId,
+            'started_at' => $this->eventContext()->now,
+        ], ['accessibleFields' => ['*' => true]]), ['atomic' => false]);
+        $this->recordAccess($this->eventContext(), AccessEventsTable::MEMBERSHIP_GRANTED, $user, [
+            'changes' => ['after' => ['property_id' => (int)$user->property_id, 'role' => $user->role]],
+            'columns' => ['membership_id' => (int)$membership->id, 'role_id' => $roleId],
+        ]);
     }
 
     /**

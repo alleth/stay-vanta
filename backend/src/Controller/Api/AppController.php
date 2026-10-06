@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
-use App\Auth\Permissions;
+use App\Auth\Access;
+use App\Auth\AccessResolver;
 use App\Auth\PermissionSet;
 use App\Event\EventContext;
 use App\Event\ReasonRequiredException;
@@ -44,9 +45,10 @@ class AppController extends Controller
     protected ?User $currentUser = null;
 
     /**
-     * The current user's permissions, loaded once per request by permissions().
+     * What the current user may do and where, resolved once per request by
+     * access() from their membership or the platform flag (step 10b).
      */
-    private ?PermissionSet $permissions = null;
+    private ?Access $access = null;
 
     /**
      * This request's event context, built once by eventContext().
@@ -91,27 +93,43 @@ class AppController extends Controller
     }
 
     /**
-     * The property the signed-in user belongs to, or null for the Platform
-     * Owner. This answers "is this user tied to one property?" (e.g. may they
-     * see other properties' staff), which is a different question from "which
-     * property is this request for?" — that's effectivePropertyId(). Permissions
-     * Phase 2 replaces the users.property_id read here with the membership.
+     * What the current user may do and where (step 10b): their membership's
+     * property and its role's grants, or the platform flag. Resolved once.
+     */
+    protected function access(): Access
+    {
+        if ($this->access === null) {
+            $this->access = $this->currentUser !== null
+                ? (new AccessResolver())->resolve($this->currentUser)
+                : Access::none();
+        }
+
+        return $this->access;
+    }
+
+    /**
+     * The property the signed-in user belongs to (their membership's), or
+     * null on the platform. This answers "is this user tied to one property?"
+     * (e.g. may they see other properties' staff), which is a different
+     * question from "which property is this request for?" — that's
+     * effectivePropertyId().
      */
     protected function boundPropertyId(): ?int
     {
-        return $this->currentUser?->property_id !== null ? (int)$this->currentUser->property_id : null;
+        return $this->access()->platform ? null : $this->access()->propertyId;
     }
 
     /**
      * The property the current user is scoped to.
      *
-     * Admins/receptionists are bound to their own property; owners aren't
-     * (null) and may target any property via a `property_id` request param.
+     * Property staff are bound to their membership's property (null when they
+     * have none); the platform isn't, and may target any property via a
+     * `property_id` request param.
      */
     protected function effectivePropertyId(): ?int
     {
-        if ($this->currentUser?->property_id !== null) {
-            return (int)$this->currentUser->property_id;
+        if (!$this->access()->platform) {
+            return $this->access()->propertyId;
         }
         $requested = $this->request->getData('property_id') ?? $this->request->getQuery('property_id');
 
@@ -120,13 +138,16 @@ class AppController extends Controller
 
     /**
      * Apply the current user's property scope to a query when they are bound
-     * to a property. Owners see everything (optionally filtered by query param).
+     * to a property. The platform sees everything (optionally filtered by
+     * query param); property staff without a membership see nothing.
      */
     protected function scopeToProperty(SelectQuery $query): SelectQuery
     {
         $propertyId = $this->effectivePropertyId();
         if ($propertyId !== null) {
             $query->where([$query->getRepository()->getAlias() . '.property_id' => $propertyId]);
+        } elseif (!$this->access()->platform) {
+            $query->where(['1 = 0']);
         }
 
         return $query;
@@ -151,13 +172,12 @@ class AppController extends Controller
     }
 
     /**
-     * What the current user may do on this request. Phase 1 reads it from the
-     * user's role; Phase 2 reads the grants of their membership at the
-     * request's property, and only this method changes.
+     * What the current user may do on this request: the grants of their
+     * membership's role at its property, or the platform's (step 10b).
      */
     protected function permissions(): PermissionSet
     {
-        return $this->permissions ??= Permissions::forRole($this->currentUser?->role);
+        return $this->access()->permissions;
     }
 
     /**
@@ -219,7 +239,7 @@ class AppController extends Controller
             $reason = $this->request->getData('reason');
             $this->eventContext = new EventContext(
                 $this->currentUser?->id !== null ? (int)$this->currentUser->id : null,
-                $this->currentUser?->role,
+                $this->access()->roleCode ?? $this->currentUser?->role,
                 $this->effectivePropertyId(),
                 $this->correlationId(),
                 EventContext::SOURCE_WEB,
