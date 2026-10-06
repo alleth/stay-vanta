@@ -6,6 +6,7 @@ namespace App\Controller\Api;
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Response;
 
 /**
  * Guests — registry plus the local/foreign monitoring counts.
@@ -53,6 +54,72 @@ class GuestsController extends AppController
             'limit' => $limit,
         ]);
         $this->viewBuilder()->setOption('serialize', ['guests', 'total', 'page', 'limit']);
+    }
+
+    /**
+     * GET /api/guests/export?from=YYYY-MM-DD&to=YYYY-MM-DD → CSV
+     *
+     * Guests registered in the range (step 10c, Manager), with their stays.
+     * Contact details are included; government ID numbers never are (X3;
+     * guests carry none, and the Senior/PWD ID numbers on discounts stay out).
+     * Recorded as `data_exported`.
+     */
+    public function export(): Response
+    {
+        $this->request->allowMethod('get');
+        $this->authorize(Permissions::GUESTS_GUEST_EXPORT, 'Only Managers can export guests.');
+        $range = $this->exportRange();
+        $guests = $this->scopeToProperty($this->fetchTable('Guests')->find())
+            ->select(['id', 'full_name', 'guest_type', 'nationality', 'contact_number', 'email', 'created'])
+            ->where([
+                'Guests.created >=' => BusinessTime::startOf($range[0]),
+                'Guests.created <' => BusinessTime::endOf($range[1]),
+            ])
+            ->orderBy(['Guests.created' => 'ASC', 'Guests.id' => 'ASC'])
+            ->limit(self::EXPORT_MAX_ROWS + 1)
+            ->all()->toList();
+
+        // Stays per guest (cancelled ones aren't stays): one grouped query,
+        // selecting only the group column and aggregates (ONLY_FULL_GROUP_BY).
+        $ids = array_map(fn($g) => (int)$g->id, $guests);
+        $stays = [];
+        foreach (array_chunk($ids, 1000) as $chunk) {
+            $query = $this->fetchTable('Reservations')->find();
+            $found = $query
+                ->select([
+                    'guest_id',
+                    'stays' => $query->func()->count('*'),
+                    'first' => $query->func()->min('check_in'),
+                    'last' => $query->func()->max('check_in'),
+                ])
+                ->where(['guest_id IN' => $chunk, 'status !=' => 'cancelled'])
+                ->groupBy(['guest_id'])
+                ->disableHydration()
+                ->all();
+            foreach ($found as $row) {
+                $stays[(int)$row['guest_id']] = $row;
+            }
+        }
+
+        $cells = array_map(function ($g) use ($stays): array {
+            $s = $stays[(int)$g->id] ?? null;
+
+            return [
+                $g->full_name,
+                $g->guest_type,
+                $g->nationality,
+                $g->contact_number,
+                $g->email,
+                $g->created?->setTimezone(BusinessTime::timezone())->format('Y-m-d'),
+                (int)($s['stays'] ?? 0),
+                $s !== null ? substr((string)$s['first'], 0, 10) : null,
+                $s !== null ? substr((string)$s['last'], 0, 10) : null,
+            ];
+        }, $guests);
+
+        return $this->respondWithCsv('guests', $range, [
+            'Name', 'Type', 'Nationality', 'Phone', 'Email', 'Registered', 'Stays', 'First stay', 'Last stay',
+        ], $cells);
     }
 
     /**

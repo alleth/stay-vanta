@@ -276,6 +276,12 @@ are ledgered); guest record edits; room status changes (future Rooms module, `ro
   `APP_SUBSCRIPTION_ENFORCEMENT` = `report` (default: warnings only) → `grace` → `read_only` →
   `suspend` (B5: move one phase at a time). Screens: `components/SubscriptionBanner.jsx`, the stage
   on Subscribers (`GET /properties` returns `subscription` per property).
+- **Data exports (step 10c, X1–X5):** `GET /reservations/export`, `/guests/export`,
+  `/invoices/export`, `/finance/collections/export` (Manager; `*.export` permissions, kept in
+  read-only, not in support sessions). Each lives in the controller that owns the data and ends with
+  `AppController::respondWithCsv()` after `exportRange()`: it records `data_exported` (no rows) and
+  answers a CSV. Screens: `components/ExportButton.jsx` (Front Desk, Guests, Finance headers).
+  Enforcement must not move past `grace` before this is in production (X5).
 - **Phase 3:** editable roles in Settings (audited), new starter roles (Property Owner,
   Housekeeping, Storekeeper…), multi-property switcher; drop the old user columns.
 - **Rules for code written now:** resolve the property through `effectivePropertyId()` /

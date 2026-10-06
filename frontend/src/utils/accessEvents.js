@@ -23,6 +23,7 @@ export const ACCESS_LABELS = {
   support_access_started: 'Support access started',
   support_access_used: 'Opened during support access',
   support_access_ended: 'Support access ended',
+  data_exported: 'Data exported',
 }
 
 // Events that call for a second look, shown with a warning tint.
@@ -46,6 +47,9 @@ export function accessDetail(e) {
   if (e.event === 'sign_in_refused') return e.changes?.because === 'no_membership' ? 'No role at any property' : 'Account inactive'
   if (e.event === 'membership_role_changed' && e.changes?.role) return `${roleLabel(e.changes.role.before)} → ${roleLabel(e.changes.role.after)}`
   if (e.event === 'support_access_used' && e.changes?.path) return `${e.changes.method} ${e.changes.path}`
+  if (e.event === 'data_exported' && e.changes?.dataset) {
+    return `${e.changes.dataset}, ${e.changes.from} to ${e.changes.to}, ${e.changes.rows} row${e.changes.rows === 1 ? '' : 's'}`
+  }
   return null
 }
 

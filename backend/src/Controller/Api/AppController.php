@@ -16,12 +16,15 @@ use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
 use Cake\Datasource\EntityInterface;
 use Cake\Event\EventInterface;
+use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\Http\Exception\UnauthorizedException;
+use Cake\Http\Response;
 use Cake\I18n\DateTime;
 use Cake\ORM\Query\SelectQuery;
 use Cake\ORM\Table;
 use Cake\Utility\Text;
+use DateTimeImmutable;
 
 /**
  * Base controller for all JSON API endpoints.
@@ -395,6 +398,111 @@ class AppController extends Controller
 
         $this->set(['events' => $events, 'page' => $page, 'has_more' => $hasMore]);
         $this->viewBuilder()->setOption('serialize', ['events', 'page', 'has_more']);
+    }
+
+    /** Longest range an export covers, in days (step 10c). */
+    protected const EXPORT_MAX_DAYS = 366;
+
+    /** Most rows one export file holds (step 10c); more asks for a shorter range. */
+    protected const EXPORT_MAX_ROWS = 50000;
+
+    /**
+     * An export's date range from `from` and `to` (YYYY-MM-DD, hotel days,
+     * both inclusive), at most EXPORT_MAX_DAYS long. 400 otherwise.
+     *
+     * @return array{0: string, 1: string} [from, to]
+     */
+    protected function exportRange(): array
+    {
+        $range = [];
+        foreach (['from', 'to'] as $key) {
+            $value = (string)$this->request->getQuery($key);
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+            if ($date === false || $date->format('Y-m-d') !== $value) {
+                throw new BadRequestException("Choose a {$key} date (YYYY-MM-DD).");
+            }
+            $range[] = $date;
+        }
+        [$from, $to] = $range;
+        if ($to < $from) {
+            throw new BadRequestException('The end date must be on or after the start date.');
+        }
+        if ($from->diff($to)->days + 1 > self::EXPORT_MAX_DAYS) {
+            throw new BadRequestException('An export covers at most 12 months. Choose a shorter range.');
+        }
+
+        return [$from->format('Y-m-d'), $to->format('Y-m-d')];
+    }
+
+    /**
+     * Answer with an export (step 10c, X1–X4): a CSV file (UTF-8 with a
+     * byte-order mark, so spreadsheets read accents correctly) named after
+     * the list and range. The download is recorded first, as `data_exported`
+     * (who, which list, which dates, how many rows, from which device; never
+     * the rows), in its own transaction: if the record can't be written,
+     * nothing is sent.
+     *
+     * @param string $dataset reservations | guests | invoices | collections.
+     * @param array{0: string, 1: string} $range From exportRange().
+     * @param list<string> $header Column titles.
+     * @param list<list<mixed>> $rows One list of cells per row.
+     */
+    protected function respondWithCsv(string $dataset, array $range, array $header, array $rows): Response
+    {
+        if (count($rows) > self::EXPORT_MAX_ROWS) {
+            throw new BadRequestException(sprintf(
+                'This range has more than %s rows. Choose a shorter range.',
+                number_format(self::EXPORT_MAX_ROWS),
+            ));
+        }
+        [$from, $to] = $range;
+        $this->fetchTable('AccessEvents')->getConnection()->transactional(
+            function () use ($dataset, $from, $to, $rows): void {
+                $this->recordAccess($this->eventContext(), AccessEventsTable::DATA_EXPORTED, $this->currentUser, [
+                    'changes' => ['dataset' => $dataset, 'from' => $from, 'to' => $to, 'rows' => count($rows)],
+                    'propertyId' => $this->effectivePropertyId(),
+                ], true);
+            },
+        );
+
+        $out = fopen('php://temp', 'w+');
+        fwrite($out, "\xEF\xBB\xBF");
+        fputcsv($out, $header, ',', '"', '');
+        foreach ($rows as $row) {
+            fputcsv($out, array_map([$this, 'csvCell'], $row), ',', '"', '');
+        }
+        rewind($out);
+        $csv = (string)stream_get_contents($out);
+        fclose($out);
+
+        return $this->response
+            ->withType('csv')
+            ->withStringBody($csv)
+            ->withDownload(sprintf('%s-%s-to-%s.csv', $dataset, $from, $to));
+    }
+
+    /**
+     * One CSV cell. Text that a spreadsheet would run as a formula (a guest
+     * named "=HYPERLINK(...)") is prefixed with an apostrophe; numbers stay
+     * numbers, negative amounts included.
+     */
+    private function csvCell(mixed $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+        if (is_bool($value)) {
+            return $value ? 'yes' : 'no';
+        }
+        if (is_int($value) || is_float($value)) {
+            return (string)$value;
+        }
+        $text = (string)$value;
+        if ($text !== '' && in_array($text[0], ['=', '+', '-', '@', "\t", "\r"], true) && !is_numeric($text)) {
+            return "'" . $text;
+        }
+
+        return $text;
     }
 
     /**

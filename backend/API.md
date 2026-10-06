@@ -186,6 +186,20 @@ Reading it:
   at their property. Property users who see access history get `support_active` (open sessions
   there) in `/auth/me`.
 
+## Data exports (step 10c)
+- `GET /api/reservations/export` · `GET /api/guests/export` · `GET /api/invoices/export` ·
+  `GET /api/finance/collections/export`, each `?from=YYYY-MM-DD&to=YYYY-MM-DD` (hotel days,
+  inclusive, at most 366 days; 400 otherwise) — **Manager** (`front_desk.reservation.export`,
+  `guests.guest.export`, `finance.invoice.export`, `finance.collections.export`; kept in the
+  read-only period, never in a support session). Answers `text/csv` (UTF-8 with a BOM) as a download
+  named `<list>-<from>-to-<to>.csv`; at most 50,000 rows (400 asks for a shorter range). Recorded first
+  as `data_exported` (`{dataset, from, to, rows}`); if it can't be, nothing is sent.
+- Reservations by check-in (deleted left out; total from `quote()`); guests by registration, with
+  stays, **no government ID numbers** (X3); invoices one row per line by opening date (reversals as
+  their negative lines, so lines add up to the total); collections one row per hotel day from
+  `Collections::figuresOn()` (Outstanding is a today-only figure, so not a column). Text a
+  spreadsheet would run as a formula is prefixed with an apostrophe.
+
 ## Roles (step 10b)
 - `GET /api/roles` — **Manager** (`settings.role.view`): `{roles: [{code, name, preset, permissions}]}`,
   read-only.

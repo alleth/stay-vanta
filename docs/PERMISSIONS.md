@@ -76,13 +76,17 @@ several properties.
 | `finance.invoice.reverse` | M | Manager, Accountant | yes | Finance |
 | `finance.invoice.refund` | M | Manager, Accountant | yes | Finance |
 | `finance.receipt_series.manage` | M | Manager, Accountant | | Finance |
+| `finance.collections.export` | M | Manager, Accountant, Property Owner | | Finance |
+| `finance.invoice.export` | M | Manager, Accountant | | Finance |
 | `front_desk.reservation.view` | M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Front Desk |
 | `front_desk.reservation.manage` | M, FD | Manager, Front Desk | | Front Desk |
 | `front_desk.reservation.backdate` | M | Manager | yes | Front Desk |
 | `front_desk.reservation.correct` | M | Manager | yes | Front Desk |
 | `front_desk.reservation.delete` | M | Manager | yes | Front Desk |
+| `front_desk.reservation.export` | M | Manager | | Front Desk |
 | `guests.guest.view` | M, FD | Manager, Front Desk, POS Cashier, Property Owner | | Guests |
 | `guests.guest.manage` | M, FD | Manager, Front Desk, POS Cashier | | Guests |
+| `guests.guest.export` | M | Manager | | Guests |
 | `pos.sale.view` | M, FD | Manager, Front Desk, POS Cashier, Accountant, Property Owner | | POS |
 | `pos.sale.manage` | M, FD | Manager, Front Desk, POS Cashier | | POS |
 | `pos.sale.cancel_paid` | M | Manager | yes | POS |
@@ -105,7 +109,7 @@ several properties.
 | `staff.account.manage` | PO, M | Manager | | Staff |
 | `staff.access_history.view` | M | Manager, Property Owner | | Staff |
 
-41 permissions: 3 platform, 38 property.
+45 permissions: 3 platform, 42 property.
 
 ## Endpoint map
 
@@ -156,6 +160,10 @@ several properties.
 | `GET /support-sessions`, `GET /support-sessions/{id}` | `staff.access_history.view` | The property's support sessions and the requests made during each |
 | `POST /support-sessions/{id}/end` | `staff.account.manage` | The Manager ends a support session at their property (`reason` optional) |
 | `GET /roles` | `settings.role.view` | Role presets and their permissions, read-only (step 10b) |
+| `GET /reservations/export` | `front_desk.reservation.export` | CSV of reservations by check-in date (step 10c); `from`, `to` (YYYY-MM-DD, at most 366 days); recorded (`data_exported`) |
+| `GET /guests/export` | `guests.guest.export` | CSV of guests by registration date (step 10c); no government ID numbers (X3) |
+| `GET /invoices/export` | `finance.invoice.export` | CSV of invoice lines by invoice date (step 10c) |
+| `GET /finance/collections/export` | `finance.collections.export` | CSV of Collected / Refunded / Net Collected per hotel day (step 10c), from `Collections` |
 
 ## Subscription stages (step 10b, A7)
 

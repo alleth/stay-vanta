@@ -162,6 +162,11 @@ class PermissionMatrixApiTest extends TestCase
         ['GET', '/api/support-sessions/{id}', 'staff.access_history.view'],
         ['POST', '/api/support-sessions/{id}/end', 'staff.account.manage'],
         ['GET', '/api/roles', 'settings.role.view'],
+        // Data exports (step 10c): no range in the probe, so a holder gets 400 and nothing is recorded.
+        ['GET', '/api/reservations/export', 'front_desk.reservation.export'],
+        ['GET', '/api/guests/export', 'guests.guest.export'],
+        ['GET', '/api/invoices/export', 'finance.invoice.export'],
+        ['GET', '/api/finance/collections/export', 'finance.collections.export'],
     ];
 
     private const MISSING_ID = '999999999';

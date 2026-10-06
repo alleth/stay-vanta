@@ -10,7 +10,7 @@ import { SkeletonTable } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
 import { refundMethodLabel } from '../../utils/refunds'
 import { eventLabel, fieldLabel, formatValue, subjectText } from '../../utils/configChanges'
-import { accessLabel } from '../../utils/accessEvents'
+import { accessLabel, accessDetail } from '../../utils/accessEvents'
 
 // The Operations page's panels (Manager + Front Desk Staff), drawn from one
 // GET /operations/today payload. Every figure is today's, on the hotel's
@@ -611,7 +611,8 @@ function configText(e) {
 // (Front Desk Staff) · “Left the hotel”". Sign-ins never appear here.
 function accessText(e) {
   const person = e.person ? ` · ${e.person}${e.person_role ? ` (${roleLabel(e.person_role)})` : ''}` : ''
-  return `${accessLabel(e.event)}${person}${e.reason ? ` · “${e.reason}”` : ''}`
+  const detail = accessDetail(e)
+  return `${accessLabel(e.event)}${person}${detail ? ` · ${detail}` : ''}${e.reason ? ` · “${e.reason}”` : ''}`
 }
 
 function activityText(e) {

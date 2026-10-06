@@ -9,6 +9,7 @@ import { Receivables } from '../components/finance/Receivables'
 import { InvoicesPanel } from '../components/finance/InvoicesPanel'
 import { FinanceAnalytics } from '../components/finance/FinanceAnalytics'
 import { ReceiptBooklets } from '../components/finance/ReceiptBooklets'
+import ExportButton from '../components/ExportButton'
 
 // Finance: the property's money — what was collected (Collections), what's
 // owed (Receivables), the invoices themselves (Invoices — the same panel Front
@@ -36,7 +37,17 @@ export default function Finance() {
 
   return (
     <div>
-      <h1 className="mb-4 text-2xl font-bold">Finance</h1>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="mb-0 text-2xl font-bold">Finance</h1>
+        <div className="flex flex-wrap gap-2">
+          {can(P.FINANCE_COLLECTIONS_EXPORT) && (
+            <ExportButton what="collections" dateLabel="day" path="/finance/collections/export" dataset="collections" />
+          )}
+          {can(P.FINANCE_INVOICE_EXPORT) && (
+            <ExportButton what="invoices" dateLabel="opening date" path="/invoices/export" dataset="invoices" />
+          )}
+        </div>
+      </div>
       <Tabs activeKey={tab} onSelect={setTab} className="mb-4">
         <Tab eventKey="collections" title="Collections">
           <CollectionsReport allowMonthly={can(P.FINANCE_COLLECTIONS_VIEW_RANGE)} />

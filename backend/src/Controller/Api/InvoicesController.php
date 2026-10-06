@@ -10,6 +10,7 @@ use App\Model\Table\InvoiceEventsTable;
 use Cake\Database\Expression\QueryExpression;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ConflictException;
+use Cake\Http\Response;
 use RuntimeException;
 
 /**
@@ -62,6 +63,60 @@ class InvoicesController extends AppController
 
         $this->set('invoices', $list);
         $this->viewBuilder()->setOption('serialize', ['invoices']);
+    }
+
+    /**
+     * GET /api/invoices/export?from=YYYY-MM-DD&to=YYYY-MM-DD → CSV
+     *
+     * One row per invoice line, for invoices opened in the range (step 10c,
+     * Manager): reversals appear as their own negative lines, as on the
+     * folio, so the lines of an invoice add up to its total. Recorded as
+     * `data_exported`.
+     */
+    public function export(): Response
+    {
+        $this->request->allowMethod('get');
+        $this->authorize(Permissions::FINANCE_INVOICE_EXPORT, 'Only Managers can export invoices.');
+        $range = $this->exportRange();
+        $invoices = $this->scopeToProperty($this->fetchTable('Invoices')->find())
+            ->contain([
+                'Guests' => fn($q) => $q->select(['id', 'full_name']),
+                'InvoiceLines' => fn($q) => $q->orderBy(['InvoiceLines.id' => 'ASC']),
+            ])
+            ->where([
+                'Invoices.created >=' => BusinessTime::startOf($range[0]),
+                'Invoices.created <' => BusinessTime::endOf($range[1]),
+            ])
+            ->orderBy(['Invoices.created' => 'ASC', 'Invoices.id' => 'ASC'])
+            ->all();
+
+        $local = fn($at) => $at?->setTimezone(BusinessTime::timezone())->format('Y-m-d H:i');
+        $cells = [];
+        foreach ($invoices as $invoice) {
+            foreach ($invoice->invoice_lines ?? [] as $line) {
+                $cells[] = [
+                    (int)$invoice->id,
+                    $invoice->invoice_number,
+                    $invoice->or_number,
+                    $invoice->guest?->full_name,
+                    $invoice->status === 'settled' ? 'Settled' : 'Open',
+                    $local($invoice->created),
+                    $local($invoice->settled_at),
+                    $line->description,
+                    $line->source_type,
+                    round((float)$line->amount, 2),
+                    $line->reverses_line_id !== null ? 'Reversal' : null,
+                ];
+                if (count($cells) > self::EXPORT_MAX_ROWS) {
+                    break 2;
+                }
+            }
+        }
+
+        return $this->respondWithCsv('invoices', $range, [
+            'Invoice', 'SI number', 'OR number', 'Guest', 'Status', 'Opened', 'Settled', 'Line', 'Source',
+            'Amount', 'Note',
+        ], $cells);
     }
 
     /**

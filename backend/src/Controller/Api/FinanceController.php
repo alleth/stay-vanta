@@ -8,6 +8,8 @@ use App\Model\BusinessTime;
 use App\Model\Finance\Collections;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
+use Cake\Http\Response;
+use Cake\I18n\Date;
 
 /**
  * Finance: money the property has collected and is still owed.
@@ -84,6 +86,47 @@ class FinanceController extends AppController
             'outstanding' => $this->money($propertyId)->outstanding(),
         ]);
         $this->viewBuilder()->setOption('serialize', ['dashboard']);
+    }
+
+    /**
+     * GET /api/finance/collections/export?from=YYYY-MM-DD&to=YYYY-MM-DD → CSV
+     *
+     * Collected, Refunded and Net Collected for each hotel day in the range
+     * (step 10c, Manager), from the one calculation every report uses
+     * (Collections::figuresOn()), so the file matches Finance to the
+     * centavo. Outstanding is a figure of today only (open invoices now), so
+     * it isn't a column. Recorded as `data_exported`.
+     */
+    public function exportCollections(): Response
+    {
+        $this->request->allowMethod('get');
+        $this->authorize(Permissions::FINANCE_COLLECTIONS_EXPORT, 'Only Managers can export collections.');
+        $range = $this->exportRange();
+        $propertyId = $this->effectivePropertyId();
+        if ($propertyId === null) {
+            throw new BadRequestException('property_id is required.');
+        }
+        $money = $this->money($propertyId);
+
+        $cells = [];
+        $day = new Date($range[0]);
+        $last = new Date($range[1]);
+        while ($day <= $last) {
+            $f = $money->figuresOn($day->format('Y-m-d'));
+            $cells[] = [
+                $day->format('Y-m-d'),
+                round((float)$f['collected']['invoices']['total'], 2),
+                round((float)$f['collected']['pos']['total'], 2),
+                round((float)$f['collected']['total'], 2),
+                round((float)$f['refunded']['total'], 2),
+                round((float)$f['net'], 2),
+            ];
+            $day = $day->addDays(1);
+        }
+
+        return $this->respondWithCsv('collections', $range, [
+            'Day', 'Collected (invoices)', 'Collected (POS)', 'Collected', 'Refunded', 'Net collected',
+        ], $cells);
     }
 
     /**

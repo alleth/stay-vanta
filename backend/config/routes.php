@@ -73,6 +73,7 @@ return function (RouteBuilder $routes): void {
         $builder->get('/operations/today', ['controller' => 'Operations', 'action' => 'today']);
         $builder->get('/operations/activity', ['controller' => 'Operations', 'action' => 'activity']);
         $builder->get('/finance/collections', ['controller' => 'Finance', 'action' => 'collections']);
+        $builder->get('/finance/collections/export', ['controller' => 'Finance', 'action' => 'exportCollections']);
         $builder->get('/finance/summary', ['controller' => 'Finance', 'action' => 'summary']);
         $builder->get('/finance/seasonality', ['controller' => 'Finance', 'action' => 'seasonality']);
         $builder->get('/platform/dashboard', ['controller' => 'Platform', 'action' => 'dashboard']);
@@ -187,6 +188,8 @@ return function (RouteBuilder $routes): void {
 
         $builder->get('/reservations', ['controller' => 'Reservations', 'action' => 'index']);
         $builder->get('/reservations/stats', ['controller' => 'Reservations', 'action' => 'stats']);
+        // Data exports (step 10c, Managers): CSV, recorded as data_exported.
+        $builder->get('/reservations/export', ['controller' => 'Reservations', 'action' => 'export']);
         $builder->get('/reservations/{id}/history', ['controller' => 'Reservations', 'action' => 'history'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->get('/reservations/{id}/price', ['controller' => 'Reservations', 'action' => 'price'])
@@ -217,6 +220,7 @@ return function (RouteBuilder $routes): void {
         // Guests module.
         $builder->get('/guests/stats', ['controller' => 'Guests', 'action' => 'stats']);
         $builder->get('/guests/match', ['controller' => 'Guests', 'action' => 'match']);
+        $builder->get('/guests/export', ['controller' => 'Guests', 'action' => 'export']);
         $builder->get('/guests', ['controller' => 'Guests', 'action' => 'index']);
         $builder->post('/guests', ['controller' => 'Guests', 'action' => 'add']);
         $builder->get('/guests/{id}', ['controller' => 'Guests', 'action' => 'view'])
@@ -248,6 +252,7 @@ return function (RouteBuilder $routes): void {
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         $builder->get('/invoices', ['controller' => 'Invoices', 'action' => 'index']);
+        $builder->get('/invoices/export', ['controller' => 'Invoices', 'action' => 'export']);
         $builder->get('/invoices/{id}', ['controller' => 'Invoices', 'action' => 'view'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post('/invoices/{id}/settle', ['controller' => 'Invoices', 'action' => 'settle'])

@@ -67,6 +67,9 @@ class AccessEventsTable extends Table
     public const SUPPORT_ACCESS_USED = 'support_access_used';
     /** The Platform Owner or the property's Manager ends a session before it expires. */
     public const SUPPORT_ACCESS_ENDED = 'support_access_ended';
+    // Data leaving the system (step 10c)
+    /** A Manager downloads a CSV export: which list, which dates, how many rows. Never the rows. */
+    public const DATA_EXPORTED = 'data_exported';
 
     public const TYPES = [
         self::ACCOUNT_CREATED,
@@ -88,6 +91,7 @@ class AccessEventsTable extends Table
         self::SUPPORT_ACCESS_STARTED,
         self::SUPPORT_ACCESS_USED,
         self::SUPPORT_ACCESS_ENDED,
+        self::DATA_EXPORTED,
     ];
 
     public const REQUIRES_REASON = [
@@ -112,6 +116,7 @@ class AccessEventsTable extends Table
         self::MEMBERSHIP_ROLE_CHANGED,
         self::SUPPORT_ACCESS_STARTED,
         self::SUPPORT_ACCESS_ENDED,
+        self::DATA_EXPORTED,
     ];
 
     public const SCOPE_PROPERTY = 'property';

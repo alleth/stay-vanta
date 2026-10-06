@@ -18,6 +18,7 @@ use Cake\Database\Expression\QueryExpression;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\Http\Exception\NotFoundException;
+use Cake\Http\Response;
 use Cake\I18n\Date;
 use Cake\I18n\DateTime;
 use Cake\ORM\Query\SelectQuery;
@@ -1150,6 +1151,55 @@ class ReservationsController extends AppController
         }
 
         $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * GET /api/reservations/export?from=YYYY-MM-DD&to=YYYY-MM-DD → CSV
+     *
+     * The property's reservations whose check-in falls in the range (step
+     * 10c, Manager), priced by quote() exactly as the screens show them;
+     * deleted ones are left out. Recorded as `data_exported`.
+     */
+    public function export(): Response
+    {
+        $this->request->allowMethod('get');
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_EXPORT, 'Only Managers can export reservations.');
+        $range = $this->exportRange();
+        $reservations = $this->fetchTable('Reservations');
+        $rows = $this->scopeToProperty($reservations->find())
+            ->contain(self::RESERVATION_CONTAIN)
+            ->where(['Reservations.check_in >=' => $range[0], 'Reservations.check_in <=' => $range[1]])
+            ->orderBy(['Reservations.check_in' => 'ASC', 'Reservations.id' => 'ASC'])
+            ->limit(self::EXPORT_MAX_ROWS + 1)
+            ->all()->toList();
+        $ids = array_map(fn(Reservation $r): int => (int)$r->id, $rows);
+        $chargeStatus = $this->roomChargeStatuses($ids);
+        $bookedBy = $this->bookedBy($ids);
+        $billing = ['not_billed' => 'Not billed', 'billed' => 'Billed', 'settled' => 'Settled'];
+
+        $cells = array_map(function (Reservation $r) use ($reservations, $chargeStatus, $bookedBy, $billing): array {
+            $quote = $reservations->quote($r, $this->resolveBaseRate((int)$r->property_id, $r->room_id));
+
+            return [
+                $r->booking_reference ?: '#' . $r->id,
+                $r->guest?->full_name,
+                $r->room?->room_number,
+                $r->source,
+                $r->check_in?->format('Y-m-d'),
+                $r->check_out?->format('Y-m-d'),
+                (int)($quote['nights'] ?? 0),
+                (int)$r->total_guests,
+                $r->status,
+                $billing[self::billingState($chargeStatus[(int)$r->id] ?? null)],
+                round((float)($quote['total'] ?? 0), 2),
+                $bookedBy[(int)$r->id]['name'] ?? null,
+            ];
+        }, $rows);
+
+        return $this->respondWithCsv('reservations', $range, [
+            'Reference', 'Guest', 'Room', 'Source', 'Check-in', 'Check-out', 'Nights', 'Guests', 'Status',
+            'Billing', 'Total', 'Booked by',
+        ], $cells);
     }
 
     /**

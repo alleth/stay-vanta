@@ -982,6 +982,8 @@ class OperationsController extends AppController
                 'person' => $names[$e->subject_user_id] ?? ($e->snapshot['name'] ?? null),
                 'person_role' => $e->snapshot['role'] ?? null,
                 'reason' => $e->reason,
+                // What changed: a role's before/after, an export's list, dates and rows.
+                'changes' => $e->changes,
             ];
         }
 

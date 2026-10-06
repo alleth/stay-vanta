@@ -39,6 +39,8 @@ final class Permissions
     public const FINANCE_INVOICE_REVERSE = 'finance.invoice.reverse';
     public const FINANCE_INVOICE_REFUND = 'finance.invoice.refund';
     public const FINANCE_RECEIPT_SERIES_MANAGE = 'finance.receipt_series.manage';
+    public const FINANCE_COLLECTIONS_EXPORT = 'finance.collections.export';
+    public const FINANCE_INVOICE_EXPORT = 'finance.invoice.export';
 
     // Front Desk
     public const FRONT_DESK_RESERVATION_VIEW = 'front_desk.reservation.view';
@@ -46,10 +48,12 @@ final class Permissions
     public const FRONT_DESK_RESERVATION_BACKDATE = 'front_desk.reservation.backdate';
     public const FRONT_DESK_RESERVATION_CORRECT = 'front_desk.reservation.correct';
     public const FRONT_DESK_RESERVATION_DELETE = 'front_desk.reservation.delete';
+    public const FRONT_DESK_RESERVATION_EXPORT = 'front_desk.reservation.export';
 
     // Guests
     public const GUESTS_GUEST_VIEW = 'guests.guest.view';
     public const GUESTS_GUEST_MANAGE = 'guests.guest.manage';
+    public const GUESTS_GUEST_EXPORT = 'guests.guest.export';
 
     // POS
     public const POS_SALE_VIEW = 'pos.sale.view';
@@ -99,13 +103,17 @@ final class Permissions
         self::FINANCE_INVOICE_REVERSE,
         self::FINANCE_INVOICE_REFUND,
         self::FINANCE_RECEIPT_SERIES_MANAGE,
+        self::FINANCE_COLLECTIONS_EXPORT,
+        self::FINANCE_INVOICE_EXPORT,
         self::FRONT_DESK_RESERVATION_VIEW,
         self::FRONT_DESK_RESERVATION_MANAGE,
         self::FRONT_DESK_RESERVATION_BACKDATE,
         self::FRONT_DESK_RESERVATION_CORRECT,
         self::FRONT_DESK_RESERVATION_DELETE,
+        self::FRONT_DESK_RESERVATION_EXPORT,
         self::GUESTS_GUEST_VIEW,
         self::GUESTS_GUEST_MANAGE,
+        self::GUESTS_GUEST_EXPORT,
         self::POS_SALE_VIEW,
         self::POS_SALE_MANAGE,
         self::POS_SALE_CANCEL_PAID,
@@ -213,6 +221,11 @@ final class Permissions
             self::FRONT_DESK_RESERVATION_BACKDATE,
             self::FRONT_DESK_RESERVATION_CORRECT,
             self::FRONT_DESK_RESERVATION_DELETE,
+            // Data exports (step 10c, X1): Managers only.
+            self::FRONT_DESK_RESERVATION_EXPORT,
+            self::GUESTS_GUEST_EXPORT,
+            self::FINANCE_INVOICE_EXPORT,
+            self::FINANCE_COLLECTIONS_EXPORT,
         ],
         // Front Desk Staff
         'receptionist' => [
@@ -223,8 +236,9 @@ final class Permissions
 
     /**
      * What a property in its read-only period keeps besides every view
-     * permission (A7, B1 and B2, approved 2026-10-06): settling invoices and
-     * recording refunds, so guests already in house are billed and paid back
+     * permission (A7, B1 and B2, approved 2026-10-06): exporting its data
+     * (10c), settling invoices and recording refunds, so guests already in
+     * house are billed and paid back
      * (controlled wind-down), and account security (deactivate, reactivate,
      * reset a password), because security always takes precedence over
      * subscription enforcement. Creating accounts stays refused
@@ -235,6 +249,11 @@ final class Permissions
         self::FINANCE_INVOICE_REFUND,
         self::POS_SALE_CANCEL_PAID,
         self::STAFF_ACCOUNT_MANAGE,
+        // A lapsed hotel can still take its data (A7, step 10c).
+        self::FRONT_DESK_RESERVATION_EXPORT,
+        self::GUESTS_GUEST_EXPORT,
+        self::FINANCE_INVOICE_EXPORT,
+        self::FINANCE_COLLECTIONS_EXPORT,
     ];
 
     /**

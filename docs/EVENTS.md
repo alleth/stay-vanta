@@ -315,6 +315,7 @@ row, in the change's own transaction.
 | `support_access_started` | yes | | The Platform Owner opens a support session at one property (A6): read-only, 60 minutes (`support_session_id`; `changes.after`: property, expires_at). Recorded **at the hotel** (`property_id` = the session's), so its Manager sees it |
 | `support_access_used` | | | One request made during a support session (`changes`: method, path), refused ones too; written before the request runs, or it doesn't run. Not in the feed |
 | `support_access_ended` | | | The Platform Owner or the property's Manager ends a session early (`changes.ended_by`: `platform_owner` \| `manager`; reason optional). **Expiry records nothing**: the end time was fixed at the start |
+| `data_exported` | | | A Manager downloads a CSV export (step 10c): `changes` = `{dataset, from, to, rows}`, never the rows; with the device, like a sign-in. In the feed (one Activity line, X4); no reason (X2) |
 
 Rules (decided 2026-10-05):
 - **A failed sign-in has no actor** and `source: web` (`EventContext::unauthenticated()`): the

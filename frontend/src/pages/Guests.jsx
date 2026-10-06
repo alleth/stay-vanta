@@ -7,6 +7,9 @@ import { listGuestsPage, guestStats, getGuest, createGuest, updateGuest, matchGu
 import { SkeletonTable, SkeletonTableRows, Skeleton } from '../components/Skeleton'
 import { StatCard } from '../components/StatCard'
 import { describeError } from '../utils/apiError'
+import ExportButton from '../components/ExportButton'
+import { useAuth } from '../context/AuthContext'
+import { P } from '../auth/permissions'
 
 const TYPE_VARIANT = { local: 'info', foreign: 'warning' }
 
@@ -14,6 +17,7 @@ const GUESTS_PER_PAGE = 20
 
 export default function Guests() {
   const { propertyId } = useProperty()
+  const { can } = useAuth()
   const [stats, setStats] = useState({ total: 0, local: 0, foreign: 0, inHouse: 0 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -85,7 +89,12 @@ export default function Guests() {
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="mb-0 text-2xl font-bold">Guests</h1>
-        <Button onClick={() => setModal('add')}>Add guest</Button>
+        <div className="flex items-center gap-2">
+          {can(P.GUESTS_GUEST_EXPORT) && (
+            <ExportButton what="guests" dateLabel="registration date" path="/guests/export" dataset="guests" />
+          )}
+          <Button onClick={() => setModal('add')}>Add guest</Button>
+        </div>
       </div>
 
       {error && <Alert variant="danger">{error}</Alert>}
