@@ -495,7 +495,8 @@ class AppController extends Controller
             return $value ? 'yes' : 'no';
         }
         if (is_int($value) || is_float($value)) {
-            return (string)$value;
+            // Rounding a tiny negative gives -0.0, which would print as "-0".
+            return (string)($value == 0 ? 0 : $value);
         }
         $text = (string)$value;
         if ($text !== '' && in_array($text[0], ['=', '+', '-', '@', "\t", "\r"], true) && !is_numeric($text)) {
