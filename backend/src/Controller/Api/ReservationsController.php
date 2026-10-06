@@ -942,7 +942,14 @@ class ReservationsController extends AppController
     public function transition(int $id, string $transition): void
     {
         $this->request->allowMethod('post');
-        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
+        // Checking a guest out stays possible while the subscription is
+        // read-only (A7, B1: controlled wind-down); checking in and
+        // cancelling don't.
+        if ($transition === 'check-out') {
+            $this->authorizeWindDown(Permissions::FRONT_DESK_RESERVATION_MANAGE);
+        } else {
+            $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
+        }
 
         if (!isset(self::TRANSITIONS[$transition])) {
             throw new BadRequestException('Unknown transition.');
@@ -1610,11 +1617,16 @@ class ReservationsController extends AppController
     public function postCharge(int $id): void
     {
         $this->request->allowMethod('post');
-        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
+        // Billing a stay that has started is wind-down (A7, B1); billing a
+        // future booking isn't, while the subscription is read-only.
+        $this->authorizeWindDown(Permissions::FRONT_DESK_RESERVATION_MANAGE);
 
         $reservation = $this->scopeToProperty(
             $this->fetchTable('Reservations')->find()->where(['Reservations.id' => $id]),
         )->firstOrFail();
+        if (!in_array($reservation->status, ['checked_in', 'checked_out'], true)) {
+            $this->refuseWhenReadOnly();
+        }
 
         $this->postChargeOrFail($reservation);
         $this->respondWithReservation($reservation, 200);

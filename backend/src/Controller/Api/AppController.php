@@ -10,6 +10,7 @@ use App\Event\EventContext;
 use App\Event\ReasonRequiredException;
 use App\Middleware\CorrelationIdMiddleware;
 use App\Model\Entity\User;
+use App\Model\Subscription;
 use App\Model\Table\AccessEventsTable;
 use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
@@ -223,8 +224,53 @@ class AppController extends Controller
             if ($this->access()->supportSession !== null) {
                 throw new ForbiddenException('Support access is read-only.');
             }
+            if (in_array($permission, $this->access()->withheld, true)) {
+                $this->refuseWhenReadOnly();
+            }
             throw new ForbiddenException($message ?? "You don't have permission to do this.");
         }
+    }
+
+    /**
+     * Like authorize(), for a named wind-down action (A7, B1): checking a
+     * guest out, posting a started stay's room charge. While the property is
+     * read-only these stay allowed for whoever's role grants the permission
+     * (Permissions::WIND_DOWN), though the permission itself is withheld.
+     *
+     * @param string $permission A Permissions constant.
+     */
+    protected function authorizeWindDown(string $permission): void
+    {
+        if (in_array($permission, $this->access()->windDown, true)) {
+            return;
+        }
+        $this->authorize($permission);
+    }
+
+    /**
+     * Refuse a change because the property's subscription has ended (A7):
+     * 403, saying until when it's read-only or that it's suspended. Does
+     * nothing while the subscription allows changes. For actions whose
+     * permission stays held in read-only but whose purpose doesn't (creating
+     * an account, B2).
+     */
+    protected function refuseWhenReadOnly(): void
+    {
+        $subscription = $this->access()->subscription;
+        if ($subscription === null || !$subscription->isReadOnly()) {
+            return;
+        }
+        if ($subscription->isSuspended()) {
+            throw new ForbiddenException(
+                "This property's subscription is suspended. Contact the platform to renew it.",
+            );
+        }
+        throw new ForbiddenException(sprintf(
+            "This property's subscription has ended, so it is read-only%s. Contact the platform to renew it.",
+            $subscription->mode === Subscription::MODE_SUSPEND && $subscription->suspendedFrom() !== null
+                ? ' until it is suspended on ' . $subscription->suspendedFrom()->format('M j, Y')
+                : '',
+        ));
     }
 
     /**

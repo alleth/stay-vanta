@@ -222,6 +222,32 @@ final class Permissions
     ];
 
     /**
+     * What a property in its read-only period keeps besides every view
+     * permission (A7, B1 and B2, approved 2026-10-06): settling invoices and
+     * recording refunds, so guests already in house are billed and paid back
+     * (controlled wind-down), and account security (deactivate, reactivate,
+     * reset a password), because security always takes precedence over
+     * subscription enforcement. Creating accounts stays refused
+     * (UsersController::add()).
+     */
+    public const READ_ONLY_KEEPS = [
+        self::FINANCE_INVOICE_SETTLE,
+        self::FINANCE_INVOICE_REFUND,
+        self::POS_SALE_CANCEL_PAID,
+        self::STAFF_ACCOUNT_MANAGE,
+    ];
+
+    /**
+     * Permissions a read-only property may still use for named wind-down
+     * actions only, never in general (AppController::authorizeWindDown()):
+     * checking a guest out and posting the room charge of a stay that has
+     * started. New bookings, check-ins and edits stay refused.
+     */
+    public const WIND_DOWN = [
+        self::FRONT_DESK_RESERVATION_MANAGE,
+    ];
+
+    /**
      * Whether a permission only reads (its action is `view` or `view_*`).
      * Read-only access (a support session; a lapsed subscription, step 10b)
      * keeps these and loses every other.

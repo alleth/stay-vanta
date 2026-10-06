@@ -51,6 +51,10 @@ Reading it:
   offer; the server checks every action itself. Since step 10b, `role`, `property_id` and
   `permissions` come from the person's active membership (`property_memberships` and its role's
   grants), and `platform` (bool) says whether they sign in to the platform (the platform flag).
+  Property users also get `subscription` `{stage, enforced, mode, lapsed_on, read_only_from,
+  suspended_from, wind_down}` (A7; `stage` by the dates, `enforced` what the rollout phase
+  applies). At a suspended property (once enforced) sign-in answers **403** `{error}` naming the
+  suspension, and an open session holds no permissions.
 - **Recorded (step 10, `access_events`):** a sign-in (`signed_in`, with the browser's user agent
   and the reported client address), a wrong password for an existing account (`sign_in_failed`, no
   actor), the failure that pauses the address (`sign_in_locked`), the right password for an

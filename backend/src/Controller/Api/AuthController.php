@@ -107,6 +107,20 @@ class AuthController extends AppController
             return;
         }
 
+        // The right password at a suspended property (A7, once suspension is
+        // enforced): the password proved who it is, so they're told why.
+        if ($access->subscription?->isSuspended()) {
+            $throttle->clear($email);
+            $this->recordSignInAttempt($this->contextFor($user), AccessEventsTable::SIGN_IN_REFUSED, $user, [
+                'changes' => ['because' => 'subscription_suspended'],
+            ]);
+            $this->response = $this->response->withStatus(403);
+            $this->set('error', "This property's subscription is suspended. Contact the platform to renew it.");
+            $this->viewBuilder()->setOption('serialize', ['error']);
+
+            return;
+        }
+
         // A correct password clears the slate, so a few mistyped attempts
         // before it never accumulate toward a lockout.
         $throttle->clear($email);
@@ -313,6 +327,12 @@ class AuthController extends AppController
             // Support sessions open at their property, for whoever sees access
             // history there (the Manager, A6): shown as a banner.
             'support_active' => $this->supportOpenAt($access),
+            // Where the property's subscription stands (A7): the stage by its
+            // dates, the stage enforced in this rollout phase, the dates, and
+            // what stays possible while read-only (wind-down).
+            'subscription' => $access->subscription !== null
+                ? $access->subscription->toArray() + ['wind_down' => $access->windDown]
+                : null,
         ];
     }
 }

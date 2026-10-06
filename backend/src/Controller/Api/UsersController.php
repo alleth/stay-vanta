@@ -79,6 +79,8 @@ class UsersController extends AppController
     public function add(): void
     {
         $this->request->allowMethod('post');
+        // Read-only keeps account security (B2), not new accounts.
+        $this->refuseWhenReadOnly();
 
         $role = (string)$this->request->getData('role');
         $propertyId = $this->resolveTargetProperty($role);

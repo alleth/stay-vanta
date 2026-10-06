@@ -305,7 +305,7 @@ row, in the change's own transaction.
 | `signed_in` | | | A successful sign-in (`changes.ended_other_session` when it replaced a session) |
 | `sign_in_failed` | | | A wrong password for an existing account; **no actor** (nobody was proven) |
 | `sign_in_locked` | | | The failure that paused the address (login throttle) |
-| `sign_in_refused` | | | The right password for an inactive account (answered as any failure) |
+| `sign_in_refused` | | | The right password, but no way in: an inactive account (answered as any failure), no active membership (`changes.because = no_membership`, step 10b), or a suspended subscription (`changes.because = subscription_suspended`, answered 403 with the reason, step 10b) |
 | `signed_out` | | | The person signs out |
 | `session_ended` | | | A deactivation or a password set ended the person's session (`changes.because`) |
 | `membership_granted` | | | A person gets a role at a property: a new account (`UsersController`, `create_user`) (`membership_id`, `role_id`; `changes.after`: property, role) |

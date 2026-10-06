@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Auth;
 
 use App\Model\Entity\User;
+use App\Model\Subscription;
 use App\Model\Table\RolesTable;
 use Cake\Log\Log;
 use Cake\ORM\TableRegistry;
@@ -74,12 +75,11 @@ final class AccessResolver
                 ->extract('permission')
                 ->toList();
 
-            return new Access(
-                new PermissionSet($granted),
+            return $this->underSubscription(
+                $granted,
                 (int)$membership->get('property_id'),
                 $membership->get('role')?->get('code'),
                 (int)$membership->get('id'),
-                false,
             );
         }
 
@@ -91,9 +91,53 @@ final class AccessResolver
         ) {
             Log::warning(sprintf('membership fallback used for user %d (no membership on record)', (int)$user->id));
 
-            return new Access(Permissions::forRole($user->role), (int)$user->property_id, $user->role, null, false);
+            return $this->underSubscription(
+                Permissions::forRole($user->role)->toArray(),
+                (int)$user->property_id,
+                $user->role,
+                null,
+            );
         }
 
         return Access::none();
+    }
+
+    /**
+     * A property person's access as their subscription allows (A7): all of
+     * their grants while it runs or in grace; in the read-only period, view
+     * permissions and Permissions::READ_ONLY_KEEPS, plus the wind-down ones
+     * for named actions; once suspended, nothing. Only the stage the
+     * configured rollout phase enforces applies (B5).
+     *
+     * @param list<string> $granted The role's grants.
+     */
+    private function underSubscription(array $granted, int $propertyId, ?string $roleCode, ?int $membershipId): Access
+    {
+        $property = TableRegistry::getTableLocator()->get('Properties')->find()
+            ->where(['Properties.id' => $propertyId])->first();
+        $subscription = $property !== null ? Subscription::of($property) : null;
+        $windDown = [];
+        $all = $granted;
+        if ($subscription?->isSuspended()) {
+            $granted = [];
+        } elseif ($subscription?->isReadOnly()) {
+            $windDown = array_values(array_intersect($granted, Permissions::WIND_DOWN));
+            $granted = array_values(array_filter(
+                $granted,
+                fn($p) => Permissions::isView($p) || in_array($p, Permissions::READ_ONLY_KEEPS, true),
+            ));
+        }
+
+        return new Access(
+            new PermissionSet($granted),
+            $propertyId,
+            $roleCode,
+            $membershipId,
+            false,
+            null,
+            $subscription,
+            $windDown,
+            array_values(array_diff($all, $granted)),
+        );
     }
 }

@@ -65,6 +65,12 @@ return [
         // before 7c-2, kept for one release as the rollback switch. See
         // App\Model\Finance\Collections.
         'collectedModel' => env('APP_COLLECTED_MODEL', 'cash'),
+        /*
+         * Subscription enforcement phase (build step 10b, A7/B5): report |
+         * grace | read_only | suspend. See App\Model\Subscription. Ships as
+         * `report`: warnings only, nothing blocked.
+         */
+        'subscriptionEnforcement' => env('APP_SUBSCRIPTION_ENFORCEMENT', 'report'),
         'base' => false,
         'dir' => 'src',
         'webroot' => 'webroot',

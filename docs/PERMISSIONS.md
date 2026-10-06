@@ -157,6 +157,24 @@ several properties.
 | `POST /support-sessions/{id}/end` | `staff.account.manage` | The Manager ends a support session at their property (`reason` optional) |
 | `GET /roles` | `settings.role.view` | Role presets and their permissions, read-only (step 10b) |
 
+## Subscription stages (step 10b, A7)
+
+A lapsed subscription narrows what a property's people hold, on top of their role (worked out
+per request by `App\Model\Subscription`, enforced only as far as `APP_SUBSCRIPTION_ENFORCEMENT`
+allows: `report` | `grace` | `read_only` | `suspend`, B5):
+
+- **Grace (7 days):** everything, with a warning.
+- **Read-only (30 days):** every `view` permission (`Permissions::isView()`) plus
+  `Permissions::READ_ONLY_KEEPS`: settling invoices, recording refunds (invoice and POS), and
+  account security (deactivate, reactivate, reset a password; creating an account is refused, B2).
+  `Permissions::WIND_DOWN` (`front_desk.reservation.manage`) is withheld but still allowed for two
+  named actions through `authorizeWindDown()`: checking a guest out, and posting the room charge of
+  a stay that has started (B1). A refusal caused by the subscription says so; one the role never
+  allowed doesn't.
+- **Suspended:** nothing; sign-in is refused (403, recorded as `sign_in_refused`).
+
+The Platform Owner and support sessions are not affected.
+
 ## Rules that stay outside permissions
 
 - **Who may manage whom.** A Manager creates and resets only Front Desk Staff in their own

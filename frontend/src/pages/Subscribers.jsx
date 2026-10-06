@@ -218,11 +218,7 @@ export default function Subscribers() {
                     )}
                   </td>
                   <td>
-                    {p.subscription_active ? (
-                      <Badge bg="warning">Active</Badge>
-                    ) : (
-                      <Badge bg="secondary">Inactive</Badge>
-                    )}
+                    <StageBadge subscription={p.subscription} />
                   </td>
                   <td className="text-right">{formatMoney(p.subscription_fee)}</td>
                   <td className="text-muted">{p.subscription_expires_at ?? '—'}</td>
@@ -287,6 +283,33 @@ export default function Subscribers() {
             <Button variant="secondary" onClick={() => setHistory(null)}>Close</Button>
           </Modal.Footer>
         </Modal>
+      )}
+    </div>
+  )
+}
+
+// Where a subscription stands (step 10b, A7): active, or how far past its
+// end, and whether that stage is enforced yet in this rollout phase (B5).
+const STAGES = {
+  active: { label: 'Active', bg: 'warning' },
+  grace: { label: 'Grace period', bg: 'info' },
+  read_only: { label: 'Read-only', bg: 'danger' },
+  suspended: { label: 'Suspended', bg: 'danger' },
+}
+
+function StageBadge({ subscription: s }) {
+  if (!s) return null
+  const stage = STAGES[s.stage] ?? { label: s.stage, bg: 'secondary' }
+  const next = s.stage === 'grace' ? `read-only ${s.read_only_from}`
+    : s.stage === 'read_only' ? `suspended ${s.suspended_from}` : null
+  return (
+    <div>
+      <Badge bg={stage.bg}>{stage.label}</Badge>
+      {s.stage !== 'active' && (
+        <div className="text-xs text-muted">
+          unpaid since {s.lapsed_on}{next ? ` · ${next}` : ''}
+          {s.enforced !== s.stage && ' · not enforced yet'}
+        </div>
       )}
     </div>
   )

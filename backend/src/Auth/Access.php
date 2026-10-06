@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Auth;
 
+use App\Model\Subscription;
 use Cake\Datasource\EntityInterface;
 
 /**
@@ -20,6 +21,10 @@ final class Access
      * @param bool $platform Whether this is platform access (the platform flag).
      * @param \Cake\Datasource\EntityInterface|null $supportSession The open support session this
      *   access comes from (the Platform Owner reading one property, read-only, A6).
+     * @param \App\Model\Subscription|null $subscription The property's subscription stage (A7).
+     * @param list<string> $windDown Permissions usable only for named wind-down actions while
+     *   the property is read-only (Permissions::WIND_DOWN).
+     * @param list<string> $withheld Permissions the role grants but the subscription withholds now.
      */
     public function __construct(
         public readonly PermissionSet $permissions,
@@ -28,6 +33,9 @@ final class Access
         public readonly ?int $membershipId,
         public readonly bool $platform,
         public readonly ?EntityInterface $supportSession = null,
+        public readonly ?Subscription $subscription = null,
+        public readonly array $windDown = [],
+        public readonly array $withheld = [],
     ) {
     }
 

@@ -266,6 +266,16 @@ are ledgered); guest record edits; room status changes (future Rooms module, `ro
   Platform Owner only, reason, ends the session. `Permissions::isView()` classifies view vs change
   (also the basis of subscription read-only, part 3). A new grant ships as a migration calling
   `MembershipImport::seedRoles()` (`SeedRoleGrants`).
+  **Part 3 (built): subscription enforcement (A7).** `App\Model\Subscription::of($property)`: lapsed
+  the day after `subscription_expires_at` (or the day the status was set inactive, from the property
+  change log), then 7 days grace, 30 read-only, suspended (hotel days). `AccessResolver` narrows a
+  property person's grants by the *enforced* stage: read-only keeps view permissions plus
+  `Permissions::READ_ONLY_KEEPS`, and `WIND_DOWN` only via `authorizeWindDown()` (check-out,
+  billing a started stay); suspended holds nothing and can't sign in. `refuseWhenReadOnly()` for
+  actions whose permission stays held but whose purpose doesn't (creating an account). The phase is
+  `APP_SUBSCRIPTION_ENFORCEMENT` = `report` (default: warnings only) → `grace` → `read_only` →
+  `suspend` (B5: move one phase at a time). Screens: `components/SubscriptionBanner.jsx`, the stage
+  on Subscribers (`GET /properties` returns `subscription` per property).
 - **Phase 3:** editable roles in Settings (audited), new starter roles (Property Owner,
   Housekeeping, Storekeeper…), multi-property switcher; drop the old user columns.
 - **Rules for code written now:** resolve the property through `effectivePropertyId()` /

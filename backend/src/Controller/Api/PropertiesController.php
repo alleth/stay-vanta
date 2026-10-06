@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\Permissions;
+use App\Model\Subscription;
 
 /**
  * Hotels & resorts. Owners manage these; admins/receptionists can read their
@@ -31,7 +32,14 @@ class PropertiesController extends AppController
             }]);
         }
 
-        $this->set('properties', $query->all());
+        // Each subscriber's stage (A7, B5): the Platform list of who is in
+        // grace, read-only or suspended, before and after enforcement.
+        $list = $query->all()->map(function ($property) {
+            $property->set('subscription', Subscription::of($property)->toArray());
+
+            return $property;
+        })->toList();
+        $this->set('properties', $list);
         $this->viewBuilder()->setOption('serialize', ['properties']);
     }
 
