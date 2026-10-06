@@ -291,10 +291,14 @@ class LedgerWritesApiTest extends TestCase
         $itemId = (int)$this->responseJson()['item']['id'];
 
         $this->assertSame(40.0, $this->quantity($itemId));
+        // One request, two facts (inventory follow-up, 2026-10-06): the
+        // item's creation (config_changes) and its opening stock movement.
         $action = $this->action($this->requestId());
-        $this->assertCount(1, $action);
-        $this->assertSame($itemId, (int)$action[0]->subject_id);
-        $movement = $this->getTableLocator()->get('StockMovements')->get((int)$action[0]->event_id);
+        $this->assertSame(['config_changes', 'stock_movements'], array_map(fn($a) => $a->event_table, $action));
+        foreach ($action as $line) {
+            $this->assertSame($itemId, (int)$line->subject_id);
+        }
+        $movement = $this->getTableLocator()->get('StockMovements')->get((int)$action[1]->event_id);
         $this->assertSame('opening_balance', $movement->reason);
     }
 
