@@ -409,6 +409,11 @@ class PermissionMatrixApiTest extends TestCase
             $url = "/api/rooms/$roomId?property_id={$this->propertyId}";
 
             $this->callAs($this->tokens[$role], 'PATCH', $url, ['status' => 'maintenance']);
+            if (!PermissionCatalog::grants($role, 'rooms.room.update_status')) {
+                // The Platform Owner since step 10b: no hotel permissions at all.
+                $this->assertResponseCode(403, "$role changing a room's status");
+                continue;
+            }
             $this->assertAllowed("$role changing a room's status");
 
             $this->callAs($this->tokens[$role], 'PATCH', $url, ['room_number' => "MX-$i-renamed"]);
