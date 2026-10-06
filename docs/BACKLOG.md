@@ -23,7 +23,12 @@ Use the terminology change log of the naming release as the source for every ren
 Operations, Finance, POS, Platform Owner / Manager / Front Desk Staff, Collected, Outstanding,
 Receivables, Vacant, Not billed / Billed / Settled, Post room charge.
 
-## Platform Owner access to hotel data
+## Platform Owner access to hotel data: resolved in step 10b
+
+**Resolved 2026-10-06 (step 10b, part 2):** the platform flag grants only the platform's
+permissions (the 24 `PO†` grants are gone); a person without a membership or the flag is scoped
+to nothing; hotel data is reached only through a support session (`SupportSessionsController`,
+A6). Kept below for the record.
 
 **Ready when:** Permissions Phase 2 (build step 10) introduces memberships and turns the Platform
 Owner into a platform flag. Phase 1 keeps today's behavior unchanged on purpose.
@@ -39,11 +44,11 @@ platform operator), not an accident. It's an architectural concern, decided 2026
 unrestricted access must not stay permanent.
 
 Direction:
-- [ ] Platform access is separate from property permissions: the platform flag grants only
+- [x] Platform access is separate from property permissions: the platform flag grants only
   `platform.*`.
-- [ ] "No property" never means "all properties". A null property id grants nothing outside
+- [x] "No property" never means "all properties". A null property id grants nothing outside
   explicit platform endpoints.
-- [ ] Support access to a hotel is deliberate: started explicitly, scoped to one property, time
+- [x] Support access to a hotel is deliberate: started explicitly, scoped to one property, time
   limited, and recorded with actor, reason and timestamp in `access_events`.
 
 ## CI gate on deployment: resolved (under observation)

@@ -9,3 +9,8 @@ const withProp = (params, propertyId) =>
 // (impact=price&latest=1: where each current price came from).
 export const configChanges = (propertyId, params = {}) =>
   client.get('/config-changes', { params: withProp(params, propertyId) }).then((r) => r.data)
+
+// Role definitions (step 10b, Manager): the presets and their permissions,
+// read-only → [{ code, name, preset, permissions }].
+export const listRoles = () =>
+  client.get('/roles').then((r) => r.data.roles)

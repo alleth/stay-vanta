@@ -24,3 +24,13 @@ export const propertyChanges = (propertyId, page = 1) =>
 // reason, step 9). Platform Owner only.
 export const updateProperty = (id, data) =>
   client.patch(`/properties/${id}`, data).then((r) => r.data.property)
+
+// Support access (step 10b, A6): read one property's data for 60 minutes,
+// read-only, with a reason; every request is recorded and the Manager sees
+// it. → { session }
+export const startSupport = (propertyId, reason) =>
+  client.post('/platform/support-sessions', { property_id: propertyId, reason }).then((r) => r.data.session)
+
+// End your own support session early.
+export const endOwnSupport = (id) =>
+  client.post(`/platform/support-sessions/${id}/end`).then((r) => r.data.session)

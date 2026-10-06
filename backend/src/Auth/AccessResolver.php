@@ -15,7 +15,9 @@ use Cake\ORM\TableRegistry;
  * always agree.
  *
  * One property per person today: the oldest active membership is the one used
- * (a property switcher is Phase 3).
+ * (a property switcher is Phase 3). The Platform Owner holds the platform's
+ * grants, or, while a support session is open, read-only access to that one
+ * property (Permissions::supportGrants()).
  *
  * Fallback for one release (CLAUDE.md, Permission strategy): an account that
  * has never had a membership (made outside the API and the import) is read
@@ -35,7 +37,22 @@ final class AccessResolver
                 Log::warning(sprintf('platform flag fallback used for user %d (role owner, no flag)', (int)$user->id));
             }
 
-            // Phase 1 grants until the platform flag grants only platform.*.
+            // An open support session (A6): that one property, read-only.
+            $session = TableRegistry::getTableLocator()->get('SupportSessions')->find('open')
+                ->where(['SupportSessions.user_id' => $user->id])
+                ->orderBy(['SupportSessions.id' => 'DESC'])
+                ->first();
+            if ($session !== null) {
+                return new Access(
+                    new PermissionSet(Permissions::supportGrants()),
+                    (int)$session->get('property_id'),
+                    'owner',
+                    null,
+                    false,
+                    $session,
+                );
+            }
+
             return new Access(Permissions::forRole('owner'), null, 'owner', null, true);
         }
 

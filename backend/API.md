@@ -159,6 +159,32 @@ Reading it:
   the staff they manage (404 otherwise): the same shape as `/auth/sign-ins`.
   Owner & admin only; admins may change their own password & reset their receptionists, but not
   a peer admin's (see `UsersController::findManageable()`).
+- **Step 10b:** a new account also gets its membership (`membership_granted`). `PATCH /api/users/{id}`
+  with `role` (`admin` | `receptionist`) changes the person's role at their property: **Platform
+  Owner only** (403 for anyone else), `reason` required (400 without; nothing saved), and it ends
+  their session (`membership_role_changed`, `session_ended`).
+
+## Support access (step 10b, A6)
+- `POST /api/platform/support-sessions` `{property_id, reason}` — **Platform Owner**
+  (`platform.support_access.start`, elevated): opens a read-only session at one property for 60
+  minutes → 201 `{session}`. One open at a time (400 otherwise). While it's open, every request
+  the Platform Owner makes is scoped to that property, holds only the Manager preset's view
+  permissions (any change: 403 "Support access is read-only.") and is recorded first
+  (`support_access_used`). `GET /auth/me` returns `support` `{id, property_id, property_name,
+  reason, expires_at}` and the property as `property_id`.
+- `POST /api/platform/support-sessions/{id}/end` — the Platform Owner ends their own (400 once
+  ended or expired). Expiry records nothing; the session simply stops counting.
+- `GET /api/support-sessions[?page=]` → `{sessions: [{id, by, reason, started_at, expires_at,
+  ended_at, ended_by, state (open|ended|expired), requests}], page, has_more}` and
+  `GET /api/support-sessions/{id}` → `{session, requests: [{at, method, path}]}` — **Manager**
+  (`staff.access_history.view`), their property only (404 otherwise).
+- `POST /api/support-sessions/{id}/end` `[{reason}]` — **Manager** (`staff.account.manage`) ends one
+  at their property. Property users who see access history get `support_active` (open sessions
+  there) in `/auth/me`.
+
+## Roles (step 10b)
+- `GET /api/roles` — **Manager** (`settings.role.view`): `{roles: [{code, name, preset, permissions}]}`,
+  read-only.
 
 ## Inventory
 - `GET|POST /api/inventory-categories` — create **owner/admin only**; a name already used by the

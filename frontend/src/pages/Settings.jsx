@@ -20,6 +20,7 @@ import {
   RoomModal, RateModal, PromoRateModal, ChargeModal,
 } from '../components/settings/ConfigModals'
 import ChangeLog from '../components/settings/ChangeLog'
+import RolesPanel from '../components/settings/RolesPanel'
 
 // Settings (build step 9): the property's configuration — rooms, room rates,
 // promo rates, extra charges and booking sources — and the change log that
@@ -360,6 +361,12 @@ export default function Settings() {
           {canSeeLog && (
             <Tab eventKey="log" title="Change log">
               <ChangeLog propertyId={propertyId} roomName={roomName} />
+            </Tab>
+          )}
+
+          {can(P.SETTINGS_ROLE_VIEW) && (
+            <Tab eventKey="roles" title="Roles">
+              <RolesPanel />
             </Tab>
           )}
         </Tabs>

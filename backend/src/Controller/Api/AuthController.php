@@ -6,6 +6,7 @@ namespace App\Controller\Api;
 use App\Auth\Access;
 use App\Auth\AccessResolver;
 use App\Auth\LoginThrottle;
+use App\Auth\Permissions;
 use App\Event\EventContext;
 use App\Model\Entity\User;
 use App\Model\Table\AccessEventsTable;
@@ -237,6 +238,59 @@ class AuthController extends AppController
     }
 
     /**
+     * The Platform Owner's open support session, as the screens show it.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function ownSupportSession(Access $access): ?array
+    {
+        $session = $access->supportSession;
+        if ($session === null) {
+            return null;
+        }
+        $property = $this->fetchTable('Properties')->find()->select(['name'])
+            ->where(['id' => $session->get('property_id')])->disableHydration()->first();
+
+        return [
+            'id' => (int)$session->get('id'),
+            'property_id' => (int)$session->get('property_id'),
+            'property_name' => $property['name'] ?? null,
+            'reason' => $session->get('reason'),
+            'expires_at' => $session->get('expires_at'),
+        ];
+    }
+
+    /**
+     * Support sessions open now at the person's property, when they may see
+     * access history there.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function supportOpenAt(Access $access): array
+    {
+        if (
+            $access->supportSession !== null
+            || $access->propertyId === null
+            || !$access->permissions->has(Permissions::STAFF_ACCESS_HISTORY_VIEW)
+        ) {
+            return [];
+        }
+
+        return $this->fetchTable('SupportSessions')->find('open')
+            ->contain(['Users' => ['fields' => ['id', 'name']]])
+            ->where(['SupportSessions.property_id' => $access->propertyId])
+            ->orderBy(['SupportSessions.id' => 'ASC'])
+            ->all()
+            ->map(fn($session) => [
+                'id' => (int)$session->get('id'),
+                'by' => $session->get('user')?->get('name'),
+                'reason' => $session->get('reason'),
+                'expires_at' => $session->get('expires_at'),
+            ])
+            ->toList();
+    }
+
+    /**
      * The signed-in user as the SPA sees them.
      *
      * @return array<string, mixed>
@@ -254,6 +308,11 @@ class AuthController extends AppController
             // What the screens may offer. Convenience only: every action
             // checks its permission on the server.
             'permissions' => $access->permissions->toArray(),
+            // The Platform Owner's own open support session (A6), if any.
+            'support' => $this->ownSupportSession($access),
+            // Support sessions open at their property, for whoever sees access
+            // history there (the Manager, A6): shown as a banner.
+            'support_active' => $this->supportOpenAt($access),
         ];
     }
 }

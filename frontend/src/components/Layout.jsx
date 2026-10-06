@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Badge, Dropdown, Modal } from './ui'
 import AccessHistory from './AccessHistory'
+import SupportBanner from './SupportBanner'
 import { mySignIns } from '../api/account'
 import BrandMark from './BrandMark'
 import ThemeToggle from './ThemeToggle'
@@ -70,6 +71,7 @@ export default function Layout() {
           </div>
         </div>
       </header>
+      <SupportBanner />
 
       {showSignIns && (
         <Modal show onHide={() => setShowSignIns(false)} centered>

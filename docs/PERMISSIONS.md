@@ -47,9 +47,13 @@ Approved 2026-10-03. They explain the catalog; follow them when you add to it.
   hierarchy are not permissions (see "Rules that stay outside permissions").
 
 Holders: **PO** = Platform Owner (`owner`), **M** = Manager (`admin`), **FD** = Front Desk Staff
-(`receptionist`). † = held by the Platform Owner today only because the endpoint has no check, or
-checks `owner, admin` for hotel configuration. This is recorded in `BACKLOG.md` ("Platform Owner
-access to hotel data") and goes away in Phase 2, when the Platform Owner becomes a platform flag.
+(`receptionist`). Until step 10b the Platform Owner also held 24 hotel permissions (marked †) only
+because those endpoints had no check, or checked `owner, admin` (F3, `BACKLOG.md`). Since 10b the
+platform flag grants only what PO holds below: the platform, the properties' records and their
+Managers (`staff.account.*`, kept: managing Managers was always theirs), and support access.
+Hotel data is reached only through a **support session** (A6): read-only, one property, a reason,
+60 minutes, every request recorded, shown to the Manager; during it the Platform Owner holds the
+Manager preset's view permissions (`Permissions::supportGrants()`) and nothing that changes data.
 
 Future roles (Phase 3, examples): Property Owner, Accountant, POS Cashier, Housekeeping,
 Maintenance, Storekeeper. A multi-property Manager isn't a role: it's a Manager membership at
@@ -61,45 +65,47 @@ several properties.
 |---|---|---|---|---|
 | `platform.dashboard.view` | PO | Platform Owner (platform flag) | | Platform |
 | `platform.property.manage` | PO | Platform Owner (platform flag) | | Platform |
+| `platform.support_access.start` | PO | Platform Owner (platform flag) | yes | Platform |
 | `operations.today.view` | M, FD | Manager, Front Desk, Property Owner, Housekeeping, Maintenance | | Operations |
 | `operations.staff.view` | M | Manager, Property Owner | | Operations |
-| `finance.collections.view` | PO†, M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Finance |
-| `finance.collections.view_range` | PO†, M | Manager, Accountant, Property Owner | | Finance |
+| `finance.collections.view` | M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Finance |
+| `finance.collections.view_range` | M | Manager, Accountant, Property Owner | | Finance |
 | `finance.analytics.view` | M | Manager, Accountant, Property Owner | | Finance |
-| `finance.invoice.view` | PO†, M, FD | Manager, Front Desk, Accountant, Property Owner | | Finance |
-| `finance.invoice.settle` | PO†, M, FD | Manager, Front Desk, Accountant | | Finance |
+| `finance.invoice.view` | M, FD | Manager, Front Desk, Accountant, Property Owner | | Finance |
+| `finance.invoice.settle` | M, FD | Manager, Front Desk, Accountant | | Finance |
 | `finance.invoice.reverse` | M | Manager, Accountant | yes | Finance |
 | `finance.invoice.refund` | M | Manager, Accountant | yes | Finance |
-| `finance.receipt_series.manage` | PO†, M | Manager, Accountant | | Finance |
-| `front_desk.reservation.view` | PO†, M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Front Desk |
-| `front_desk.reservation.manage` | PO†, M, FD | Manager, Front Desk | | Front Desk |
+| `finance.receipt_series.manage` | M | Manager, Accountant | | Finance |
+| `front_desk.reservation.view` | M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Front Desk |
+| `front_desk.reservation.manage` | M, FD | Manager, Front Desk | | Front Desk |
 | `front_desk.reservation.backdate` | M | Manager | yes | Front Desk |
 | `front_desk.reservation.correct` | M | Manager | yes | Front Desk |
 | `front_desk.reservation.delete` | M | Manager | yes | Front Desk |
-| `guests.guest.view` | PO†, M, FD | Manager, Front Desk, POS Cashier, Property Owner | | Guests |
-| `guests.guest.manage` | PO†, M, FD | Manager, Front Desk, POS Cashier | | Guests |
-| `pos.sale.view` | PO†, M, FD | Manager, Front Desk, POS Cashier, Accountant, Property Owner | | POS |
-| `pos.sale.manage` | PO†, M, FD | Manager, Front Desk, POS Cashier | | POS |
-| `pos.sale.cancel_paid` | PO†, M | Manager | yes | POS |
-| `pos.menu.manage` | PO†, M | Manager | | POS |
-| `rooms.room.view` | PO†, M, FD | Manager, Front Desk, Housekeeping, Maintenance, Property Owner | | Rooms |
-| `rooms.room.update_status` | PO†, M, FD | Manager, Front Desk, Housekeeping, Maintenance | | Rooms |
-| `inventory.item.view` | PO†, M, FD | Manager, Front Desk, Storekeeper, Property Owner | | Inventory |
-| `inventory.item.manage` | PO†, M | Manager, Storekeeper | | Inventory |
-| `inventory.category.manage` | PO†, M | Manager, Storekeeper | | Inventory |
-| `inventory.stock.adjust` | PO†, M | Manager, Storekeeper | | Inventory |
+| `guests.guest.view` | M, FD | Manager, Front Desk, POS Cashier, Property Owner | | Guests |
+| `guests.guest.manage` | M, FD | Manager, Front Desk, POS Cashier | | Guests |
+| `pos.sale.view` | M, FD | Manager, Front Desk, POS Cashier, Accountant, Property Owner | | POS |
+| `pos.sale.manage` | M, FD | Manager, Front Desk, POS Cashier | | POS |
+| `pos.sale.cancel_paid` | M | Manager | yes | POS |
+| `pos.menu.manage` | M | Manager | | POS |
+| `rooms.room.view` | M, FD | Manager, Front Desk, Housekeeping, Maintenance, Property Owner | | Rooms |
+| `rooms.room.update_status` | M, FD | Manager, Front Desk, Housekeeping, Maintenance | | Rooms |
+| `inventory.item.view` | M, FD | Manager, Front Desk, Storekeeper, Property Owner | | Inventory |
+| `inventory.item.manage` | M | Manager, Storekeeper | | Inventory |
+| `inventory.category.manage` | M | Manager, Storekeeper | | Inventory |
+| `inventory.stock.adjust` | M | Manager, Storekeeper | | Inventory |
 | `settings.property.view` | PO, M, FD | every property role | | Settings |
-| `settings.configuration.view` | PO†, M, FD | Manager, Front Desk, Property Owner | | Settings |
-| `settings.room.manage` | PO†, M | Manager | | Settings |
-| `settings.room_rate.manage` | PO†, M | Manager | | Settings |
-| `settings.promo_rate.manage` | PO†, M | Manager | | Settings |
-| `settings.extra_charge.manage` | PO†, M | Manager | | Settings |
+| `settings.configuration.view` | M, FD | Manager, Front Desk, Property Owner | | Settings |
+| `settings.room.manage` | M | Manager | | Settings |
+| `settings.room_rate.manage` | M | Manager | | Settings |
+| `settings.promo_rate.manage` | M | Manager | | Settings |
+| `settings.extra_charge.manage` | M | Manager | | Settings |
 | `settings.change_log.view` | M | Manager, Property Owner | | Settings |
+| `settings.role.view` | M | Manager, Property Owner | | Settings |
 | `staff.account.view` | PO, M | Manager, Property Owner | | Staff |
 | `staff.account.manage` | PO, M | Manager | | Staff |
 | `staff.access_history.view` | M | Manager, Property Owner | | Staff |
 
-39 permissions: 2 platform, 37 property.
+41 permissions: 3 platform, 38 property.
 
 ## Endpoint map
 
@@ -144,8 +150,12 @@ several properties.
 | `GET /platform/property-changes` | `platform.property.manage` | Changes to property records (fee, subscription, name), step 9 |
 | `GET /reservations/{id}/price` | `front_desk.reservation.view` | Where a booking's price comes from (step 9); who changed the configuration is named only with `settings.change_log.view` |
 | `GET /users` | `staff.account.view` | |
-| `POST /users`, `PATCH/PUT /users/{id}`, `POST /users/{id}/reset-password` | `staff.account.manage` | Rules kept: who may manage whom (below). Deactivating, reactivating and resetting someone else's password need a reason; changing your own needs your current password (step 10) |
+| `POST /users`, `PATCH/PUT /users/{id}`, `POST /users/{id}/reset-password` | `staff.account.manage` | Rules kept: who may manage whom (below). Deactivating, reactivating and resetting someone else's password need a reason; changing your own needs your current password (step 10). `role` (Manager ↔ Front Desk Staff) only from the Platform Owner, with a reason; it ends the person's session (step 10b) |
 | `GET /users/{id}/access-history` | `staff.access_history.view` | A staff member's access history (step 10), for the staff you manage |
+| `POST /platform/support-sessions`, `POST /platform/support-sessions/{id}/end` | `platform.support_access.start` | Support access (step 10b, A6): start needs `property_id` and `reason`; one open session at a time, 60 minutes, read-only, every request recorded |
+| `GET /support-sessions`, `GET /support-sessions/{id}` | `staff.access_history.view` | The property's support sessions and the requests made during each |
+| `POST /support-sessions/{id}/end` | `staff.account.manage` | The Manager ends a support session at their property (`reason` optional) |
+| `GET /roles` | `settings.role.view` | Role presets and their permissions, read-only (step 10b) |
 
 ## Rules that stay outside permissions
 

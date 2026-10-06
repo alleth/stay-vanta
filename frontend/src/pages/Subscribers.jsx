@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, Table, Badge, Button, Spinner, Alert, Form, Modal } from '../components/ui'
 import {
   listSubscribers,
@@ -6,7 +7,11 @@ import {
   createSubscriberManager,
   updateProperty,
   propertyChanges,
+  startSupport,
 } from '../api/platform'
+import ReasonModal from '../components/ReasonModal'
+import PropertyStaffModal from '../components/platform/PropertyStaffModal'
+import { useAuth } from '../context/AuthContext'
 import ConfigHistory from '../components/settings/ConfigHistory'
 import { SkeletonTable } from '../components/Skeleton'
 import { formatMoney } from '../utils/format'
@@ -28,6 +33,12 @@ export default function Subscribers() {
   const [busyId, setBusyId] = useState(null)
   // The property whose change history is open (fee, subscription, name; step 9).
   const [history, setHistory] = useState(null)
+  // The property whose people are open (role changes, step 10b).
+  const [staffOf, setStaffOf] = useState(null)
+  // The property a support session is being started for (A6).
+  const [supportFor, setSupportFor] = useState(null)
+  const { refresh } = useAuth()
+  const navigate = useNavigate()
 
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(BLANK)
@@ -219,6 +230,12 @@ export default function Subscribers() {
                     <Button size="sm" variant="outline-secondary" className="mr-1" onClick={() => setHistory(p)}>
                       History
                     </Button>
+                    <Button size="sm" variant="outline-secondary" className="mr-1" onClick={() => setStaffOf(p)}>
+                      Staff
+                    </Button>
+                    <Button size="sm" variant="outline-secondary" className="mr-1" onClick={() => setSupportFor(p)}>
+                      Support access
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline-secondary"
@@ -240,6 +257,24 @@ export default function Subscribers() {
           </tbody>
         </Table>
       </Card>
+
+      {staffOf && <PropertyStaffModal property={staffOf} onHide={() => setStaffOf(null)} />}
+
+      {supportFor && (
+        <ReasonModal
+          show
+          title={`Support access to ${supportFor.name}`}
+          description="Read-only, for 60 minutes. Every page you open is recorded, and the property’s Manager sees the session, your reason, and can end it."
+          confirmLabel="Start support access"
+          onHide={() => setSupportFor(null)}
+          onConfirm={async (reason) => {
+            await startSupport(supportFor.id, reason)
+            setSupportFor(null)
+            await refresh()
+            navigate('/hub')
+          }}
+        />
+      )}
 
       {history && (
         <Modal show onHide={() => setHistory(null)} centered>

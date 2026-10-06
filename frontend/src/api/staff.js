@@ -20,3 +20,15 @@ export const resetStaffPassword = (id, password, extra = {}) =>
 // A staff member's access history (Manager, step 10): same shape as mySignIns.
 export const staffAccessHistory = (id, page = 1) =>
   client.get(`/users/${id}/access-history`, { params: { page } }).then((r) => r.data)
+
+// Support access at this property (step 10b, Manager): sessions newest first
+// → { sessions, page, has_more }; one session with its requests →
+// { session, requests }; end an open one (reason optional).
+export const supportSessions = (page = 1) =>
+  client.get('/support-sessions', { params: { page } }).then((r) => r.data)
+
+export const supportSession = (id) =>
+  client.get(`/support-sessions/${id}`).then((r) => r.data)
+
+export const endSupportSession = (id, reason) =>
+  client.post(`/support-sessions/${id}/end`, reason ? { reason } : {}).then((r) => r.data.session)

@@ -10,6 +10,7 @@ use App\Event\EventContext;
 use App\Event\ReasonRequiredException;
 use App\Middleware\CorrelationIdMiddleware;
 use App\Model\Entity\User;
+use App\Model\Table\AccessEventsTable;
 use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
 use Cake\Datasource\EntityInterface;
@@ -89,6 +90,23 @@ class AppController extends Controller
         $this->currentUser = $this->resolveUserFromToken();
         if ($this->currentUser === null) {
             throw new UnauthorizedException('Missing or invalid token.');
+        }
+
+        // A support session is fully audited (A6, B7): every request made
+        // during it is recorded before it runs. If the record can't be
+        // written, the request doesn't happen.
+        $session = $this->access()->supportSession;
+        if ($session !== null) {
+            $this->fetchTable('AccessEvents')->getConnection()->transactional(function () use ($session): void {
+                $this->recordAccess($this->eventContext(), AccessEventsTable::SUPPORT_ACCESS_USED, $this->currentUser, [
+                    'changes' => [
+                        'method' => $this->request->getMethod(),
+                        'path' => substr($this->request->getPath(), 0, 255),
+                    ],
+                    'columns' => ['support_session_id' => (int)$session->get('id')],
+                    'propertyId' => (int)$session->get('property_id'),
+                ]);
+            });
         }
     }
 
@@ -202,6 +220,9 @@ class AppController extends Controller
     protected function authorize(string $permission, ?string $message = null): void
     {
         if (!$this->can($permission)) {
+            if ($this->access()->supportSession !== null) {
+                throw new ForbiddenException('Support access is read-only.');
+            }
             throw new ForbiddenException($message ?? "You don't have permission to do this.");
         }
     }

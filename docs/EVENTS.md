@@ -310,7 +310,11 @@ row, in the change's own transaction.
 | `session_ended` | | | A deactivation or a password set ended the person's session (`changes.because`) |
 | `membership_granted` | | | A person gets a role at a property: a new account (`UsersController`, `create_user`) (`membership_id`, `role_id`; `changes.after`: property, role) |
 | `membership_imported` | | | Import (step 10b): a membership made from the account's `users.role` / `users.property_id`; **no actor** |
+| `membership_role_changed` | yes | | The Platform Owner changes a person's role at a property (`changes.role` before/after, `membership_id`, `role_id` = the new role); their session ends (`session_ended`) |
 | `platform_access_granted` | | | The platform flag is set: `create_user` for an owner, or the import for today's Platform Owner (platform scope) |
+| `support_access_started` | yes | | The Platform Owner opens a support session at one property (A6): read-only, 60 minutes (`support_session_id`; `changes.after`: property, expires_at). Recorded **at the hotel** (`property_id` = the session's), so its Manager sees it |
+| `support_access_used` | | | One request made during a support session (`changes`: method, path), refused ones too; written before the request runs, or it doesn't run. Not in the feed |
+| `support_access_ended` | | | The Platform Owner or the property's Manager ends a session early (`changes.ended_by`: `platform_owner` \| `manager`; reason optional). **Expiry records nothing**: the end time was fixed at the start |
 
 Rules (decided 2026-10-05):
 - **A failed sign-in has no actor** and `source: web` (`EventContext::unauthenticated()`): the
@@ -334,6 +338,10 @@ Rules (decided 2026-10-05):
   `Permissions::ROLE_GRANTS` by migration with **no event**: they are code a migration ships, not
   something a person did (Phase 3 makes roles editable, and audited). A sign-in with the right
   password but no active membership is `sign_in_refused` with `changes.because = no_membership`.
+- **Support access (step 10b, part 2, A6).** The session's state is `support_sessions` (open until
+  `ended_at` or `expires_at`); its history is these events, all with `support_session_id`. Support
+  events are about the Platform Owner (`subject_user_id`) but belong to the hotel: `record()` takes a
+  `propertyId` option for ledgers with platform events. Started and ended join Operations → Activity.
 - **Membership import** (`MembershipImport`, migration `ImportMemberships`): one
   `membership_imported` per Manager or Front Desk account with an existing property and no
   membership, dated at the import, no actor or reason, correlation `import-users-<id>`; the
@@ -346,5 +354,5 @@ Rules (decided 2026-10-05):
 
 ## Planned
 
-Release 10b, parts 2 and 3, adds role changes, membership ends and support access to
-`access_events` (10b proposal, section 7); no new ledger.
+Membership ends (`membership_ended`) arrive with Phase 3's multi-property memberships; until then
+leaving a property is deactivating the account.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Card, Table, Button, Badge, Modal, Form, Alert, Spinner,
+  Card, Table, Button, Badge, Modal, Form, Alert, Spinner, Tabs, Tab,
 } from '../components/ui'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -12,6 +12,7 @@ import {
 } from '../api/staff'
 import ReasonModal from '../components/ReasonModal'
 import AccessHistory from '../components/AccessHistory'
+import SupportSessions from '../components/SupportSessions'
 import { SkeletonTable } from '../components/Skeleton'
 import { roleLabel } from '../utils/roles'
 
@@ -21,11 +22,13 @@ export default function Staff() {
   const { role, user, can } = useAuth()
   // A staff member's sign-ins and account history (step 10, Manager).
   const canSeeHistory = can(P.STAFF_ACCESS_HISTORY_VIEW)
+  // Read-only access (a support session, step 10b) sees the list, not the actions.
+  const canManage = can(P.STAFF_ACCOUNT_MANAGE)
   const { propertyId } = useProperty()
   // Owners reset anyone; admins change their own password and reset their
   // receptionists, but not a peer admin's.
-  const canSetPassword = (u) =>
-    role === 'owner' || u.id === user?.id || (role === 'admin' && u.role === 'receptionist')
+  const canSetPassword = (u) => canManage
+    && (role === 'owner' || u.id === user?.id || (role === 'admin' && u.role === 'receptionist'))
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -66,62 +69,71 @@ export default function Staff() {
               : 'Add Front Desk Staff for your property.'}
           </small>
         </div>
-        <Button onClick={() => setModal('add')}>Add staff</Button>
+        {canManage && <Button onClick={() => setModal('add')}>Add staff</Button>}
       </div>
 
       {error && <Alert variant="danger">{error}</Alert>}
 
-      {loading ? (
-        <SkeletonTable rows={5} />
-      ) : (
-        <Card>
-          <Table hover>
-            <thead>
-              <tr>
-                <th>Name</th><th>Email</th><th>Role</th><th>Status</th>
-                <th className="text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {staff.length === 0 && (
-                <tr><td colSpan={5} className="py-6 text-center text-muted">No staff yet.</td></tr>
-              )}
-              {staff.map((u) => (
-                <tr key={u.id} className={u.is_active ? '' : 'text-muted'}>
-                  <td className="font-semibold">{u.name}</td>
-                  <td>{u.email}</td>
-                  <td><Badge bg={ROLE_VARIANT[u.role] ?? 'secondary'}>{roleLabel(u.role)}</Badge></td>
-                  <td>
-                    {u.is_active
-                      ? <Badge bg="success">active</Badge>
-                      : <Badge bg="secondary">inactive</Badge>}
-                  </td>
-                  <td className="whitespace-nowrap text-right">
-                    {canSeeHistory && (
-                      <Button size="sm" variant="outline-secondary" className="mr-2"
-                        onClick={() => setModal({ type: 'history', user: u })}>
-                        History
-                      </Button>
-                    )}
-                    {canSetPassword(u) && (
-                      <Button size="sm" variant="outline-secondary" className="mr-2"
-                        onClick={() => setModal({ type: 'reset', user: u, self: u.id === user?.id })}>
-                        {u.id === user?.id ? 'Change password' : 'Reset password'}
-                      </Button>
-                    )}
-                    {u.id !== user?.id && (
-                      <Button size="sm" variant={u.is_active ? 'outline-danger' : 'outline-success'}
-                        onClick={() => setSwitching(u)}>
-                        {u.is_active ? 'Deactivate' : 'Reactivate'}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </Card>
-      )}
+      <Tabs defaultActiveKey="people">
+        <Tab eventKey="people" title="People">
+          {loading ? (
+            <SkeletonTable rows={5} />
+          ) : (
+            <Card>
+              <Table hover>
+                <thead>
+                  <tr>
+                    <th>Name</th><th>Email</th><th>Role</th><th>Status</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {staff.length === 0 && (
+                    <tr><td colSpan={5} className="py-6 text-center text-muted">No staff yet.</td></tr>
+                  )}
+                  {staff.map((u) => (
+                    <tr key={u.id} className={u.is_active ? '' : 'text-muted'}>
+                      <td className="font-semibold">{u.name}</td>
+                      <td>{u.email}</td>
+                      <td><Badge bg={ROLE_VARIANT[u.role] ?? 'secondary'}>{roleLabel(u.role)}</Badge></td>
+                      <td>
+                        {u.is_active
+                          ? <Badge bg="success">active</Badge>
+                          : <Badge bg="secondary">inactive</Badge>}
+                      </td>
+                      <td className="whitespace-nowrap text-right">
+                        {canSeeHistory && (
+                          <Button size="sm" variant="outline-secondary" className="mr-2"
+                            onClick={() => setModal({ type: 'history', user: u })}>
+                            History
+                          </Button>
+                        )}
+                        {canSetPassword(u) && (
+                          <Button size="sm" variant="outline-secondary" className="mr-2"
+                            onClick={() => setModal({ type: 'reset', user: u, self: u.id === user?.id })}>
+                            {u.id === user?.id ? 'Change password' : 'Reset password'}
+                          </Button>
+                        )}
+                        {canManage && u.id !== user?.id && (
+                          <Button size="sm" variant={u.is_active ? 'outline-danger' : 'outline-success'}
+                            onClick={() => setSwitching(u)}>
+                            {u.is_active ? 'Deactivate' : 'Reactivate'}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </Card>
+          )}
+        </Tab>
+        {canSeeHistory && (
+          <Tab eventKey="security" title="Security">
+            <SupportSessions />
+          </Tab>
+        )}
+      </Tabs>
 
       {modal === 'add' && (
         <AddStaffModal

@@ -80,6 +80,20 @@ return function (RouteBuilder $routes): void {
         $builder->get('/platform/property-changes', ['controller' => 'ConfigChanges', 'action' => 'propertyChanges']);
         $builder->get('/config-changes', ['controller' => 'ConfigChanges', 'action' => 'index']);
 
+        // Support access (step 10b, A6): the Platform Owner starts and ends
+        // their session; the property's Manager sees and may end it.
+        $builder->post('/platform/support-sessions', ['controller' => 'SupportSessions', 'action' => 'start']);
+        $builder->post('/platform/support-sessions/{id}/end', ['controller' => 'SupportSessions', 'action' => 'endOwn'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->get('/support-sessions', ['controller' => 'SupportSessions', 'action' => 'index']);
+        $builder->get('/support-sessions/{id}', ['controller' => 'SupportSessions', 'action' => 'view'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post('/support-sessions/{id}/end', ['controller' => 'SupportSessions', 'action' => 'endAtProperty'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+
+        // Role definitions, read-only (step 10b).
+        $builder->get('/roles', ['controller' => 'Roles', 'action' => 'index']);
+
         // Old /reports/* paths, served by the same actions until the frontend has
         // moved off them for a release (build step 3); then remove these lines.
         $builder->get('/reports/owner-dashboard', ['controller' => 'Platform', 'action' => 'dashboard']);

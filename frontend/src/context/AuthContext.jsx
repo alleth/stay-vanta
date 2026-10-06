@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import client, { getToken, setToken } from '../api/client'
 import { ROLE_FALLBACK } from '../auth/permissions'
 
@@ -26,6 +26,14 @@ export function AuthProvider({ children }) {
     return res.data.user
   }
 
+  // Re-read who they are: after a support session starts or ends (step 10b)
+  // their property and permissions change without a new sign-in.
+  const refresh = useCallback(async () => {
+    const res = await client.get('/auth/me')
+    setUser(res.data.user)
+    return res.data.user
+  }, [])
+
   function logout() {
     setToken(null)
     setUser(null)
@@ -39,7 +47,7 @@ export function AuthProvider({ children }) {
     [user],
   )
   const value = {
-    user, loading, login, logout, role,
+    user, loading, login, logout, refresh, role,
     can: (permission) => granted.has(permission),
     // Where they work, which a permission never implies: the platform (the
     // Platform Owner, bound to no property) or one property. Screens check

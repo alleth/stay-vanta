@@ -289,14 +289,26 @@ class PropertyIsolationApiTest extends TestCase
 
     // ------------------------------------------------- the platform owner
 
-    public function testPlatformOwnerReachesAPropertyOnlyWhenNamingIt(): void
+    /**
+     * Step 10b (F3 closed): the Platform Owner holds no hotel permission, so
+     * naming a property gets them nothing. Through a support session they
+     * read that one property, whatever property they name.
+     */
+    public function testPlatformOwnerReachesHotelDataOnlyThroughASupportSessionForThatProperty(): void
     {
         $this->callAs($this->ownerToken, 'GET', '/api/rooms?property_id=' . $this->theirs);
-        $this->assertResponseOk();
-        $this->assertStringContainsString(self::B_ROOM, (string)$this->_response->getBody());
+        $this->assertResponseCode(403);
+
+        $this->callAs($this->ownerToken, 'POST', '/api/platform/support-sessions', [
+            'property_id' => $this->theirs, 'reason' => 'Checking a room report',
+        ]);
+        $this->assertResponseCode(201);
 
         $this->callAs($this->ownerToken, 'GET', '/api/rooms?property_id=' . $this->ours);
         $this->assertResponseOk();
-        $this->assertStringNotContainsString(self::B_ROOM, (string)$this->_response->getBody());
+        $this->assertStringContainsString(self::B_ROOM, (string)$this->_response->getBody(), 'the session\'s property');
+        $this->callAs($this->ownerToken, 'GET', '/api/rooms');
+        $this->assertResponseOk();
+        $this->assertStringContainsString(self::B_ROOM, (string)$this->_response->getBody());
     }
 }

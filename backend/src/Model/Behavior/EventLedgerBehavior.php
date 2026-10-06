@@ -84,7 +84,7 @@ class EventLedgerBehavior extends Behavior
      * @param \Cake\Datasource\EntityInterface $subject The record the event is about (has property_id).
      * @param array<string, mixed> $options `changes` (before/after), `columns` (typed columns such as
      *   amount), `correctsEventId` (the event this one corrects), `snapshot` (facts added to the
-     *   table's own snapshot).
+     *   table's own snapshot), `propertyId` (see write()).
      * @return \Cake\Datasource\EntityInterface The stored event.
      */
     public function record(
@@ -110,7 +110,7 @@ class EventLedgerBehavior extends Behavior
 
         // `snapshot` adds facts to the table's own snapshot (e.g. a
         // reservation's price, step 9); it never replaces them.
-        $writeOptions = [];
+        $writeOptions = array_intersect_key($options, ['propertyId' => true]);
         if (!empty($options['snapshot'])) {
             $base = method_exists($table, 'snapshotOf') ? $table->snapshotOf($subject) : [];
             $writeOptions['snapshot'] = $base + (array)$options['snapshot'];
@@ -129,7 +129,9 @@ class EventLedgerBehavior extends Behavior
      * @param \Cake\Datasource\EntityInterface $row The new ledger row, not yet saved.
      * @param \Cake\Datasource\EntityInterface $subject The record it's about (has property_id).
      * @param array<string, mixed> $options `snapshot` and `summary` to use instead of the table's,
-     *   `subjectType` for the index row when the ledger covers several.
+     *   `subjectType` for the index row when the ledger covers several, `propertyId` for a ledger
+     *   with platform events whose subject has no property but the event does (a support session:
+     *   the Platform Owner at one hotel, step 10b).
      * @return \Cake\Datasource\EntityInterface The stored row.
      */
     public function write(
@@ -169,6 +171,12 @@ class EventLedgerBehavior extends Behavior
         }
 
         $rawProperty = $subject->get('property_id');
+        if (array_key_exists('propertyId', $options)) {
+            if (!$this->getConfig('platformEvents')) {
+                throw new LogicException('Only a ledger with platform events sets an event\x27s property.');
+            }
+            $rawProperty = $options['propertyId'];
+        }
         $propertyId = $rawProperty === null ? null : (int)$rawProperty;
         if ($propertyId === 0 || ($propertyId === null && !$this->getConfig('platformEvents'))) {
             throw new LogicException('An event subject must belong to a property.');

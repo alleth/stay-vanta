@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Auth;
 
+use Cake\Datasource\EntityInterface;
+
 /**
  * What one signed-in person may do, and where, for one request (build step
  * 10b): the permissions they hold and the property those apply to. Resolved
@@ -16,6 +18,8 @@ final class Access
      * @param string|null $roleCode Their role there (`admin`, `receptionist`), or `owner` on the platform.
      * @param int|null $membershipId The membership it comes from, if any.
      * @param bool $platform Whether this is platform access (the platform flag).
+     * @param \Cake\Datasource\EntityInterface|null $supportSession The open support session this
+     *   access comes from (the Platform Owner reading one property, read-only, A6).
      */
     public function __construct(
         public readonly PermissionSet $permissions,
@@ -23,6 +27,7 @@ final class Access
         public readonly ?string $roleCode,
         public readonly ?int $membershipId,
         public readonly bool $platform,
+        public readonly ?EntityInterface $supportSession = null,
     ) {
     }
 

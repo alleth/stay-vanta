@@ -43,7 +43,7 @@ trait ApiScenarioTrait
     private const PROPERTY_SCOPED_TABLES = [
         'FoodOrders', 'Invoices', 'Reservations', 'Guests', 'FoodMenuItems',
         'InventoryItems', 'InventoryCategories', 'ReceiptSeries', 'ExtraCharges', 'PromoRates',
-        'BookingSources', 'RoomRates', 'Rooms', 'PropertyMemberships', 'Users',
+        'BookingSources', 'RoomRates', 'Rooms', 'PropertyMemberships', 'SupportSessions', 'Users',
     ];
 
     /**

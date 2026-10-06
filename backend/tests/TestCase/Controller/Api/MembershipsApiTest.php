@@ -231,6 +231,43 @@ class MembershipsApiTest extends TestCase
         $this->assertSame([], $this->eventsOf($userId, 'membership_imported'));
     }
 
+    public function testOnlyThePlatformOwnerChangesARoleWithAReasonAndItEndsTheSession(): void
+    {
+        $deskId = $this->userIdFor($this->deskToken);
+        $ownerToken = $this->makeUser(null, 'owner', 'member-owner-' . uniqid() . '@example.test');
+
+        $this->callAs($this->adminToken, 'PATCH', "/api/users/$deskId", ['role' => 'admin', 'reason' => 'Promotion']);
+        $this->assertResponseCode(403, 'a Manager never grants the Manager role');
+
+        $this->callAs($ownerToken, 'PATCH', "/api/users/$deskId", ['role' => 'admin']);
+        $this->assertResponseCode(400, 'a role change needs a reason');
+        $this->assertSame([], $this->eventsOf($deskId, 'membership_role_changed'));
+
+        $this->callAs($ownerToken, 'PATCH', "/api/users/$deskId", ['role' => 'admin', 'reason' => 'Promoted to Manager']);
+        $this->assertResponseOk();
+
+        $membership = $this->getTableLocator()->get('PropertyMemberships')->find('active')
+            ->contain(['Roles'])->where(['user_id' => $deskId])->firstOrFail();
+        $this->assertSame('admin', $membership->role->code);
+        $this->assertSame('admin', $this->getTableLocator()->get('Users')->get($deskId)->role, 'still written');
+
+        [$event] = $this->eventsOf($deskId, 'membership_role_changed');
+        $this->assertSame($this->userIdFor($ownerToken), (int)$event->actor_id);
+        $this->assertSame('owner', $event->actor_role);
+        $this->assertSame('Promoted to Manager', $event->reason);
+        $this->assertEquals(['role' => ['before' => 'receptionist', 'after' => 'admin']], $event->changes);
+        $this->assertSame((int)$membership->id, (int)$event->membership_id);
+        [$ended] = $this->eventsOf($deskId, 'session_ended');
+        $this->assertEquals(['because' => 'membership_role_changed'], $ended->changes);
+
+        $this->callAs($this->deskToken, 'GET', '/api/auth/me');
+        $this->assertResponseCode(401, 'a new role means signing in again (A8)');
+
+        $this->callAs($ownerToken, 'PATCH', "/api/users/$deskId", ['role' => 'admin', 'reason' => 'Again']);
+        $this->assertResponseCode(400, 'nothing to change');
+        $this->assertCount(1, $this->eventsOf($deskId, 'membership_role_changed'));
+    }
+
     public function testThePlatformOwnerIsReadFromThePlatformFlag(): void
     {
         $ownerToken = $this->makeUser(null, 'owner', 'member-owner-' . uniqid() . '@example.test');

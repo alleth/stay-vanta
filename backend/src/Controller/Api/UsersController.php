@@ -6,6 +6,7 @@ namespace App\Controller\Api;
 use App\Auth\Permissions;
 use App\Model\Entity\User;
 use App\Model\Table\AccessEventsTable;
+use App\Model\Table\RolesTable;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -124,8 +125,14 @@ class UsersController extends AppController
         $this->findManageable($id);
         $name = $this->request->getData('name');
         $active = $this->request->getData('is_active');
+        $role = $this->request->getData('role');
+        // Changing a role is the Platform Owner's alone (step 10b): a Manager
+        // never grants or removes the Manager role.
+        if ($role !== null && !$this->access()->platform) {
+            throw new ForbiddenException('Only the Platform Owner can change a role.');
+        }
 
-        $user = $users->getConnection()->transactional(function () use ($users, $id, $name, $active): User {
+        $user = $users->getConnection()->transactional(function () use ($users, $id, $name, $active, $role): User {
             // Lock, then check against the locked row (a second identical
             // request finds nothing to change and records nothing).
             $user = $this->lockUser($id);
@@ -150,15 +157,27 @@ class UsersController extends AppController
                     ['is_active' => ['before' => !$isActive, 'after' => $isActive]],
                 ];
             }
-            if ($events === []) {
+            $roleChange = null;
+            if ($role !== null && (string)$role !== $user->role) {
+                $roleChange = $this->roleChangeFor($user, (string)$role);
+                // Still written for one release, so a rollback keeps working.
+                $data['role'] = (string)$role;
+            }
+            if ($events === [] && $roleChange === null) {
                 throw new BadRequestException('Nothing to change.');
             }
             $users->patchEntity($user, $data);
             $sessionOpen = false;
+            $endedBecause = null;
             if (($data['is_active'] ?? null) === false) {
                 // A8: a switched-off account's session ends now, so switching
                 // it back on can't revive it (F1).
                 $sessionOpen = $this->endSession($user);
+                $endedBecause = AccessEventsTable::ACCOUNT_DEACTIVATED;
+            } elseif ($roleChange !== null) {
+                // A8: a new role means new permissions; sign in again.
+                $sessionOpen = $this->endSession($user);
+                $endedBecause = AccessEventsTable::MEMBERSHIP_ROLE_CHANGED;
             }
             if (!$users->save($user, ['atomic' => false])) {
                 return $user;
@@ -166,9 +185,18 @@ class UsersController extends AppController
             foreach ($events as [$type, $changes]) {
                 $this->recordAccess($this->eventContext(), $type, $user, ['changes' => $changes]);
             }
+            if ($roleChange !== null) {
+                [$membership, $roleId, $before] = $roleChange;
+                $membership->set('role_id', $roleId);
+                $this->fetchTable('PropertyMemberships')->saveOrFail($membership, ['atomic' => false]);
+                $this->recordAccess($this->eventContext(), AccessEventsTable::MEMBERSHIP_ROLE_CHANGED, $user, [
+                    'changes' => ['role' => ['before' => $before, 'after' => $user->role]],
+                    'columns' => ['membership_id' => (int)$membership->id, 'role_id' => $roleId],
+                ]);
+            }
             if ($sessionOpen) {
                 $this->recordAccess($this->eventContext(), AccessEventsTable::SESSION_ENDED, $user, [
-                    'changes' => ['because' => AccessEventsTable::ACCOUNT_DEACTIVATED],
+                    'changes' => ['because' => $endedBecause],
                 ]);
             }
 
@@ -271,6 +299,36 @@ class UsersController extends AppController
         $user->set('token_expires', null);
 
         return $open;
+    }
+
+    /**
+     * What changing a person's role takes (step 10b): their active membership,
+     * locked, the new role's id, and the role before. The Platform Owner's
+     * change, with a reason (the event refuses one without).
+     *
+     * A property's last active Manager may be demoted only this way: Managers
+     * can't change roles or deactivate themselves, so they can never remove
+     * the last Manager (A10).
+     *
+     * @return array{0: \Cake\Datasource\EntityInterface, 1: int, 2: string}
+     */
+    private function roleChangeFor(User $user, string $role): array
+    {
+        if (!array_key_exists($role, RolesTable::PRESETS)) {
+            throw new BadRequestException('Choose Manager or Front Desk Staff.');
+        }
+        $membership = $this->fetchTable('PropertyMemberships')->find('active')
+            ->where(['PropertyMemberships.user_id' => $user->id])
+            ->orderBy(['PropertyMemberships.id' => 'ASC'])
+            ->epilog('FOR UPDATE')
+            ->first();
+        if ($membership === null) {
+            throw new BadRequestException('This person has no active membership whose role could change.');
+        }
+        /** @var \App\Model\Table\RolesTable $roles */
+        $roles = $this->fetchTable('Roles');
+
+        return [$membership, (int)$roles->idFor($role), (string)$user->role];
     }
 
     /**

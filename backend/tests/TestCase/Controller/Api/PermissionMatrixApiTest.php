@@ -155,6 +155,13 @@ class PermissionMatrixApiTest extends TestCase
         ['PUT', '/api/users/{id}', 'staff.account.manage'],
         ['POST', '/api/users/{id}/reset-password', 'staff.account.manage'],
         ['GET', '/api/users/{id}/access-history', 'staff.access_history.view'],
+        // Support access (step 10b): no reason in the probe, so a holder gets 400 and no session opens.
+        ['POST', '/api/platform/support-sessions', 'platform.support_access.start', '', ['property_id' => '{property}']],
+        ['POST', '/api/platform/support-sessions/{id}/end', 'platform.support_access.start'],
+        ['GET', '/api/support-sessions', 'staff.access_history.view'],
+        ['GET', '/api/support-sessions/{id}', 'staff.access_history.view'],
+        ['POST', '/api/support-sessions/{id}/end', 'staff.account.manage'],
+        ['GET', '/api/roles', 'settings.role.view'],
     ];
 
     private const MISSING_ID = '999999999';

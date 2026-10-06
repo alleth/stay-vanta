@@ -255,8 +255,17 @@ are ledgered); guest record edits; room status changes (future Rooms module, `ro
   made the rest. `users.role` / `users.property_id` are still written for one release, and an
   account that never had a membership falls back to them (logged as "membership fallback used";
   remove it once those lines stop). No active membership and no flag = no access, and sign-in is
-  refused. Test users get their membership from `ApiScenarioTrait::makeUser()`. Parts 2–3 (the
-  Platform Owner losing the † grants, support access, subscription enforcement): the 10b proposal.
+  refused. Test users get their membership from `ApiScenarioTrait::makeUser()`.
+  **Part 2 (built):** the platform flag grants only `platform.*`, `settings.property.view` and
+  `staff.account.*` (the 24 † grants are gone, F3 closed). Hotel data only through a **support
+  session** (A6, `SupportSessionsController`, `support_sessions`): read-only (the Manager preset's
+  view permissions, `Permissions::supportGrants()`; refusals say "Support access is read-only."),
+  one property, a reason, 60 minutes, every request recorded first in `AppController::beforeFilter`
+  (`support_access_used`), shown to the Manager (banner from `/auth/me` `support_active`, Staff →
+  Security) who may end it; expiry records nothing. Role changes (`PATCH /users/{id}` `role`):
+  Platform Owner only, reason, ends the session. `Permissions::isView()` classifies view vs change
+  (also the basis of subscription read-only, part 3). A new grant ships as a migration calling
+  `MembershipImport::seedRoles()` (`SeedRoleGrants`).
 - **Phase 3:** editable roles in Settings (audited), new starter roles (Property Owner,
   Housekeeping, Storekeeper…), multi-property switcher; drop the old user columns.
 - **Rules for code written now:** resolve the property through `effectivePropertyId()` /
@@ -366,8 +375,9 @@ target model, and today's gaps, are in "Accountability standard" above.
 
 ### Roles & subscriptions
 Three roles on `users.role` (`UsersTable::ROLES`), shown on screens by their display names:
-- **owner → Platform Owner** — the platform operator, `property_id = null`. Sees Dashboard
-  (subscription revenue + counts) and Subscribers only.
+- **owner → Platform Owner** — the platform operator (platform flag `users.is_platform`). Sees
+  Dashboard (subscription revenue + counts) and Subscribers (properties, their staff and role
+  changes, support access); hotel screens only during a read-only support session (step 10b).
 - **admin → Manager** — runs one subscribing hotel. Operations (today + staff/activity),
   Inventory, Front Desk, Guests, POS, Finance (collections by day/month/range, receivables,
   invoices, analytics), Staff. Creates Front Desk Staff accounts.
@@ -479,7 +489,12 @@ would make the key attacker-controlled.
   form when the save needs one (a correction, a stay before today, a referral discount).
 - **Access history is `src/components/AccessHistory.jsx`** (step 10): your own from the header's
   avatar menu ("Your sign-ins", `GET /auth/sign-ins`), a staff member's from Staff → History
-  (Manager). Wording in `utils/accessEvents.js`.
+  (Manager). Wording in `utils/accessEvents.js`. Support access (step 10b):
+  `src/components/SupportBanner.jsx` under the header (the Platform Owner's own session, or one open
+  at the Manager's property; `AuthContext.refresh()` re-reads `/auth/me` when one starts, ends or
+  expires), `components/SupportSessions.jsx` (Staff → Security), and
+  `components/platform/PropertyStaffModal.jsx` (Subscribers → Staff: role changes). Settings → Roles
+  is `components/settings/RolesPanel.jsx`.
 - **Elevated actions ask why with `src/components/ReasonModal.jsx`** (`show`, `title`,
   `description`, `confirmLabel`, `onConfirm(reason)`, `onHide`) and send `reason` with the request.
 - **Configuration screens (step 9).** Deleting a configuration row asks why (`ReasonModal`); a

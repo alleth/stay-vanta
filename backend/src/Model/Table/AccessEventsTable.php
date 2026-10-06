@@ -56,9 +56,17 @@ class AccessEventsTable extends Table
     public const MEMBERSHIP_GRANTED = 'membership_granted';
     /** Import: a membership made from the account's own role and property. */
     public const MEMBERSHIP_IMPORTED = 'membership_imported';
+    /** Their role at the property changes (Platform Owner only); their session ends. Needs a reason. */
+    public const MEMBERSHIP_ROLE_CHANGED = 'membership_role_changed';
     // Platform
     /** The platform flag is set (for today's Platform Owner, by the import). */
     public const PLATFORM_ACCESS_GRANTED = 'platform_access_granted';
+    /** The Platform Owner opens a read-only support session at one property (A6). Needs a reason. */
+    public const SUPPORT_ACCESS_STARTED = 'support_access_started';
+    /** One request made during a support session (method and path). */
+    public const SUPPORT_ACCESS_USED = 'support_access_used';
+    /** The Platform Owner or the property's Manager ends a session before it expires. */
+    public const SUPPORT_ACCESS_ENDED = 'support_access_ended';
 
     public const TYPES = [
         self::ACCOUNT_CREATED,
@@ -75,23 +83,35 @@ class AccessEventsTable extends Table
         self::SESSION_ENDED,
         self::MEMBERSHIP_GRANTED,
         self::MEMBERSHIP_IMPORTED,
+        self::MEMBERSHIP_ROLE_CHANGED,
         self::PLATFORM_ACCESS_GRANTED,
+        self::SUPPORT_ACCESS_STARTED,
+        self::SUPPORT_ACCESS_USED,
+        self::SUPPORT_ACCESS_ENDED,
     ];
 
     public const REQUIRES_REASON = [
         self::ACCOUNT_DEACTIVATED,
         self::ACCOUNT_REACTIVATED,
         self::PASSWORD_RESET,
+        self::MEMBERSHIP_ROLE_CHANGED,
+        self::SUPPORT_ACCESS_STARTED,
     ];
 
     public const REASON_GRACE = [];
 
-    /** Account administration: these join Operations → Activity (A9). Sessions don't. */
+    /**
+     * Account administration and support access: these join Operations →
+     * Activity (A9). Sign-ins and each request of a support session don't.
+     */
     public const FEED_TYPES = [
         self::ACCOUNT_CREATED,
         self::ACCOUNT_DEACTIVATED,
         self::ACCOUNT_REACTIVATED,
         self::PASSWORD_RESET,
+        self::MEMBERSHIP_ROLE_CHANGED,
+        self::SUPPORT_ACCESS_STARTED,
+        self::SUPPORT_ACCESS_ENDED,
     ];
 
     public const SCOPE_PROPERTY = 'property';
