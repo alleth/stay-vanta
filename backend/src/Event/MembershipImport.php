@@ -196,6 +196,30 @@ final class MembershipImport
                     $result['platform']++;
                 }
             });
+
+            // A grant on record whose flag didn't persist (seen on staging: an
+            // account made by `create_user` run with a stale cached schema of
+            // `users`). The grant is already recorded, with its actor and
+            // time, so the flag is set to match and no event is added.
+            $unflagged = $users->find()
+                ->where(['Users.role' => 'owner', 'Users.property_id IS' => null, 'Users.is_platform' => false])
+                ->where(function ($exp, $q) {
+                    return $exp->exists(
+                        $q->getConnection()->selectQuery('1', 'access_events')
+                            ->where([
+                                'access_events.subject_user_id = Users.id',
+                                'access_events.event_type' => AccessEventsTable::PLATFORM_ACCESS_GRANTED,
+                            ]),
+                    );
+                })
+                ->all()->toList();
+            foreach ($unflagged as $owner) {
+                $users->updateAll(['is_platform' => true], ['id' => $owner->get('id')]);
+                Log::warning(sprintf(
+                    'membership import: user %d had platform_access_granted on record but no flag; flag set to match',
+                    (int)$owner->get('id'),
+                ));
+            }
         }
         $result['skipped'] = count($skipped);
 
