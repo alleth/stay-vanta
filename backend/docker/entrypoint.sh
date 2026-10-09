@@ -32,4 +32,11 @@ until php bin/cake.php migrations migrate --no-lock; do
   sleep 3
 done
 
+# Migrations run as root, and data migrations load tables, so the schema
+# cache now holds root-owned files that Apache (www-data) can't open
+# ("Permission denied" warnings), possibly describing a table a later
+# migration changed. Forget them and give tmp/ back to Apache.
+rm -f tmp/cache/models/* 2>/dev/null || true
+chown -R www-data:www-data tmp logs 2>/dev/null || true
+
 exec apache2-foreground
