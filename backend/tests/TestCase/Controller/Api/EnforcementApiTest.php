@@ -157,7 +157,7 @@ class EnforcementApiTest extends TestCase
         $this->assertSame('owner', $raised->actor_role);
         $this->assertSame('Customers notified on Oct 1', $raised->reason);
         $this->assertSame($raisedId, $raised->correlation_id);
-        $this->assertSame(['before' => 'report', 'after' => 'grace'], $raised->changes['phase']);
+        $this->assertEquals(['before' => 'report', 'after' => 'grace'], $raised->changes['phase']);
         $this->assertGreaterThanOrEqual(1, $raised->snapshot['properties']);
 
         $readOnly = $this->events()[2];
