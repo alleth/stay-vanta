@@ -95,7 +95,7 @@ class RoomServiceApiTest extends TestCase
         $this->assertSame($this->userIdFor($this->deskToken), (int)$started->actor_id);
         $this->assertSame('Leaking tap', $started->reason);
         $this->assertSame($requestId, $started->correlation_id);
-        $this->assertSame('maintenance', $this->roomRow($this->roomId)->status, 'older readers still see maintenance');
+        $this->assertSame('available', $this->roomRow($this->roomId)->status, 'status is occupancy only (G8b)');
         $this->assertSame(1, $this->getTableLocator()->get('ActivityIndex')->find()
             ->where(['event_table' => 'room_events', 'event_id' => $started->id])->count(), 'every change reaches Activity');
 
@@ -189,12 +189,13 @@ class RoomServiceApiTest extends TestCase
         $this->assertResponseOk((string)$this->_response->getBody());
         $room = $this->roomRow($this->roomId);
         $this->assertSame('maintenance', $room->service_status, 'check-out never clears maintenance');
-        $this->assertSame('maintenance', $room->status);
+        $this->assertSame('available', $room->status, 'occupancy only: vacant (G8b)');
 
         $this->callAs($this->adminToken, 'GET', '/api/operations/today');
         $rooms = $this->responseJson()['operations']['rooms'];
-        $this->assertSame(1, $rooms['maintenance']);
+        $this->assertSame(1, $rooms['maintenance'], 'service decides, not status');
         $this->assertSame(0, $rooms['occupied']);
+        $this->assertSame(0, $rooms['available'], 'a room under maintenance is not for sale');
     }
 
     public function testOnlyManagersReadTheHistoryWithBeforeAfterAndRequestId(): void

@@ -492,7 +492,11 @@ class ReservationEventsApiTest extends TestCase
         $this->callAs($this->adminToken, 'GET', '/api/reservations?limit=25');
         $this->assertResponseOk();
         $row = $this->responseJson()['reservations'][0];
-        $this->assertSame(['id', 'name'], array_keys($row['receptionist']), 'no token expiry or other account fields');
+        // G8b: the legacy "last touched by" and Mark paid flag are no longer answered.
+        foreach (['receptionist', 'receptionist_id', 'payment_status'] as $legacy) {
+            $this->assertArrayNotHasKey($legacy, $row);
+        }
+        $this->assertSame(['name', 'recorded', 'at'], array_keys($row['booked_by']), 'only the name of who booked it');
         // Who booked it comes from its creation event, not the legacy column.
         $this->assertStringContainsString('resv-desk', (string)$row['booked_by']['name']);
         $this->assertTrue($row['booked_by']['recorded']);

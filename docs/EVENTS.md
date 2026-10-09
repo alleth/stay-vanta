@@ -221,7 +221,8 @@ Rules (decided 2026-10-04):
   restore. Deleted means "historically happened", not "temporarily hidden".
 - **Money stays in `invoice_events`**: a check-out's room charge, a cancellation's reversals and
   refund share the action's correlation id with its reservation event; nothing is copied.
-- **`reservations.receptionist_id` is legacy** (R6): still stamped for one release, never the actor.
+- **`reservations.receptionist_id` is legacy** (R6): never the actor. Since G8b it is not written
+  or returned; the values recorded before stay in the column and in imported snapshots (L-D2).
 - **Timeline and feed** (part 2): `GET /reservations/{id}/history` merges these events with the
   invoice events of the reservation's money; Operations → Activity shows every type but `edited`.
   Staff actions today count distinct requests per actor across all ledgers (`activity_index`).
@@ -399,7 +400,10 @@ import is indexed** for the feed (R2). Read by Managers only (`GET /rooms/{id}/h
 Rules: a change to the status a room already has is refused (400) and records nothing. A check-in,
 a walk-in and a past stay still going are refused into a room not in service; a booking for later
 dates is refused only when the room is out of service (R3). Check-out never clears maintenance.
-Occupancy can't be set by hand (R4). `rooms.status` keeps the old combined value for one release.
+Occupancy can't be set by hand (R4). `rooms.status` is occupancy only (occupied | available) since
+G8b: migration `NormalizeRoomOccupancy` turned the old combined `maintenance` copies into
+`available` (the service state stays in `service_status` and its history here); a pre-G4 value with
+no service state is left as it is and counted.
 History before G4 (`RoomServiceImport`, migration `ImportRoomService`, `bin/cake activity_backfill`):
 idempotent, correlation `import-rooms-<id>`.
 

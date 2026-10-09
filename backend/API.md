@@ -121,8 +121,7 @@ Reading it:
     5). A parent item with live sub-items is a container and is left out of the alerts.
   - `staff` / `activity` — **admin only, `null` for a receptionist**. `staff.members` = active
     admin/receptionist accounts with `actions_today`; `activity` = the latest 8 stock movements and
-    food orders merged, each with its `actor`. Only those two ledgers count — a reservation's
-    `receptionist_id` is re-stamped on every edit/transition, so it can't attribute an action.
+    food orders merged, each with its `actor`.
   - `attention` — the counts behind the computed "Needs attention" panel (no stored
     notifications): `arrivals_pending`, `late_arrivals`, `departures_pending`,
     `overdue_departures`, `new_bookings` (non-walk-in reservations created today),
@@ -351,9 +350,10 @@ Reading it:
   `/history`.
 - `GET /api/reservations?deleted=only` — **Manager only** (403 otherwise): the read-only list of
   soft-deleted reservations.
-- Embedded staff (`receptionist`, `last_receptionist`) carry `{id, name}` only (step 8). Each listed
-  reservation carries `booked_by` `{name, recorded, at}` from its creation event (`recorded: false`
-  = imported, person unknown); `receptionist` is legacy ("last touched by") and not shown.
+- Embedded staff (`last_receptionist`) carry `{id, name}` only (step 8). Each listed reservation
+  carries `booked_by` `{name, recorded, at}` from its creation event (`recorded: false` = imported,
+  person unknown). Reservations no longer answer `receptionist`, `receptionist_id` or
+  `payment_status` (G8b): who acted is in the history, billing in `billing_state`.
 - `DELETE /api/reservations/{id}` `{reason}` — **admin only** (403), any status, **soft** (step 8):
   sets `deleted_at`, keeps the row, its `reservation_discounts` and extras, records `deleted` with
   the whole reservation; 404 afterwards. 400 without a reason, and once anything has been
@@ -361,7 +361,8 @@ Reading it:
   order by the same guest dated within the stay (food orders link to the guest, not the booking).
   Frees the room if it was the one checking the guest in.
 - `POST /api/reservations/{id}/{check-in|check-out|cancel}` — stamp
-  `checked_in_at`/`checked_out_at`/`cancelled_at` and `receptionist_id`; flip room status.
+  `checked_in_at`/`checked_out_at`/`cancelled_at`; set the room's occupancy (`status` occupied |
+  available; its service is `service_status`).
   - check-in accepts `early_check_in:true` → posts the configured fee to the guest's invoice.
   - check-out posts the room charge (+ downpayment credit) if it hasn't been posted already.
   - cancel from `booked` with a downpayment **requires `refund_method`** (cash|gcash|maya|gotyme;

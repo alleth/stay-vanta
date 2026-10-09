@@ -141,7 +141,8 @@ housekeeping, expenses, time keeping and configuration.
 **Today:** inventory (`stock_movements`), POS sales (`food_order_events`, step 5) and invoices
 (`invoice_events`, step 6, in production 2026-10-03; history from before is imported with no actor)
 meet it; reservations (`reservation_events`, soft delete) since step 8. `reservations.receptionist_id`
-is legacy ("last touched by", still stamped for one release, never the actor). Configuration
+is legacy ("last touched by" before step 8): since G8b it is never written or returned, and the
+values recorded before stay in the column (L-D2). Configuration
 (`config_changes`, step 9, in production 2026-10-05, `b6ecca2`; rows from before carry one
 `baseline_recorded` with no actor). Accounts and sign-ins (`access_events`, step 10 part 1 =
 release 10a; memberships, roles and support access follow in 10b). Inventory item records
@@ -395,8 +396,9 @@ Every stock/asset state row and every mutating action records **who was responsi
   (transactional: locks the item row, writes the ledger row with the shared event columns and its
   `activity_index` row, updates `quantity`, stamps `inventory_items.last_receptionist_id`, rejects
   negative stock). Never mutate `inventory_items.quantity` directly.
-- `reservations.receptionist_id` (stamped at creation **and** on every transition and edit, so
-  it's only "last touched by", not a history), `food_orders.receptionist_id` (who placed it).
+- `food_orders.receptionist_id` (who placed it). `reservations.receptionist_id` was "last touched
+  by" before step 8; it is no longer written (G8b): reservations answer who through
+  `reservation_events`.
 
 Stamp the acting user from `AppController::$currentUser` on any endpoint that changes state. The
 target model, and today's gaps, are in "Accountability standard" above.
@@ -693,8 +695,8 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
   (`invoiceForLine('reservation', …)`), so whichever fires first posts it. It posts the offsetting
   `downpayment_credit` in the same call, **only once the charge line exists** (so an unresolvable
   rate can't strand a credit), under a `FOR UPDATE` lock on the reservation. Cancel reverses the
-  room charge, credit and early check-in fee. `payment_status` is still written but nothing reads
-  it; billing comes from `billing_state` (see "Reservation billing").
+  room charge, credit and early check-in fee. `payment_status` is still set on posting but never
+  read or returned (G8b); billing comes from `billing_state` (see "Reservation billing").
 - **Early check-in**: a built-in, non-deletable `extra_charges` row (`early_check_in`, seeded by
   `ExtraChargesTable::earlyCheckInFor()`). Checking in before noon prompts, then posts
   `early_check_in:true` → fee billed to the invoice. Fee 0 disables it.

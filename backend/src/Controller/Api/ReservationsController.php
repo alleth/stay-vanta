@@ -31,16 +31,16 @@ use RuntimeException;
 /**
  * Reservations — bookings plus the check-in/out/cancel lifecycle.
  *
- * The acting receptionist is stamped on `receptionist_id` at creation and on
- * every lifecycle transition, so the booking always shows who last handled it.
+ * Who did what is in `reservation_events` (build step 8). The legacy
+ * `receptionist_id` ("last touched by") is no longer written or returned
+ * (G8b, L-D2); the values recorded before stay in the column as they were.
  */
 class ReservationsController extends AppController
 {
-    /** What a reservation is answered with ("Receptionist" is legacy: last touched by, id and name). */
+    /** What a reservation is answered with. */
     private const RESERVATION_CONTAIN = [
         'Rooms',
         'Guests',
-        'Receptionist' => self::USER_BRIEF,
         'ReservationDiscounts',
         'ReservationExtraCharges',
     ];
@@ -430,7 +430,6 @@ class ReservationsController extends AppController
                     'property_id' => $propertyId,
                     'room_id' => $roomId,
                     'guest_id' => $guestId,
-                    'receptionist_id' => (int)$this->currentUser->id,
                     'check_in' => $checkIn,
                     'check_out' => $checkOut,
                     'status' => $status,
@@ -699,7 +698,6 @@ class ReservationsController extends AppController
                     'channel_discount_value' => $channelDiscount['value'],
                     'additional_beds' => (int)($this->request->getData('additional_beds')
                         ?? $reservation->additional_beds),
-                    'receptionist_id' => (int)$this->currentUser->id,
                 ], ['accessibleFields' => ['property_id' => false]]);
 
                 $previousRoomId = $reservation->getOriginal('room_id');
@@ -854,7 +852,6 @@ class ReservationsController extends AppController
             $refuseIfTransacted($reservation);
             $before = $this->stateOf($reservation);
             $reservation->set('deleted_at', new DateTime());
-            $reservation->set('receptionist_id', (int)$this->currentUser->id);
             $reservations->saveOrFail($reservation);
             $this->recordReservationEvent($reservation, ReservationEventsTable::DELETED, ['before' => $before]);
 
@@ -1030,8 +1027,6 @@ class ReservationsController extends AppController
                 $chargePostedBefore = $invoices->invoiceForLine('reservation', (int)$reservation->id) !== null;
 
                 $reservation->set('status', $rule['to']);
-                // Re-stamp: this receptionist is now the last to act on the booking.
-                $reservation->set('receptionist_id', (int)$this->currentUser->id);
                 // Log when the check-in/out *event* actually happened (distinct from
                 // the planned check_in/check_out dates) for the Front Desk audit log.
                 if ($transition === 'check-in') {

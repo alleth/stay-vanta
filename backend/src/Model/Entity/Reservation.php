@@ -8,8 +8,10 @@ use Cake\ORM\Entity;
 /**
  * Reservation entity.
  *
- * `receptionist_id` is the LAST receptionist to act on the booking (created it
- * or performed a check-in/out/cancel) — the accountability stamp for the room.
+ * Who did what is in `reservation_events`. `receptionist_id` ("last touched
+ * by" before step 8) and `payment_status` (the old Mark paid flag; billing is
+ * read from the invoice) are legacy: kept in the table as recorded, never
+ * written by a request and never returned (G8b).
  *
  * @property int $id
  * @property int $property_id
@@ -37,9 +39,7 @@ use Cake\ORM\Entity;
  * @property string|null $channel_discount_value  the percentage (0-100] or the peso amount
  * @property string|null $discount_amount  flat referral discount amount, independent of
  *   and stackable with the statutory one (a guest can be senior/pwd *and* referred)
- * @property string $payment_status unpaid | paid — Front Desk operational flag,
- *   independent of the booking lifecycle and of invoice settlement
- * @property int $additional_beds
+ * @property string $payment_status unpaid | paid — legacy; set on posting, read by nothing
  */
 class Reservation extends Entity
 {
@@ -47,7 +47,7 @@ class Reservation extends Entity
         'property_id' => true,
         'room_id' => true,
         'guest_id' => true,
-        'receptionist_id' => true,
+        'receptionist_id' => false,
         'check_in' => true,
         'check_out' => true,
         'checked_in_at' => true,
@@ -69,4 +69,10 @@ class Reservation extends Entity
         'payment_status' => true,
         'additional_beds' => true,
     ];
+
+    /**
+     * Legacy columns left out of every response (G8b): the ledgers and
+     * `billing_state` answer who acted and what's owed.
+     */
+    protected array $_hidden = ['receptionist_id', 'payment_status'];
 }

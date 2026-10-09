@@ -138,6 +138,37 @@ class LegacyCleanupApiTest extends TestCase
     }
 
     /**
+     * G8b (L6, L-D2): the legacy "last touched by" is neither written nor
+     * answered, the value recorded before stays exactly as it was, and the
+     * ledger still says who acted.
+     */
+    public function testReceptionistIdIsNoLongerWrittenAndTheOldValueStays(): void
+    {
+        $adminId = $this->userIdFor($this->adminToken);
+        $roomId = $this->insertRow('Rooms', [
+            'property_id' => $this->propertyId, 'room_number' => 'G8-R', 'status' => 'available', 'service_status' => 'in_service',
+        ]);
+        $reservationId = $this->insertRow('Reservations', [
+            'property_id' => $this->propertyId, 'room_id' => $roomId, 'receptionist_id' => $adminId,
+            'status' => 'booked', 'source' => 'walk_in', 'payment_status' => 'unpaid', 'total_guests' => 1,
+            'check_in' => date('Y-m-d', strtotime('+3 days')), 'check_out' => date('Y-m-d', strtotime('+4 days')),
+        ]);
+
+        $this->callAs($this->deskToken, 'POST', "/api/reservations/$reservationId/cancel", ['receptionist_id' => 999]);
+        $this->assertResponseOk((string)$this->_response->getBody());
+        $answered = $this->responseJson()['reservation'];
+        foreach (['receptionist', 'receptionist_id', 'payment_status'] as $legacy) {
+            $this->assertArrayNotHasKey($legacy, $answered, "$legacy is not answered");
+        }
+
+        $row = $this->getTableLocator()->get('Reservations')->get($reservationId);
+        $this->assertSame($adminId, (int)$row->receptionist_id, 'the recorded value stays as it was');
+        $cancelled = $this->getTableLocator()->get('ReservationEvents')->find()
+            ->where(['reservation_id' => $reservationId, 'event_type' => 'cancelled'])->firstOrFail();
+        $this->assertSame($this->userIdFor($this->deskToken), (int)$cancelled->actor_id, 'the ledger says who acted');
+    }
+
+    /**
      * L12 (readers): occupancy and service are separate filters; the combined
      * `status=maintenance` value is refused.
      */

@@ -15,6 +15,10 @@ use Cake\Validation\Validator;
  */
 class RoomsTable extends Table
 {
+    /**
+     * Occupancy values. `maintenance` is only the pre-G4 combined value: still
+     * accepted so an untouched old row stays valid, never written since G8b.
+     */
     public const STATUSES = ['available', 'occupied', 'maintenance'];
 
     // Service availability (final review G4): whether the room can be sold
@@ -81,22 +85,16 @@ class RoomsTable extends Table
 
     /**
      * Set a room's occupancy (check-in, check-out, cancellation, moving a
-     * guest): occupied, or, once vacant, available only while it's in
-     * service. A check-out never clears maintenance (G4). `rooms.status`
-     * keeps this combined value for one release, so older readers see a
-     * room under maintenance as before.
+     * guest): occupied or available. `rooms.status` is occupancy only; whether
+     * the room can be sold is `service_status` (G4), which this never touches,
+     * so a check-out never clears maintenance. G8b stopped writing the old
+     * combined `maintenance` value here.
      *
      * @param \Cake\Datasource\EntityInterface $room The room (saved by the caller).
      * @param bool $occupied Whether a guest is now in it.
      */
     public static function setOccupied(EntityInterface $room, bool $occupied): void
     {
-        if ($occupied) {
-            $room->set('status', 'occupied');
-
-            return;
-        }
-        $inService = ($room->get('service_status') ?? self::IN_SERVICE) === self::IN_SERVICE;
-        $room->set('status', $inService ? 'available' : 'maintenance');
+        $room->set('status', $occupied ? 'occupied' : 'available');
     }
 }

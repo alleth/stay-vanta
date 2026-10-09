@@ -121,9 +121,8 @@ Carry these into steps 6–10:
 
 ## Smaller items
 
-- [ ] **Step 8 follow-ups (in production 2026-10-04, `d9cda62`).** Cleanup release: stop stamping
-  `reservations.receptionist_id` (legacy since step 8, R6) and drop it from the API: G8b (L-D2:
-  the column and its values stay). The catch-all routes that answered 401 for a non-existent API
+- [x] **Step 8 follow-ups (in production 2026-10-04, `d9cda62`).** `reservations.receptionist_id`
+  is no longer stamped or returned (G8b; L-D2: the column and its values stay). The catch-all routes that answered 401 for a non-existent API
   path were removed in G8a: an unknown path now answers 404.
 
 - [ ] **Staging database sleeps when idle (observed 2026-10-04, not a blocker).** Railway stops the
