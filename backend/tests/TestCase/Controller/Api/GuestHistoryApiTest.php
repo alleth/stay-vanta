@@ -119,7 +119,8 @@ class GuestHistoryApiTest extends TestCase
         [$event] = $this->eventsOf($second);
         $this->assertSame('registered_despite_matches', $event->event_type);
         $this->assertSame('Father and son, same name', $event->reason);
-        $this->assertSame([['guest_id' => $first, 'name' => 'Ben Reyes']], $event->changes['matches']);
+        // assertEquals: MySQL's JSON column sorts object keys.
+        $this->assertEquals([['guest_id' => $first, 'name' => 'Ben Reyes']], $event->changes['matches']);
         $this->assertSame(1, $this->feedRows((int)$event->id), 'a look-alike override reaches Activity');
     }
 
