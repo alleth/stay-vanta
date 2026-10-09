@@ -156,9 +156,10 @@ class ConfigAuditApiTest extends TestCase
         $roomId = (int)$this->responseJson()['room']['id'];
         $this->assertSame('booking', $this->changes('room', $roomId)[0]->impact);
 
-        // Front Desk marking a room for maintenance is operational state, not configuration.
-        $this->callAs($this->deskToken, 'PATCH', "/api/rooms/$roomId", [
-            'room_number' => 'C-2', 'room_type' => 'Twin', 'status' => 'maintenance',
+        // Front Desk putting a room under maintenance is operational state, not
+        // configuration: it's recorded in room_events (G4), not config_changes.
+        $this->callAs($this->deskToken, 'POST', "/api/rooms/$roomId/service", [
+            'service_status' => 'maintenance', 'reason' => 'Leaking tap',
         ]);
         $this->assertResponseOk((string)$this->_response->getBody());
         $this->assertCount(1, $this->changes('room', $roomId));
