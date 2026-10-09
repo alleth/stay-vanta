@@ -149,6 +149,11 @@ return function (RouteBuilder $routes): void {
         // Front Desk module: rooms, rates, reservations.
         $builder->get('/rooms', ['controller' => 'Rooms', 'action' => 'index']);
         $builder->post('/rooms', ['controller' => 'Rooms', 'action' => 'add']);
+        // Room service availability and its history (G4).
+        $builder->post('/rooms/{id}/service', ['controller' => 'Rooms', 'action' => 'service'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->get('/rooms/{id}/history', ['controller' => 'Rooms', 'action' => 'history'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->patch('/rooms/{id}', ['controller' => 'Rooms', 'action' => 'edit'])
             ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->put('/rooms/{id}', ['controller' => 'Rooms', 'action' => 'edit'])

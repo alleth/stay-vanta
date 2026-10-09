@@ -94,6 +94,8 @@ several properties.
 | `pos.menu.manage` | M | Manager | | POS |
 | `rooms.room.view` | M, FD | Manager, Front Desk, Housekeeping, Maintenance, Property Owner | | Rooms |
 | `rooms.room.update_status` | M, FD | Manager, Front Desk, Housekeeping, Maintenance | | Rooms |
+| `rooms.room.remove_from_service` | M | Manager | | Rooms |
+| `rooms.room.view_history` | M | Manager, Property Owner | | Rooms |
 | `inventory.item.view` | M, FD | Manager, Front Desk, Storekeeper, Property Owner | | Inventory |
 | `inventory.item.manage` | M | Manager, Storekeeper | | Inventory |
 | `inventory.category.manage` | M | Manager, Storekeeper | | Inventory |
@@ -110,7 +112,7 @@ several properties.
 | `staff.account.manage` | PO, M | Manager | | Staff |
 | `staff.access_history.view` | M | Manager, Property Owner | | Staff |
 
-46 permissions: 3 platform, 43 property.
+48 permissions: 3 platform, 45 property.
 
 ## Endpoint map
 
@@ -141,7 +143,9 @@ several properties.
 | `POST /food-orders/{id}/refund` | `pos.sale.cancel_paid` | Money returned for a paid sale cancelled earlier with no refund on record: needs `reason`, `method`; once (build step 7c) |
 | `POST/PATCH/PUT/DELETE /food-menu-items…` | `pos.menu.manage` | |
 | `GET /rooms` | `rooms.room.view` | |
-| `PATCH/PUT /rooms/{id}` (status only) | `rooms.room.update_status` | Changing number or type needs `settings.room.manage` |
+| `POST /rooms/{id}/service` | `rooms.room.update_status` | Service availability (G4): `service_status` (in_service \| maintenance \| out_of_service) and `reason`. Starting maintenance and taking a room out of service need a reason; out of service, and back from it, also need `rooms.room.remove_from_service` (Managers). Recorded in `room_events` |
+| `GET /rooms/{id}/history` | `rooms.room.view_history` | A room's service history (G4, R1): before, after, who, why, request id. Managers only |
+| `PATCH/PUT /rooms/{id}` | `rooms.room.update_status` | Changing number or type needs `settings.room.manage`. Occupancy can't be set by hand since G4 (R4): a different `status` is 400; service goes through `POST /rooms/{id}/service` |
 | `POST /rooms`, `DELETE /rooms/{id}` | `settings.room.manage` | |
 | `GET /inventory-items`, `/inventory-items/{id}`, `/inventory-categories`, `/stock-movements` | `inventory.item.view` | |
 | `POST/PATCH/PUT/DELETE /inventory-items…` | `inventory.item.manage` | |

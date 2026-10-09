@@ -52,7 +52,7 @@ trait ApiScenarioTrait
      */
     private const LEDGER_TABLES = [
         'activity_index', 'food_order_events', 'stock_movements', 'invoice_events', 'reservation_events', 'config_changes',
-        'access_events', 'guest_events',
+        'access_events', 'guest_events', 'room_events',
     ];
 
     protected function createProperty(string $name): int

@@ -36,6 +36,8 @@ export const P = {
   POS_MENU_MANAGE: 'pos.menu.manage',
   ROOMS_ROOM_VIEW: 'rooms.room.view',
   ROOMS_ROOM_UPDATE_STATUS: 'rooms.room.update_status',
+  ROOMS_ROOM_REMOVE_FROM_SERVICE: 'rooms.room.remove_from_service',
+  ROOMS_ROOM_VIEW_HISTORY: 'rooms.room.view_history',
   INVENTORY_ITEM_VIEW: 'inventory.item.view',
   INVENTORY_ITEM_MANAGE: 'inventory.item.manage',
   INVENTORY_CATEGORY_MANAGE: 'inventory.category.manage',
@@ -109,6 +111,8 @@ export const ROLE_FALLBACK = {
     P.FINANCE_INVOICE_EXPORT,
     P.FINANCE_COLLECTIONS_EXPORT,
     P.GUESTS_GUEST_VIEW_HISTORY,
+    P.ROOMS_ROOM_REMOVE_FROM_SERVICE,
+    P.ROOMS_ROOM_VIEW_HISTORY,
   ],
   receptionist: [
     P.FINANCE_COLLECTIONS_VIEW,

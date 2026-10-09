@@ -9,6 +9,7 @@ use App\Event\ConfigBaseline;
 use App\Event\GuestHistoryImport;
 use App\Event\InventoryLinkReport;
 use App\Event\MembershipImport;
+use App\Event\RoomServiceImport;
 use Cake\Command\Command;
 use Cake\Console\Arguments;
 use Cake\Console\ConsoleIo;
@@ -177,6 +178,25 @@ class ActivityBackfillCommand extends Command
                 'property %d: %d guests, %d with no history, %d imported, %d recorded since%s',
                 $id,
                 $c['guests'],
+                $c['unrecorded'],
+                $c['imported'],
+                $c['recorded_since'],
+                $c['complete'] ? '' : '  <- INCOMPLETE',
+            ));
+        }
+
+        // Room service (G4): rooms already under maintenance when history began.
+        $roomService = new RoomServiceImport($connection);
+        if (!$args->getOption('check-only')) {
+            $io->out(sprintf('%-24s %d added', 'room service', $roomService->run($propertyId)['imported']));
+        }
+        foreach ($roomService->check($propertyId) as $id => $c) {
+            $incomplete += $c['complete'] ? 0 : 1;
+            $io->out(sprintf(
+                'property %d: %d rooms, %d off service, %d with no record, %d imported, %d recorded since%s',
+                $id,
+                $c['rooms'],
+                $c['off_service'],
                 $c['unrecorded'],
                 $c['imported'],
                 $c['recorded_since'],

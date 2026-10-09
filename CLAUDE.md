@@ -90,7 +90,7 @@ Subscribers.
 | Reservation | A booking or stay record | Mixing "booking"/"stay" as the record's name |
 | Purchase order | Always in full | "PO", "order" |
 | POS sale states | Paid (collected at sale) · Charged to room (on an invoice) · Unpaid | |
-| Room status | Occupied · Vacant · Reserved · Maintenance (later Clean/Dirty/Inspected, Out of service) | "Available" on screens (code value stays `available`) |
+| Room status | Occupancy: Occupied · Vacant · Reserved (from reservations only). Service: In service · Maintenance · Out of service (`rooms.service_status`, G4). Later Clean/Dirty/Inspected | "Available" on screens (code value stays `available`) |
 | Roles | Platform Owner (`owner`) · Manager (`admin`) · Front Desk Staff (`receptionist`) | Raw role values on screens; "Property Owner" is reserved for a future role |
 
 **Reservation billing (live since step 3).** The old "Mark paid" didn't collect money (it posted
@@ -146,8 +146,9 @@ is legacy ("last touched by", still stamped for one release, never the actor). C
 release 10a; memberships, roles and support access follow in 10b). Inventory item records
 (name, unit, category, threshold, stock type, parent, deletion) since the inventory follow-up
 (2026-10-06, `config_changes`, entity `inventory_item`). Guest records
-(`guest_events`, final review G3). Known gaps (G4–G8): room status changes (future Rooms module,
-`room_events`); the A11 retention routine (guest contact values included, GU5).
+(`guest_events`, final review G3). Room service
+availability (`room_events`, G4). Known gaps (G5–G8): the A11 retention routine (guest contact
+values included, GU5); housekeeping states (Clean/Dirty/Inspected) await their own module (R5).
 
 **Event recording standard** (all new ledgers; the shared foundation is build step 5):
 - **Tables:** `<subject>_events` (`reservation_events`, `invoice_events`, `food_order_events`,
@@ -527,8 +528,11 @@ would make the key attacker-controlled.
   (`GET /reservations/{id}/price`). **Front Desk sees guest-facing explanations, Managers see
   accountability** (decided 2026-10-05): the price view shows Front Desk Staff the price, its
   provenance and each change's reason, but the API leaves out who changed the configuration
-  (`shows_actors`), and the change log is Manager-only. Front Desk keeps only room *status*;
-  rooms, rates, promo rates and extra charges are set up in Settings.
+  (`shows_actors`), and the change log is Manager-only. Front Desk keeps only a room's service
+  availability (G4: Maintenance, and for Managers Out of service, through `RoomActions` and
+  `POST /rooms/{id}/service`, history in `components/RoomServiceHistory.jsx`; occupancy is never set
+  by hand); rooms, rates, promo rates and extra charges are set up in Settings. Occupancy writes go
+  through `RoomsTable::setOccupied()`, which keeps a vacant room under maintenance.
 - Initial loads use skeletons from `src/components/Skeleton.jsx`, not spinners (inline action
   buttons keep their small spinner). Stat tiles go through `src/components/StatCard.jsx` — extend
   it rather than hand-rolling a card + number (copies in pages drifted before). When a row of tiles

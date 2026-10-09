@@ -116,3 +116,14 @@ export const updateExtraCharge = (id, data) =>
 
 export const deleteExtraCharge = (id, reason) =>
   client.delete(`/extra-charges/${id}`, { data: { reason } }).then((r) => r.data)
+
+// Room service availability (final review G4): in_service | maintenance |
+// out_of_service, with a reason (required to start maintenance or take a room
+// out of service). Occupancy follows check-in and check-out only.
+export const setRoomService = (id, serviceStatus, reason) =>
+  client.post(`/rooms/${id}/service`, { service_status: serviceStatus, ...(reason ? { reason } : {}) })
+    .then((r) => r.data.room)
+
+// A room's service history (Managers): before, after, who, why, request id.
+export const roomHistory = (id, page = 1) =>
+  client.get(`/rooms/${id}/history`, { params: { page } }).then((r) => r.data)

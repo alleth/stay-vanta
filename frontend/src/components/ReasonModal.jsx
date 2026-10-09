@@ -16,10 +16,12 @@ const MIN_LENGTH = 5
  *
  * `children` are extra fields shown above the reason (e.g. a refund's amount
  * and method; their state lives in the caller), and `ready` is false while
- * those fields aren't complete, keeping Confirm disabled.
+ * those fields aren't complete, keeping Confirm disabled. `optional` lets the
+ * action go ahead without a reason (returning a room to service, G4), still
+ * saving one when given.
  */
 export default function ReasonModal({
-  show, title, description, confirmLabel = 'Confirm', onConfirm, onHide, children, ready = true,
+  show, title, description, confirmLabel = 'Confirm', onConfirm, onHide, children, ready = true, optional = false,
 }) {
   const [reason, setReason] = useState('')
   const trimmed = reason.trim()
@@ -46,7 +48,7 @@ export default function ReasonModal({
           {err && <Alert variant="danger">{err}</Alert>}
           {children}
           <Form.Group>
-            <Form.Label>Reason</Form.Label>
+            <Form.Label>{optional ? 'Reason (optional)' : 'Reason'}</Form.Label>
             <Form.Control
               as="textarea"
               rows={3}
@@ -61,7 +63,7 @@ export default function ReasonModal({
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={close} disabled={busy}>Back</Button>
-          <Button type="submit" variant="danger" disabled={busy || !ready || trimmed.length < MIN_LENGTH}>
+          <Button type="submit" variant="danger" disabled={busy || !ready || (!optional && trimmed.length < MIN_LENGTH)}>
             {busy ? <Spinner size="sm" /> : confirmLabel}
           </Button>
         </Modal.Footer>

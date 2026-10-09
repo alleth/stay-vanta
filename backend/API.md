@@ -242,8 +242,18 @@ Reading it:
 
 ## Front Desk
 - `GET|POST /api/rooms` — create **owner/admin only**.
-- `PATCH|PUT /api/rooms/{id}` — any authed staff may change `status`; changing
-  `room_number`/`room_type` is **owner/admin only** (enforced by diffing incoming vs current values).
+- `PATCH|PUT /api/rooms/{id}` — changing `room_number`/`room_type` is **Manager only** (enforced by
+  diffing incoming vs current values). **Occupancy can't be set by hand** (G4, R4): a `status`
+  different from the current one is 400.
+- `POST /api/rooms/{id}/service` `{service_status: in_service|maintenance|out_of_service, reason}`
+  (G4) — `rooms.room.update_status` (Front Desk and Managers) for maintenance and back; out of
+  service, and back from it, also `rooms.room.remove_from_service` (Managers). Starting maintenance
+  or taking a room out of service needs `reason`; the same status again is 400. Recorded in
+  `room_events`; a guest in the room stays in it. Rooms now carry `service_status`.
+- `GET /api/rooms/{id}/history[?page=]` — **Manager** (`rooms.room.view_history`): `{events: [{id,
+  at, event, before, after, actor, actor_role, recorded, reason, request_id}], page, has_more}`.
+- Reservations (G4, R3): check-in, a walk-in and a past stay still going are refused into a room not
+  in service; a booking for later dates only into one out of service. Check-out keeps maintenance.
 - `DELETE /api/rooms/{id}` — **owner/admin only**; refused if the room has reservations; removes
   room-specific rates.
 - `GET /api/room-rates[?room_id=]` · `POST /api/room-rates` · `PATCH|PUT /api/room-rates/{id}` —

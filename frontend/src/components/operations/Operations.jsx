@@ -5,7 +5,7 @@ import {
 import { SummaryGroup, SummaryRow } from '../StatCard'
 import { formatMoney } from '../../utils/format'
 import { staffActivity } from '../../api/operations'
-import { roleLabel } from '../../utils/roles'
+import { roleLabel, roomServiceLabel } from '../../utils/roles'
 import { SkeletonTable } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
 import { refundMethodLabel } from '../../utils/refunds'
@@ -30,6 +30,9 @@ const ROOM_STATUS = [
     chip: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' },
   { key: 'maintenance', label: 'Maintenance', dot: 'bg-amber-500',
     chip: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' },
+  // G4: off sale until further notice.
+  { key: 'out_of_service', label: 'Out of service', dot: 'bg-slate-500',
+    chip: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200' },
 ]
 
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
@@ -163,6 +166,7 @@ function attentionItems(a) {
     { n: a.low_stock, sev: 'warning', text: (n) => `${plural(n, 'item')} at or below reorder level` },
     { n: a.open_food_orders, sev: 'info', text: (n) => `${plural(n, 'food order')} still open` },
     { n: a.maintenance_rooms, sev: 'info', text: (n) => `${plural(n, 'room')} under maintenance` },
+    { n: a.out_of_service_rooms, sev: 'warning', text: (n) => `${plural(n, 'room')} out of service` },
     { n: a.new_bookings, sev: 'info', text: (n) => `${plural(n, 'new booking')} today` },
   ]
   return items.filter((i) => i.n > 0)
@@ -622,8 +626,21 @@ function guestText(e) {
   return [`${guestEventLabel(e.event)} · ${e.guest ?? 'guest'}`, ...details].join(' · ') + (e.reason ? ` · “${e.reason}”` : '')
 }
 
+// Room service (G4, R2): "Maintenance started · Room 101 · In service → Maintenance · “Leaking tap”".
+const ROOM_EVENT_LABELS = {
+  maintenance_started: 'Maintenance started',
+  maintenance_completed: 'Maintenance completed',
+  taken_out_of_service: 'Taken out of service',
+  returned_to_service: 'Returned to service',
+}
+function roomText(e) {
+  const change = e.before ? ` · ${roomServiceLabel(e.before)} → ${roomServiceLabel(e.after)}` : ''
+  return `${ROOM_EVENT_LABELS[e.event] ?? e.event} · Room ${e.room ?? '?'}${change}${e.reason ? ` · “${e.reason}”` : ''}`
+}
+
 function activityText(e) {
   if (e.type === 'access') return accessText(e)
+  if (e.type === 'room') return roomText(e)
   if (e.type === 'guest') return guestText(e)
   if (e.type === 'config') return configText(e)
   if (e.type === 'invoice') return invoiceText(e)

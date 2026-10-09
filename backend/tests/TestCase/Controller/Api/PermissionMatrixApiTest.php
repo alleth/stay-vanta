@@ -166,6 +166,9 @@ class PermissionMatrixApiTest extends TestCase
         ['GET', '/api/reservations/export', 'front_desk.reservation.export'],
         ['GET', '/api/guests/export', 'guests.guest.export'],
         ['GET', '/api/guests/{id}/history', 'guests.guest.view_history'],
+        // Room service (G4).
+        ['POST', '/api/rooms/{id}/service', 'rooms.room.update_status', '', ['service_status' => 'maintenance', 'reason' => 'probe']],
+        ['GET', '/api/rooms/{id}/history', 'rooms.room.view_history'],
         ['GET', '/api/invoices/export', 'finance.invoice.export'],
         ['GET', '/api/finance/collections/export', 'finance.collections.export'],
     ];
@@ -414,13 +417,16 @@ class PermissionMatrixApiTest extends TestCase
             ]);
             $url = "/api/rooms/$roomId?property_id={$this->propertyId}";
 
-            $this->callAs($this->tokens[$role], 'PATCH', $url, ['status' => 'maintenance']);
+            // Service status (G4): POST /rooms/{id}/service; occupancy can't be set by hand.
+            $this->callAs($this->tokens[$role], 'POST', "/api/rooms/$roomId/service?property_id={$this->propertyId}", [
+                'service_status' => 'maintenance', 'reason' => 'Leaking tap',
+            ]);
             if (!PermissionCatalog::grants($role, 'rooms.room.update_status')) {
                 // The Platform Owner since step 10b: no hotel permissions at all.
-                $this->assertResponseCode(403, "$role changing a room's status");
+                $this->assertResponseCode(403, "$role changing a room's service status");
                 continue;
             }
-            $this->assertAllowed("$role changing a room's status");
+            $this->assertResponseOk("$role putting a room under maintenance");
 
             $this->callAs($this->tokens[$role], 'PATCH', $url, ['room_number' => "MX-$i-renamed"]);
             if (PermissionCatalog::grants($role, 'settings.room.manage')) {

@@ -65,6 +65,8 @@ final class Permissions
     // Rooms
     public const ROOMS_ROOM_VIEW = 'rooms.room.view';
     public const ROOMS_ROOM_UPDATE_STATUS = 'rooms.room.update_status';
+    public const ROOMS_ROOM_REMOVE_FROM_SERVICE = 'rooms.room.remove_from_service';
+    public const ROOMS_ROOM_VIEW_HISTORY = 'rooms.room.view_history';
 
     // Inventory
     public const INVENTORY_ITEM_VIEW = 'inventory.item.view';
@@ -122,6 +124,8 @@ final class Permissions
         self::POS_MENU_MANAGE,
         self::ROOMS_ROOM_VIEW,
         self::ROOMS_ROOM_UPDATE_STATUS,
+        self::ROOMS_ROOM_REMOVE_FROM_SERVICE,
+        self::ROOMS_ROOM_VIEW_HISTORY,
         self::INVENTORY_ITEM_VIEW,
         self::INVENTORY_ITEM_MANAGE,
         self::INVENTORY_CATEGORY_MANAGE,
@@ -230,6 +234,9 @@ final class Permissions
             self::FINANCE_COLLECTIONS_EXPORT,
             // Who changed a guest, and why (G3, GU1): Managers only.
             self::GUESTS_GUEST_VIEW_HISTORY,
+            // Room service (G4): out of service and back, and who changed it (R1).
+            self::ROOMS_ROOM_REMOVE_FROM_SERVICE,
+            self::ROOMS_ROOM_VIEW_HISTORY,
         ],
         // Front Desk Staff
         'receptionist' => [

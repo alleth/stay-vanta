@@ -21,5 +21,7 @@ final class EventLedgers
         'AccessEvents' => 'user',
         // Guest records (final review G3).
         'GuestEvents' => 'guest',
+        // Room service availability (final review G4).
+        'RoomEvents' => 'room',
     ];
 }

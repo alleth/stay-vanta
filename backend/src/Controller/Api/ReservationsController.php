@@ -15,6 +15,7 @@ use App\Model\Table\InvoicesTable;
 use App\Model\Table\ReservationEventsTable;
 use App\Model\Table\ReservationExtraChargesTable;
 use App\Model\Table\ReservationsTable;
+use App\Model\Table\RoomsTable;
 use Cake\Database\Expression\QueryExpression;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ConflictException;
@@ -437,6 +438,10 @@ class ReservationsController extends AppController
                     $checkedOutAt = $ended ? BusinessTime::midnightOf($checkOut) : null;
                 }
 
+                // A room off service can't take a guest now, and one out of
+                // service can't be booked at all (G4, R3).
+                $this->assertRoomCanTake($roomId ? (int)$roomId : null, $status);
+
                 $reservation = $reservations->newEntity([
                     'property_id' => $propertyId,
                     'room_id' => $roomId,
@@ -480,7 +485,7 @@ class ReservationsController extends AppController
                 if ($status === 'checked_in' && $reservation->room_id) {
                     $rooms = $this->fetchTable('Rooms');
                     $room = $rooms->get($reservation->room_id);
-                    $room->set('status', 'occupied');
+                    RoomsTable::setOccupied($room, true);
                     $rooms->saveOrFail($room);
                 }
 
@@ -714,6 +719,9 @@ class ReservationsController extends AppController
                 ], ['accessibleFields' => ['property_id' => false]]);
 
                 $previousRoomId = $reservation->getOriginal('room_id');
+                if ($reservation->room_id && (int)$previousRoomId !== (int)$reservation->room_id) {
+                    $this->assertRoomCanTake((int)$reservation->room_id, (string)$reservation->status);
+                }
                 if ($reservation->status !== 'booked') {
                     $this->correctStay($reservation);
                 }
@@ -735,10 +743,10 @@ class ReservationsController extends AppController
                     && (int)$previousRoomId !== (int)$reservation->room_id
                 ) {
                     $rooms = $this->fetchTable('Rooms');
-                    foreach ([$previousRoomId => 'available', $reservation->room_id => 'occupied'] as $rid => $status) {
+                    foreach ([$previousRoomId => false, $reservation->room_id => true] as $rid => $occupied) {
                         if ($rid) {
                             $room = $rooms->get($rid);
-                            $room->set('status', $status);
+                            RoomsTable::setOccupied($room, $occupied);
                             $rooms->saveOrFail($room);
                         }
                     }
@@ -878,7 +886,7 @@ class ReservationsController extends AppController
             ) {
                 $rooms = $this->fetchTable('Rooms');
                 $room = $rooms->get($reservation->room_id);
-                $room->set('status', 'available');
+                RoomsTable::setOccupied($room, false);
                 $rooms->saveOrFail($room);
             }
         });
@@ -980,6 +988,10 @@ class ReservationsController extends AppController
                 'Its invoice is already settled, so this reservation can no longer be cancelled.',
             );
         }
+        // Checking in needs a room in service (G4, R3).
+        if ($transition === 'check-in') {
+            $this->assertRoomCanTake($reservation->room_id ? (int)$reservation->room_id : null, 'checked_in');
+        }
         $fromStatus = $reservation->status;
         // Cancelling an advance booking returns 90% of its downpayment (step
         // 7c): how the money went back is required, so the refund event can
@@ -1050,7 +1062,7 @@ class ReservationsController extends AppController
                 if ($reservation->room_id) {
                     $rooms = $this->fetchTable('Rooms');
                     $room = $rooms->get($reservation->room_id);
-                    $room->set('status', $rule['room']);
+                    RoomsTable::setOccupied($room, $rule['room'] === 'occupied');
                     $rooms->saveOrFail($room);
                 }
 
@@ -2259,6 +2271,41 @@ class ReservationsController extends AppController
         }
 
         return true;
+    }
+
+    /**
+     * Refuse a stay in a room that can't take it (final review G4, R3): a
+     * guest checking in (or a walk-in, or a past stay still going) needs the
+     * room in service; a booking for later dates is refused only when the
+     * room is out of service (maintenance is usually short, R3).
+     */
+    private function assertRoomCanTake(?int $roomId, string $status): void
+    {
+        if ($roomId === null || $status === 'checked_out' || $status === 'cancelled') {
+            return;
+        }
+        $room = $this->fetchTable('Rooms')->find()
+            ->select(['id', 'room_number', 'service_status'])
+            ->where(['Rooms.id' => $roomId])
+            ->first();
+        if ($room === null) {
+            return;
+        }
+        $service = (string)($room->get('service_status') ?? RoomsTable::IN_SERVICE);
+        $label = RoomsTable::SERVICE_LABELS[$service] ?? $service;
+        if ($status === 'checked_in' && $service !== RoomsTable::IN_SERVICE) {
+            throw new BadRequestException(sprintf(
+                'Room %s is %s: return it to service before a guest checks in.',
+                $room->get('room_number'),
+                $label,
+            ));
+        }
+        if ($status === 'booked' && $service === RoomsTable::OUT_OF_SERVICE) {
+            throw new BadRequestException(sprintf(
+                'Room %s is out of service: it can be booked once it is returned to service.',
+                $room->get('room_number'),
+            ));
+        }
     }
 
     /**

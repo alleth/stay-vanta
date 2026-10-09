@@ -129,6 +129,7 @@ class OperationsController extends AppController
                 'out_of_stock' => $inventory['out_of_stock_count'],
                 'low_stock' => $inventory['low_stock_count'],
                 'maintenance_rooms' => $rooms['maintenance'],
+                'out_of_service_rooms' => $rooms['out_of_service'],
             ],
         ]);
         $this->viewBuilder()->setOption('serialize', ['operations']);
@@ -146,7 +147,7 @@ class OperationsController extends AppController
     private function roomsAndGuests(int $propertyId, string $today, string $dayStart, string $dayEnd): array
     {
         $roomRows = $this->fetchTable('Rooms')->find()
-            ->select(['id', 'room_number', 'room_type', 'status'])
+            ->select(['id', 'room_number', 'room_type', 'status', 'service_status'])
             ->where(['property_id' => $propertyId])
             ->disableHydration()
             ->all();
@@ -234,11 +235,21 @@ class OperationsController extends AppController
             $departures[] = $this->guestRow($r, 'departed');
         }
 
-        $count = ['total' => 0, 'occupied' => 0, 'maintenance' => 0, 'reserved' => 0, 'available' => 0];
+        $count = [
+            'total' => 0, 'occupied' => 0, 'maintenance' => 0, 'out_of_service' => 0, 'reserved' => 0,
+            'available' => 0,
+        ];
         $map = [];
         foreach ($roomRows as $room) {
-            if ($room['status'] === 'occupied' || $room['status'] === 'maintenance') {
-                $status = $room['status'];
+            // Occupied comes from check-in; maintenance and out of service
+            // from the room's service status (G4). Neither can be sold.
+            $service = $room['service_status'] ?? 'in_service';
+            if ($room['status'] === 'occupied') {
+                $status = 'occupied';
+            } elseif ($service === 'out_of_service') {
+                $status = 'out_of_service';
+            } elseif ($service === 'maintenance' || $room['status'] === 'maintenance') {
+                $status = 'maintenance';
             } elseif (isset($reservedRoomIds[(int)$room['id']])) {
                 $status = 'reserved';
             } else {
@@ -632,6 +643,8 @@ class OperationsController extends AppController
                     // Guests (G3, GU4): renames and look-alike overrides only;
                     // only those types are indexed.
                     ['event_table' => 'guest_events'],
+                    // Room service changes (G4, R2): every one.
+                    ['event_table' => 'room_events'],
                 ],
             ])
             ->orderBy(['occurred_at' => 'DESC'])
@@ -658,7 +671,12 @@ class OperationsController extends AppController
         $configChangeIds = [];
         $accessEventIds = [];
         $guestEventIds = [];
+        $roomEventIds = [];
         foreach ($rows as $row) {
+            if ($row['event_table'] === 'room_events') {
+                $roomEventIds[] = (int)$row['event_id'];
+                continue;
+            }
             if ($row['event_table'] === 'guest_events') {
                 $guestEventIds[] = (int)$row['event_id'];
                 continue;
@@ -691,6 +709,7 @@ class OperationsController extends AppController
         $configLines = $this->configFeedLines($configChangeIds);
         $accessLines = $this->accessFeedLines($accessEventIds);
         $guestLines = $this->guestFeedLines($guestEventIds);
+        $roomLines = $this->roomFeedLines($roomEventIds);
         $movements = $movementIds === [] ? [] : $this->fetchTable('StockMovements')->find()
             ->contain([
                 'InventoryItems' => ['fields' => ['id', 'name', 'unit']],
@@ -747,6 +766,12 @@ class OperationsController extends AppController
             if ($row['event_table'] === 'guest_events') {
                 if (isset($guestLines[(int)$row['event_id']])) {
                     $events[] = $guestLines[(int)$row['event_id']];
+                }
+                continue;
+            }
+            if ($row['event_table'] === 'room_events') {
+                if (isset($roomLines[(int)$row['event_id']])) {
+                    $events[] = $roomLines[(int)$row['event_id']];
                 }
                 continue;
             }
@@ -1034,6 +1059,42 @@ class OperationsController extends AppController
                 'guest_id' => (int)$e->guest_id,
                 'guest' => $e->snapshot['name'] ?? null,
                 'changes' => $e->changes,
+                'reason' => $e->reason,
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Feed lines for room service changes (final review G4, R2): every one,
+     * with the room, the status before and after, who and why.
+     *
+     * @param list<int> $eventIds room_events ids on this page.
+     * @return array<int, array<string, mixed>> Feed line per event id.
+     */
+    private function roomFeedLines(array $eventIds): array
+    {
+        if ($eventIds === []) {
+            return [];
+        }
+        $events = $this->fetchTable('RoomEvents')->find()->where(['id IN' => $eventIds])->all()->toList();
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($e) => $e->actor_id, $events))));
+        $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        $lines = [];
+        foreach ($events as $e) {
+            $lines[(int)$e->id] = [
+                'type' => 'room',
+                'id' => 'room-event-' . $e->id,
+                'at' => $e->occurred_at,
+                'actor' => $e->actor_id !== null ? ($names[$e->actor_id] ?? null) : null,
+                'event' => $e->event_type,
+                'room_id' => (int)$e->room_id,
+                'room' => $e->snapshot['room_number'] ?? null,
+                'before' => $e->service_before,
+                'after' => $e->service_after,
                 'reason' => $e->reason,
             ];
         }

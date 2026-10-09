@@ -10,9 +10,10 @@ import { matchGuests, listGuests } from '../api/guests'
 import { SkeletonTable, SkeletonCards } from '../components/Skeleton'
 import { SummaryGroup, SummaryRow } from '../components/StatCard'
 import { InvoicesPanel } from '../components/finance/InvoicesPanel'
-import { BILLING_STATE, roomStatusLabel } from '../utils/roles'
+import { BILLING_STATE, roomStatusLabel, roomServiceLabel } from '../utils/roles'
+import RoomServiceHistory from '../components/RoomServiceHistory'
 import {
-  listRooms, updateRoom, listRoomRates, listBookingSources, listPromoRates,
+  listRooms, setRoomService, listRoomRates, listBookingSources, listPromoRates,
   listReservations, pageReservations, reservationStats,
   createReservation, updateReservation, deleteReservation, transitionReservation,
   postRoomCharge, reverseRoomCharge,
@@ -72,7 +73,7 @@ function resolveBaseRate(rates, roomId) {
   return specific ?? cheapest(rates.filter((rt) => rt.room_id === null)) ?? 0
 }
 
-const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning' }
+const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning', out_of_service: 'secondary' }
 const RES_VARIANT = { booked: 'secondary', checked_in: 'primary', checked_out: 'success', cancelled: 'dark' }
 
 // The statutory discounts a guest can qualify for. A booking carries one
@@ -179,11 +180,53 @@ function EstimateBreakdown({ subtotalLabel, subtotal, discounts, extras = [], to
 // Allowed manual status changes per current room status. A room becomes
 // `occupied` only by booking + checking in a guest (so picking "occupied" opens
 // the reservation flow), and returns to `available` automatically on check-out.
-function statusOptions(status) {
-  if (status === 'available') return ['available', 'occupied', 'maintenance']
-  if (status === 'occupied') return ['occupied', 'maintenance']
-  if (status === 'maintenance') return ['maintenance', 'available']
-  return [status]
+// Service changes a room card offers (G4): what each one does, and why it asks.
+const SERVICE_ACTIONS = {
+  maintenance: {
+    title: 'Start maintenance',
+    description: 'The room comes off sale for now: no guest can check in until maintenance is done. Bookings for later dates stay. Say what needs fixing.',
+  },
+  out_of_service: {
+    title: 'Take out of service',
+    description: 'The room can’t be booked or checked into until it’s returned to service. Say why.',
+  },
+  in_service: {
+    title: 'Back in service',
+    description: 'The room can be sold and checked into again.',
+  },
+}
+
+/**
+ * A room card's actions (G4): book it, start or end maintenance (Front Desk
+ * and Managers), take it out of service or return it (Managers), and its
+ * service history (Managers). Occupancy is never set by hand (R4).
+ */
+function RoomActions({ room, can, onBook, onService, onHistory }) {
+  const service = room.service_status ?? 'in_service'
+  const canChange = can(P.ROOMS_ROOM_UPDATE_STATUS)
+  const canRemove = can(P.ROOMS_ROOM_REMOVE_FROM_SERVICE)
+  return (
+    <div className="flex flex-wrap gap-1">
+      {service === 'in_service' && room.status !== 'occupied' && can(P.FRONT_DESK_RESERVATION_MANAGE) && (
+        <Button size="sm" variant="outline-primary" onClick={onBook}>New booking</Button>
+      )}
+      {service === 'in_service' && canChange && (
+        <Button size="sm" variant="outline-secondary" onClick={() => onService('maintenance')}>Maintenance</Button>
+      )}
+      {service === 'maintenance' && canChange && (
+        <Button size="sm" variant="outline-success" onClick={() => onService('in_service')}>Maintenance done</Button>
+      )}
+      {service !== 'out_of_service' && canRemove && (
+        <Button size="sm" variant="outline-danger" onClick={() => onService('out_of_service')}>Out of service</Button>
+      )}
+      {service === 'out_of_service' && canRemove && (
+        <Button size="sm" variant="outline-success" onClick={() => onService('in_service')}>Return to service</Button>
+      )}
+      {can(P.ROOMS_ROOM_VIEW_HISTORY) && (
+        <Button size="sm" variant="link" onClick={onHistory}>History</Button>
+      )}
+    </div>
+  )
 }
 
 export default function FrontDesk() {
@@ -384,24 +427,11 @@ export default function FrontDesk() {
     }
   }
 
-  async function changeRoomStatus(room, status) {
-    setPending(`room-${room.id}`)
-    try {
-      await updateRoom(room.id, { room_number: room.room_number, room_type: room.room_type, status })
-      await refresh()
-    } catch (ex) {
-      setError(describeError(ex, 'Action failed.'))
-    } finally {
-      setPending(null)
-    }
-  }
-
-  function onRoomStatusPick(room, value) {
-    if (value === room.status) return
-    // Putting a guest into a room means making a booking, not flipping a flag.
-    if (value === 'occupied') { openReservation(room.id); return }
-    changeRoomStatus(room, value)
-  }
+  // A room's service availability (G4): { room, target } while the reason
+  // dialog is open. Occupancy is never set here: it follows check-in and
+  // check-out.
+  const [serviceChange, setServiceChange] = useState(null)
+  const [roomHistoryOf, setRoomHistoryOf] = useState(null)
 
   function openReservation(roomId = null, date = null) {
     setReservationRoomId(roomId)
@@ -662,19 +692,22 @@ export default function FrontDesk() {
               {rooms.map((room) => (
                 <Card key={room.id} className="h-full">
                   <Card.Body>
-                    <div className="flex items-start justify-between">
+                    <div className="flex items-start justify-between gap-2">
                       <div className="text-2xl font-bold">{room.room_number}</div>
-                      <Badge bg={ROOM_VARIANT[room.status]}>{roomStatusLabel(room.status)}</Badge>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {room.status === 'occupied' && <Badge bg={ROOM_VARIANT.occupied}>{roomStatusLabel('occupied')}</Badge>}
+                        {(room.service_status ?? 'in_service') !== 'in_service' ? (
+                          <Badge bg={ROOM_VARIANT[room.service_status]}>{roomServiceLabel(room.service_status)}</Badge>
+                        ) : room.status !== 'occupied' && (
+                          <Badge bg={ROOM_VARIANT.available}>{roomStatusLabel('available')}</Badge>
+                        )}
+                      </div>
                     </div>
                     <div className="mb-2 text-sm text-muted">{room.room_type ?? 'Room'}</div>
-                    <Form.Select size="sm" value={room.status} disabled={pending !== null}
-                      onChange={(e) => onRoomStatusPick(room, e.target.value)}>
-                      {statusOptions(room.status).map((s) => (
-                        <option key={s} value={s}>
-                          {s === 'occupied' && room.status === 'available' ? 'Occupied → new booking' : roomStatusLabel(s)}
-                        </option>
-                      ))}
-                    </Form.Select>
+                    <RoomActions room={room} can={can}
+                      onBook={() => openReservation(room.id)}
+                      onService={(target) => setServiceChange({ room, target })}
+                      onHistory={() => setRoomHistoryOf(room)} />
                   </Card.Body>
                 </Card>
               ))}
@@ -810,6 +843,29 @@ export default function FrontDesk() {
           setReverseFor(null)
           await refresh()
         }} />
+      {serviceChange && (
+        <ReasonModal show
+          title={`Room ${serviceChange.room.room_number}: ${SERVICE_ACTIONS[serviceChange.target].title}`}
+          description={SERVICE_ACTIONS[serviceChange.target].description}
+          confirmLabel={SERVICE_ACTIONS[serviceChange.target].title}
+          optional={serviceChange.target === 'in_service'}
+          onHide={() => setServiceChange(null)}
+          onConfirm={async (reason) => {
+            await setRoomService(serviceChange.room.id, serviceChange.target, reason)
+            setServiceChange(null)
+            await refresh()
+          }} />
+      )}
+      {roomHistoryOf && (
+        <Modal show onHide={() => setRoomHistoryOf(null)} centered>
+          <Modal.Header closeButton><Modal.Title>Room {roomHistoryOf.room_number} · service history</Modal.Title></Modal.Header>
+          <Modal.Body className="max-h-[65vh] overflow-y-auto">
+            <RoomServiceHistory roomId={roomHistoryOf.id} />
+          </Modal.Body>
+          <Modal.Footer><Button variant="secondary" onClick={() => setRoomHistoryOf(null)}>Close</Button></Modal.Footer>
+        </Modal>
+      )}
+
       {modal?.type === 'reservation' && (
         <ReservationModal rooms={rooms} rates={rates} bookingSources={bookingSources} promoRates={promoRates}
           extraCharges={extraCharges}

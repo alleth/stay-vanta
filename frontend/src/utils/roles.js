@@ -13,9 +13,19 @@ export const ROOM_STATUS_LABELS = {
   available: 'Vacant',
   occupied: 'Occupied',
   maintenance: 'Maintenance',
+  out_of_service: 'Out of service',
 }
 
 export const roomStatusLabel = (status) => ROOM_STATUS_LABELS[status] ?? status
+
+// Room service availability (G4); stored values stay in_service / maintenance / out_of_service.
+export const ROOM_SERVICE_LABELS = {
+  in_service: 'In service',
+  maintenance: 'Maintenance',
+  out_of_service: 'Out of service',
+}
+
+export const roomServiceLabel = (status) => ROOM_SERVICE_LABELS[status] ?? status ?? '—'
 
 // Reservation billing states, read from the invoice (billing_state from the API).
 export const BILLING_STATE = {

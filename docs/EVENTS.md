@@ -377,6 +377,31 @@ look-alike check also runs on the server (409 unless `new_guest_force`). History
 (`GuestHistoryImport`, migration `ImportGuestHistory`, `bin/cake activity_backfill`): idempotent,
 correlation `import-guests-<id>`, edits before G3 never invented.
 
+### room_events (`RoomEvents`)
+
+Room service availability (final review G4, approved 2026-10-09 as R1–R5). Subject `room_id`. A
+room's `service_status` (`in_service` | `maintenance` | `out_of_service`) has one writer,
+`RoomsController::service()`, under a `FOR UPDATE` lock on the room row; occupancy is separate (only
+check-in and check-out set it, and their events are in `reservation_events`). Typed columns
+`service_before` and `service_after`. Snapshot: `{room_id, room_number}`. **Every type but the
+import is indexed** for the feed (R2). Read by Managers only (`GET /rooms/{id}/history`,
+`rooms.room.view_history`, R1), with the request id of each change.
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `maintenance_started` | yes | | A room goes under maintenance (off sale briefly): the reason says what's wrong |
+| `maintenance_completed` | | | Maintenance → in service (reason optional) |
+| `taken_out_of_service` | yes | | A room goes out of service, from in service or maintenance (Managers, `rooms.room.remove_from_service`) |
+| `returned_to_service` | | | Out of service → in service (Managers; reason optional) |
+| `imported` | | | Import: a room under maintenance when history began; **no actor, no reason, no start time** (dated when the import saw it) |
+
+Rules: a change to the status a room already has is refused (400) and records nothing. A check-in,
+a walk-in and a past stay still going are refused into a room not in service; a booking for later
+dates is refused only when the room is out of service (R3). Check-out never clears maintenance.
+Occupancy can't be set by hand (R4). `rooms.status` keeps the old combined value for one release.
+History before G4 (`RoomServiceImport`, migration `ImportRoomService`, `bin/cake activity_backfill`):
+idempotent, correlation `import-rooms-<id>`.
+
 ## Planned
 
 Membership ends (`membership_ended`) arrive with Phase 3's multi-property memberships; until then
