@@ -165,6 +165,7 @@ class PermissionMatrixApiTest extends TestCase
         // Data exports (step 10c): no range in the probe, so a holder gets 400 and nothing is recorded.
         ['GET', '/api/reservations/export', 'front_desk.reservation.export'],
         ['GET', '/api/guests/export', 'guests.guest.export'],
+        ['GET', '/api/guests/{id}/history', 'guests.guest.view_history'],
         ['GET', '/api/invoices/export', 'finance.invoice.export'],
         ['GET', '/api/finance/collections/export', 'finance.collections.export'],
     ];

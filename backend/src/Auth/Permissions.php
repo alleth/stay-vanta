@@ -54,6 +54,7 @@ final class Permissions
     public const GUESTS_GUEST_VIEW = 'guests.guest.view';
     public const GUESTS_GUEST_MANAGE = 'guests.guest.manage';
     public const GUESTS_GUEST_EXPORT = 'guests.guest.export';
+    public const GUESTS_GUEST_VIEW_HISTORY = 'guests.guest.view_history';
 
     // POS
     public const POS_SALE_VIEW = 'pos.sale.view';
@@ -114,6 +115,7 @@ final class Permissions
         self::GUESTS_GUEST_VIEW,
         self::GUESTS_GUEST_MANAGE,
         self::GUESTS_GUEST_EXPORT,
+        self::GUESTS_GUEST_VIEW_HISTORY,
         self::POS_SALE_VIEW,
         self::POS_SALE_MANAGE,
         self::POS_SALE_CANCEL_PAID,
@@ -226,6 +228,8 @@ final class Permissions
             self::GUESTS_GUEST_EXPORT,
             self::FINANCE_INVOICE_EXPORT,
             self::FINANCE_COLLECTIONS_EXPORT,
+            // Who changed a guest, and why (G3, GU1): Managers only.
+            self::GUESTS_GUEST_VIEW_HISTORY,
         ],
         // Front Desk Staff
         'receptionist' => [

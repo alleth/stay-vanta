@@ -145,8 +145,9 @@ is legacy ("last touched by", still stamped for one release, never the actor). C
 `baseline_recorded` with no actor). Accounts and sign-ins (`access_events`, step 10 part 1 =
 release 10a; memberships, roles and support access follow in 10b). Inventory item records
 (name, unit, category, threshold, stock type, parent, deletion) since the inventory follow-up
-(2026-10-06, `config_changes`, entity `inventory_item`). Known gaps (final review G3–G8): guest
-record edits; room status changes (future Rooms module, `room_events`); the A11 retention routine.
+(2026-10-06, `config_changes`, entity `inventory_item`). Guest records
+(`guest_events`, final review G3). Known gaps (G4–G8): room status changes (future Rooms module,
+`room_events`); the A11 retention routine (guest contact values included, GU5).
 
 **Event recording standard** (all new ledgers; the shared foundation is build step 5):
 - **Tables:** `<subject>_events` (`reservation_events`, `invoice_events`, `food_order_events`,
@@ -728,4 +729,11 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
 ### Guests
 `GuestsController::stats`: total/local/foreign count only guests **registered today** (the cards
 reset daily); `in_house` is current. `POST /api/guests` returns 409 + `duplicates` on a
-look-alike unless `force`.
+look-alike unless `force` (which needs a `reason`). **Every registration and change is a
+`guest_events` row** (G3): `registered` (with `via`: guests | reservation | walk_in),
+`registered_despite_matches` (reason), `details_updated`, `renamed` (reason: past invoices show the
+current name), `details_completed` (a booking filling empty fields), `imported`. Registrations go
+through `AppController::recordGuestRegistration()`; the booking form's guest path
+(`ReservationsController::resolveGuestId()`) runs the look-alike check on the server too. History
+is Manager-only (`guests.guest.view_history`, `components/GuestRecordHistory.jsx`); Activity shows
+renames and look-alike overrides only.

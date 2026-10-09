@@ -29,6 +29,7 @@ export const P = {
   GUESTS_GUEST_VIEW: 'guests.guest.view',
   GUESTS_GUEST_MANAGE: 'guests.guest.manage',
   GUESTS_GUEST_EXPORT: 'guests.guest.export',
+  GUESTS_GUEST_VIEW_HISTORY: 'guests.guest.view_history',
   POS_SALE_VIEW: 'pos.sale.view',
   POS_SALE_MANAGE: 'pos.sale.manage',
   POS_SALE_CANCEL_PAID: 'pos.sale.cancel_paid',
@@ -107,6 +108,7 @@ export const ROLE_FALLBACK = {
     P.GUESTS_GUEST_EXPORT,
     P.FINANCE_INVOICE_EXPORT,
     P.FINANCE_COLLECTIONS_EXPORT,
+    P.GUESTS_GUEST_VIEW_HISTORY,
   ],
   receptionist: [
     P.FINANCE_COLLECTIONS_VIEW,

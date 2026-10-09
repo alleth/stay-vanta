@@ -19,5 +19,7 @@ final class EventLedgers
         'ConfigChanges' => 'configuration',
         // Accounts and sign-ins (step 10); the subject is the person whose access it is.
         'AccessEvents' => 'user',
+        // Guest records (final review G3).
+        'GuestEvents' => 'guest',
     ];
 }

@@ -353,6 +353,30 @@ Rules (decided 2026-10-05):
   (`GET /users/{id}/access-history`, `staff.access_history.view`), and Operations → Activity
   (account administration only).
 
+### guest_events (`GuestEvents`)
+
+Guest records (final review G3, approved 2026-10-09 as GU1–GU5). Subject `guest_id`. Written by
+`GuestsController` (add, edit) and by a booking (`ReservationsController::resolveGuestId()` /
+`completeGuest()`), in the change's own transaction, under a `FOR UPDATE` lock on the guest row.
+Snapshot: `{guest_id, name}` only. `changes` keeps before/after values, contact details included
+(GU5): they fall under the retention routine when it's built (G5), which clears values, never events.
+**Only renames and look-alike overrides are indexed** for the feed (`FEED_TYPES`, GU4). Read by
+Managers only (`GET /guests/{id}/history`, `guests.guest.view_history`, GU1).
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `registered` | | | A new guest: `changes.via` = `guests` (Guests → Add) \| `reservation` (a booking) \| `walk_in` (a walk-in booking), `changes.after` = the details |
+| `registered_despite_matches` | yes | | A new guest although look-alike guests existed (same name and email or phone): `changes.matches` lists them; Guests → Add with `force`, or a booking with `new_guest_force` + `new_guest_reason` (GU3) |
+| `details_updated` | | | Nationality, address, phone, email or guest type changed: field => before/after |
+| `renamed` | yes | | The full name changed (GU2): past invoices show the guest's current name |
+| `details_completed` | | | A booking filled empty fields on a returning guest (never overwrites): field => after |
+| `imported` | | | Import: one per guest from before G3, at its own `created`, **no actor**; `snapshot.changed_since_registration` when `modified` is later |
+
+Rules: an edit that changes nothing is refused (400) and records nothing; the booking form's
+look-alike check also runs on the server (409 unless `new_guest_force`). History before G3
+(`GuestHistoryImport`, migration `ImportGuestHistory`, `bin/cake activity_backfill`): idempotent,
+correlation `import-guests-<id>`, edits before G3 never invented.
+
 ## Planned
 
 Membership ends (`membership_ended`) arrive with Phase 3's multi-property memberships; until then

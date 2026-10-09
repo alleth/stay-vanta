@@ -30,3 +30,9 @@ export const createGuest = (data, propertyId) =>
 
 export const updateGuest = (id, data) =>
   client.patch(`/guests/${id}`, data).then((r) => r.data.guest)
+
+// A guest's record history (final review G3, Managers only): registrations
+// with where from, each change with before/after, renames and look-alike
+// overrides with their reasons → { events, page, has_more }.
+export const guestHistory = (id, page = 1) =>
+  client.get(`/guests/${id}/history`, { params: { page } }).then((r) => r.data)

@@ -629,6 +629,9 @@ class OperationsController extends AppController
                     // Account administration (step 10, A9); only those types
                     // are indexed, sign-ins never are.
                     ['event_table' => 'access_events'],
+                    // Guests (G3, GU4): renames and look-alike overrides only;
+                    // only those types are indexed.
+                    ['event_table' => 'guest_events'],
                 ],
             ])
             ->orderBy(['occurred_at' => 'DESC'])
@@ -654,7 +657,12 @@ class OperationsController extends AppController
         $reservationEventIds = [];
         $configChangeIds = [];
         $accessEventIds = [];
+        $guestEventIds = [];
         foreach ($rows as $row) {
+            if ($row['event_table'] === 'guest_events') {
+                $guestEventIds[] = (int)$row['event_id'];
+                continue;
+            }
             if ($row['event_table'] === 'access_events') {
                 $accessEventIds[] = (int)$row['event_id'];
                 continue;
@@ -682,6 +690,7 @@ class OperationsController extends AppController
         $reservationLines = $this->reservationFeedLines($reservationEventIds);
         $configLines = $this->configFeedLines($configChangeIds);
         $accessLines = $this->accessFeedLines($accessEventIds);
+        $guestLines = $this->guestFeedLines($guestEventIds);
         $movements = $movementIds === [] ? [] : $this->fetchTable('StockMovements')->find()
             ->contain([
                 'InventoryItems' => ['fields' => ['id', 'name', 'unit']],
@@ -732,6 +741,12 @@ class OperationsController extends AppController
             if ($row['event_table'] === 'access_events') {
                 if (isset($accessLines[(int)$row['event_id']])) {
                     $events[] = $accessLines[(int)$row['event_id']];
+                }
+                continue;
+            }
+            if ($row['event_table'] === 'guest_events') {
+                if (isset($guestLines[(int)$row['event_id']])) {
+                    $events[] = $guestLines[(int)$row['event_id']];
                 }
                 continue;
             }
@@ -984,6 +999,42 @@ class OperationsController extends AppController
                 'reason' => $e->reason,
                 // What changed: a role's before/after, an export's list, dates and rows.
                 'changes' => $e->changes,
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Feed lines for guest events (final review G3, GU4): a rename and a guest
+     * created despite look-alikes, with who did it, the guest, what changed
+     * and why. Routine registrations and updates stay in the guest's history.
+     *
+     * @param list<int> $eventIds guest_events ids on this page.
+     * @return array<int, array<string, mixed>> Feed line per event id.
+     */
+    private function guestFeedLines(array $eventIds): array
+    {
+        if ($eventIds === []) {
+            return [];
+        }
+        $events = $this->fetchTable('GuestEvents')->find()->where(['id IN' => $eventIds])->all()->toList();
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($e) => $e->actor_id, $events))));
+        $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        $lines = [];
+        foreach ($events as $e) {
+            $lines[(int)$e->id] = [
+                'type' => 'guest',
+                'id' => 'guest-event-' . $e->id,
+                'at' => $e->occurred_at,
+                'actor' => $e->actor_id !== null ? ($names[$e->actor_id] ?? null) : null,
+                'event' => $e->event_type,
+                'guest_id' => (int)$e->guest_id,
+                'guest' => $e->snapshot['name'] ?? null,
+                'changes' => $e->changes,
+                'reason' => $e->reason,
             ];
         }
 

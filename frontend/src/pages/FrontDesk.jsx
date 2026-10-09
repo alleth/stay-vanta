@@ -1057,6 +1057,8 @@ function ReservationModal({
   }
   const [guestId, setGuestId] = useState(null) // set when reusing an existing guest
   const [duplicates, setDuplicates] = useState(null)
+  // Booking with a new guest despite look-alikes needs a reason (G3, GU3).
+  const [newGuestReason, setNewGuestReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   // Guest name autocomplete over previously-registered guests.
@@ -1158,7 +1160,12 @@ function ReservationModal({
         )
         if (matches.length) { setDuplicates(matches); setBusy(false); return }
       }
-      await createReservation(buildPayload(), propertyId)
+      const payload = buildPayload()
+      if (force && !guestId) {
+        payload.new_guest_force = true
+        payload.new_guest_reason = newGuestReason.trim()
+      }
+      await createReservation(payload, propertyId)
       onSaved()
     } catch (ex) {
       setErr(describeError(ex, 'Save failed. Check the fields and try again.'))
@@ -1364,7 +1371,11 @@ function ReservationModal({
                   </ListGroup.Item>
                 ))}
               </ListGroup>
-              <Button size="sm" variant="warning" disabled={busy} onClick={() => book(true)}>
+              <Form.Control as="textarea" rows={2} className="mb-2" value={newGuestReason} maxLength={500}
+                onChange={(e) => setNewGuestReason(e.target.value)}
+                placeholder="Why a new guest record? e.g. a different person with the same name" />
+              <Button size="sm" variant="warning" disabled={busy || newGuestReason.trim().length < 5}
+                onClick={() => book(true)}>
                 Book with a new guest anyway
               </Button>
             </Alert>

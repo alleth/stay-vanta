@@ -9,6 +9,7 @@ use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use App\Model\StatutoryDiscount;
 use App\Model\Table\BookingSourcesTable;
+use App\Model\Table\GuestEventsTable;
 use App\Model\Table\InvoiceEventsTable;
 use App\Model\Table\InvoicesTable;
 use App\Model\Table\ReservationEventsTable;
@@ -16,6 +17,7 @@ use App\Model\Table\ReservationExtraChargesTable;
 use App\Model\Table\ReservationsTable;
 use Cake\Database\Expression\QueryExpression;
 use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ConflictException;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\Http\Exception\NotFoundException;
 use Cake\Http\Response;
@@ -2176,7 +2178,25 @@ class ReservationsController extends AppController
             return null;
         }
 
+        /** @var \App\Model\Table\GuestsTable $guests */
         $guests = $this->fetchTable('Guests');
+        // The same look-alike check as Guests → Add (G3, GU3), on the server
+        // too: the booking form checks first, and only "book with a new
+        // guest anyway" (`new_guest_force`) passes, with its own reason
+        // (`new_guest_reason`; the booking's `reason` is the booking's).
+        $matches = $guests->findDuplicates(
+            $propertyId,
+            $name,
+            $this->request->getData('email'),
+            $this->request->getData('contact_number'),
+        );
+        if ($matches !== [] && !$this->request->getData('new_guest_force')) {
+            throw new ConflictException(sprintf(
+                'A guest who looks like the same person is already registered (%s). Pick them, '
+                . 'or book with a new guest anyway and say why.',
+                implode(', ', array_map(fn($m) => $m->get('full_name') . ' #' . $m->get('id'), $matches)),
+            ));
+        }
         $guest = $guests->newEntity([
             'property_id' => $propertyId,
             'full_name' => $name,
@@ -2187,6 +2207,14 @@ class ReservationsController extends AppController
             'guest_type' => $this->request->getData('guest_type') ?? 'local',
         ]);
         $guests->saveOrFail($guest);
+        $walkIn = ($this->request->getData('source') ?? BookingSourcesTable::WALK_IN) === BookingSourcesTable::WALK_IN;
+        $reason = $this->request->getData('new_guest_reason');
+        $this->recordGuestRegistration(
+            $this->eventContext()->withReason(is_string($reason) ? $reason : null),
+            $guest,
+            $walkIn ? GuestEventsTable::VIA_WALK_IN : GuestEventsTable::VIA_RESERVATION,
+            $matches,
+        );
 
         return (int)$guest->id;
     }
@@ -2203,23 +2231,31 @@ class ReservationsController extends AppController
     private function completeGuest(int $guestId, int $propertyId): bool
     {
         $guests = $this->fetchTable('Guests');
+        // Locked: the booking's transaction holds it until the fill is recorded.
         $guest = $guests->find()
             ->where(['Guests.id' => $guestId, 'Guests.property_id' => $propertyId])
+            ->epilog('FOR UPDATE')
             ->first();
         if ($guest === null) {
             return false;
         }
 
-        $changed = false;
+        $filled = [];
         foreach (['nationality', 'address', 'contact_number', 'email'] as $field) {
             $incoming = trim((string)$this->request->getData($field));
             if ($incoming !== '' && trim((string)$guest->get($field)) === '') {
                 $guest->set($field, $incoming);
-                $changed = true;
+                $filled[$field] = ['before' => null, 'after' => $incoming];
             }
         }
-        if ($changed) {
+        if ($filled !== []) {
             $guests->saveOrFail($guest);
+            // Recorded in the guest's history (G3); never overwrites a value.
+            /** @var \App\Model\Table\GuestEventsTable $events */
+            $events = $this->fetchTable('GuestEvents');
+            $events->record($this->eventContext()->withReason(null), GuestEventsTable::DETAILS_COMPLETED, $guest, [
+                'changes' => $filled,
+            ]);
         }
 
         return true;

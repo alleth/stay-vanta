@@ -390,6 +390,13 @@ Reading it:
   is current (distinct guests with a `checked_in` reservation).
 - `GET /api/guests/match?full_name=&email=&contact_number=` — de-dup candidates.
 - `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`).
+- **G3 (guest accountability):** every registration and change is a `guest_events` row. `force`
+  past look-alikes needs `reason` (400 without; nothing created). `PATCH` changing `full_name` needs
+  `reason`; an edit that changes nothing is 400. A booking that creates a guest (`guest_name`) runs
+  the same look-alike check on the server: refused unless `new_guest_force` with `new_guest_reason`;
+  a booking with `guest_id` that fills empty details records `details_completed`.
+- `GET /api/guests/{id}/history[?page=]` — **Manager** (`guests.guest.view_history`): `{events: [{id,
+  at, event, actor, actor_role, recorded, reason, changes, snapshot}], page, has_more}`.
 
 ## Food & Orders
 - `GET|POST /api/food-menu-items[?available=1][?type=food|linen]` ·

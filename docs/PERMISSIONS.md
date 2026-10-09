@@ -87,6 +87,7 @@ several properties.
 | `guests.guest.view` | M, FD | Manager, Front Desk, POS Cashier, Property Owner | | Guests |
 | `guests.guest.manage` | M, FD | Manager, Front Desk, POS Cashier | | Guests |
 | `guests.guest.export` | M | Manager | | Guests |
+| `guests.guest.view_history` | M | Manager, Property Owner | | Guests |
 | `pos.sale.view` | M, FD | Manager, Front Desk, POS Cashier, Accountant, Property Owner | | POS |
 | `pos.sale.manage` | M, FD | Manager, Front Desk, POS Cashier | | POS |
 | `pos.sale.cancel_paid` | M | Manager | yes | POS |
@@ -109,7 +110,7 @@ several properties.
 | `staff.account.manage` | PO, M | Manager | | Staff |
 | `staff.access_history.view` | M | Manager, Property Owner | | Staff |
 
-45 permissions: 3 platform, 42 property.
+46 permissions: 3 platform, 43 property.
 
 ## Endpoint map
 
@@ -134,7 +135,7 @@ several properties.
 | Editing a checked-in/checked-out stay | `front_desk.reservation.correct` | Refused with **400**, not 403, today; Phase 1 keeps the status code. Needs `reason` (step 8) |
 | `DELETE /reservations/{id}` | `front_desk.reservation.delete` | Soft delete; needs `reason` (step 8) |
 | `GET /guests`, `/guests/stats`, `/guests/match`, `/guests/{id}` | `guests.guest.view` | |
-| `POST /guests`, `PATCH/PUT /guests/{id}` | `guests.guest.manage` | |
+| `POST /guests`, `PATCH/PUT /guests/{id}` | `guests.guest.manage` | Recorded in `guest_events` (G3). Creating despite look-alike guests (`force`) and renaming need `reason`; an edit that changes nothing is 400 |
 | `GET /food-orders`, `GET /food-orders/{id}`, `GET /food-menu-items` | `pos.sale.view` | |
 | `POST /food-orders`, `/food-orders/{id}/serve`, `/food-orders/{id}/cancel` | `pos.sale.manage` | Cancelling a served and paid order also needs `pos.sale.cancel_paid`; `refund: {returned, method}` records money returned for a paid sale (needs `reason`) |
 | `POST /food-orders/{id}/refund` | `pos.sale.cancel_paid` | Money returned for a paid sale cancelled earlier with no refund on record: needs `reason`, `method`; once (build step 7c) |
@@ -161,6 +162,7 @@ several properties.
 | `POST /support-sessions/{id}/end` | `staff.account.manage` | The Manager ends a support session at their property (`reason` optional) |
 | `GET /roles` | `settings.role.view` | Role presets and their permissions, read-only (step 10b) |
 | `GET /reservations/export` | `front_desk.reservation.export` | CSV of reservations by check-in date (step 10c); `from`, `to` (YYYY-MM-DD, at most 366 days); recorded (`data_exported`) |
+| `GET /guests/{id}/history` | `guests.guest.view_history` | A guest's history (G3): registrations with where from, each change with before/after, renames and look-alike overrides with their reasons. Managers only (GU1) |
 | `GET /guests/export` | `guests.guest.export` | CSV of guests by registration date (step 10c); no government ID numbers (X3) |
 | `GET /invoices/export` | `finance.invoice.export` | CSV of invoice lines by invoice date (step 10c) |
 | `GET /finance/collections/export` | `finance.collections.export` | CSV of Collected / Refunded / Net Collected per hotel day (step 10c), from `Collections` |

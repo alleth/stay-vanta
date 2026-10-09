@@ -221,6 +221,9 @@ return function (RouteBuilder $routes): void {
         $builder->get('/guests/stats', ['controller' => 'Guests', 'action' => 'stats']);
         $builder->get('/guests/match', ['controller' => 'Guests', 'action' => 'match']);
         $builder->get('/guests/export', ['controller' => 'Guests', 'action' => 'export']);
+        // A guest's history (G3, Managers).
+        $builder->get('/guests/{id}/history', ['controller' => 'Guests', 'action' => 'history'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->get('/guests', ['controller' => 'Guests', 'action' => 'index']);
         $builder->post('/guests', ['controller' => 'Guests', 'action' => 'add']);
         $builder->get('/guests/{id}', ['controller' => 'Guests', 'action' => 'view'])

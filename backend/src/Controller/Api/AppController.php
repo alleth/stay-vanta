@@ -12,6 +12,7 @@ use App\Middleware\CorrelationIdMiddleware;
 use App\Model\Entity\User;
 use App\Model\Subscription;
 use App\Model\Table\AccessEventsTable;
+use App\Model\Table\GuestEventsTable;
 use App\Model\Table\UsersTable;
 use Cake\Controller\Controller;
 use Cake\Datasource\EntityInterface;
@@ -398,6 +399,42 @@ class AppController extends Controller
 
         $this->set(['events' => $events, 'page' => $page, 'has_more' => $hasMore]);
         $this->viewBuilder()->setOption('serialize', ['events', 'page', 'has_more']);
+    }
+
+    /**
+     * Record a new guest's registration (final review G3), in the caller's
+     * transaction: where it came from (`via`: guests | reservation |
+     * walk_in), the details it was registered with, and, when look-alike
+     * guests already existed, which ones it was created despite. That
+     * override needs a reason (GU3; `$context` carries it): the event
+     * refuses to record without one, so the guest isn't created either.
+     *
+     * @param \App\Event\EventContext $context Who, and why for an override.
+     * @param \Cake\Datasource\EntityInterface $guest The guest just saved.
+     * @param string $via GuestEventsTable::VIA_*.
+     * @param list<\Cake\Datasource\EntityInterface> $matches Look-alike guests found.
+     */
+    protected function recordGuestRegistration(
+        EventContext $context,
+        EntityInterface $guest,
+        string $via,
+        array $matches,
+    ): void {
+        $changes = ['via' => $via, 'after' => GuestEventsTable::detailsOf($guest)];
+        if ($matches !== []) {
+            $changes['matches'] = array_map(
+                fn($m) => ['guest_id' => (int)$m->get('id'), 'name' => $m->get('full_name')],
+                $matches,
+            );
+        }
+        /** @var \App\Model\Table\GuestEventsTable $events */
+        $events = $this->fetchTable('GuestEvents');
+        $events->record(
+            $context,
+            $matches === [] ? GuestEventsTable::REGISTERED : GuestEventsTable::REGISTERED_DESPITE_MATCHES,
+            $guest,
+            ['changes' => $changes],
+        );
     }
 
     /** Longest range an export covers, in days (step 10c). */

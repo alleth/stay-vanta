@@ -11,6 +11,7 @@ import { describeError } from '../../utils/apiError'
 import { refundMethodLabel } from '../../utils/refunds'
 import { eventLabel, fieldLabel, formatValue, subjectText } from '../../utils/configChanges'
 import { accessLabel, accessDetail } from '../../utils/accessEvents'
+import { guestEventDetails, guestEventLabel } from '../../utils/guestEvents'
 
 // The Operations page's panels (Manager + Front Desk Staff), drawn from one
 // GET /operations/today payload. Every figure is today's, on the hotel's
@@ -615,8 +616,15 @@ function accessText(e) {
   return `${accessLabel(e.event)}${person}${detail ? ` · ${detail}` : ''}${e.reason ? ` · “${e.reason}”` : ''}`
 }
 
+// Guests (G3, GU4): "Renamed · Eve Santos → Eva Santos · “Legal name per passport”".
+function guestText(e) {
+  const details = guestEventDetails(e).filter((l) => !l.startsWith('from '))
+  return [`${guestEventLabel(e.event)} · ${e.guest ?? 'guest'}`, ...details].join(' · ') + (e.reason ? ` · “${e.reason}”` : '')
+}
+
 function activityText(e) {
   if (e.type === 'access') return accessText(e)
+  if (e.type === 'guest') return guestText(e)
   if (e.type === 'config') return configText(e)
   if (e.type === 'invoice') return invoiceText(e)
   if (e.type === 'reservation') return reservationText(e)

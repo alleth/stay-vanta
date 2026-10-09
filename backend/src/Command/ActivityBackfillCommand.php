@@ -6,6 +6,7 @@ namespace App\Command;
 use App\Event\AccessBackfill;
 use App\Event\ActivityBackfill;
 use App\Event\ConfigBaseline;
+use App\Event\GuestHistoryImport;
 use App\Event\InventoryLinkReport;
 use App\Event\MembershipImport;
 use Cake\Command\Command;
@@ -157,6 +158,30 @@ class ActivityBackfillCommand extends Command
                     $c['imported'],
                     $c['complete'] ? '' : '  <- INCOMPLETE',
                 ));
+        }
+
+        // Guest history (G3): one imported registration per guest.
+        $guestHistory = new GuestHistoryImport($connection);
+        if (!$args->getOption('check-only')) {
+            $added = $guestHistory->run($propertyId);
+            $io->out(sprintf(
+                '%-24s %d added, %d not importable',
+                'guest history',
+                $added['imported'],
+                $added['skipped'],
+            ));
+        }
+        foreach ($guestHistory->check($propertyId) as $id => $c) {
+            $incomplete += $c['complete'] ? 0 : 1;
+            $io->out(sprintf(
+                'property %d: %d guests, %d with no history, %d imported, %d recorded since%s',
+                $id,
+                $c['guests'],
+                $c['unrecorded'],
+                $c['imported'],
+                $c['recorded_since'],
+                $c['complete'] ? '' : '  <- INCOMPLETE',
+            ));
         }
 
         // Menu items, recipes and options still using a deleted inventory item

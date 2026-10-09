@@ -8,6 +8,7 @@ import { SkeletonTable, SkeletonTableRows, Skeleton } from '../components/Skelet
 import { StatCard } from '../components/StatCard'
 import { describeError } from '../utils/apiError'
 import ExportButton from '../components/ExportButton'
+import GuestRecordHistory from '../components/GuestRecordHistory'
 import { useAuth } from '../context/AuthContext'
 import { P } from '../auth/permissions'
 
@@ -203,20 +204,24 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [duplicates, setDuplicates] = useState(null) // null = not checked; [] = none
+  // Why: a rename (GU2) and a guest created despite look-alikes (GU3) both
+  // need a reason, recorded in the guest's history.
+  const [reason, setReason] = useState('')
+  const renaming = editing && form.full_name.trim() !== (guest?.full_name ?? '').trim()
 
   async function save(force) {
     setBusy(true)
     setErr(null)
     try {
       if (editing) {
-        await updateGuest(guest.id, form)
+        await updateGuest(guest.id, renaming ? { ...form, reason } : form)
       } else {
         if (!force) {
           // Warn before creating a look-alike guest (same name + email/contact).
           const matches = await matchGuests(form, propertyId)
           if (matches.length) { setDuplicates(matches); setBusy(false); return }
         }
-        await createGuest({ ...form, force }, propertyId)
+        await createGuest(force ? { ...form, force, reason } : form, propertyId)
       }
       onSaved()
     } catch (ex) {
@@ -245,11 +250,14 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
                   </ListGroup.Item>
                 ))}
               </ListGroup>
-              <div className="mb-2 text-xs">Reuse the existing guest, or create a separate record anyway.</div>
+              <div className="mb-2 text-xs">Reuse the existing guest, or create a separate record anyway and say why.</div>
+              <Form.Control as="textarea" rows={2} className="mb-2" value={reason} maxLength={500}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Why a separate record? e.g. a different person with the same name" />
               <Button size="sm" variant="outline-secondary" className="mr-2" onClick={onClose}>
                 Keep existing
               </Button>
-              <Button size="sm" variant="warning" disabled={busy} onClick={() => save(true)}>
+              <Button size="sm" variant="warning" disabled={busy || reason.trim().length < 5} onClick={() => save(true)}>
                 Create new anyway
               </Button>
             </Alert>
@@ -259,6 +267,15 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
             <Form.Label>Full name</Form.Label>
             <Form.Control value={form.full_name} onChange={set('full_name')} required autoFocus />
           </Form.Group>
+          {renaming && (
+            <Form.Group className="mb-4">
+              <Form.Label>Why the new name?</Form.Label>
+              <Form.Control as="textarea" rows={2} value={reason} maxLength={500} required
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. Typo, legal name per ID" />
+              <Form.Text>Past reservations and invoices show the new name, so the reason is kept in the guest’s history.</Form.Text>
+            </Form.Group>
+          )}
           <div className="grid grid-cols-2 gap-x-6">
             <Form.Group className="mb-4">
               <Form.Label>Type</Form.Label>
@@ -297,6 +314,8 @@ function GuestModal({ guest, propertyId, onClose, onSaved }) {
 }
 
 function HistoryModal({ id, onClose }) {
+  // Who changed the record is for Managers (G3, GU1); everyone sees the stays.
+  const { can } = useAuth()
   const [guest, setGuest] = useState(null)
   const [error, setError] = useState(null)
 
@@ -334,6 +353,12 @@ function HistoryModal({ id, onClose }) {
               </ListGroup.Item>
             ))}
           </ListGroup>
+        )}
+        {can(P.GUESTS_GUEST_VIEW_HISTORY) && (
+          <>
+            <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-[0.04em] text-muted">Record changes</h2>
+            <GuestRecordHistory guestId={id} />
+          </>
         )}
       </Modal.Body>
       <Modal.Footer>

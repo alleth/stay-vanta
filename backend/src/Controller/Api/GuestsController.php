@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Model\BusinessTime;
+use App\Model\Table\GuestEventsTable;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Response;
 
@@ -215,15 +216,16 @@ class GuestsController extends AppController
 
         $guests = $this->fetchTable('Guests');
 
-        // De-dup guard: unless the user explicitly chose "create anyway" (force),
-        // surface look-alike guests so they can reuse one instead.
+        // De-dup guard: surface look-alike guests so they can reuse one
+        // instead. Creating anyway (`force`) records which ones it overrode,
+        // and needs a reason (G3, GU3).
+        $duplicates = $guests->findDuplicates(
+            $propertyId,
+            (string)$this->request->getData('full_name'),
+            $this->request->getData('email'),
+            $this->request->getData('contact_number'),
+        );
         if (!$this->request->getData('force')) {
-            $duplicates = $guests->findDuplicates(
-                $propertyId,
-                (string)$this->request->getData('full_name'),
-                $this->request->getData('email'),
-                $this->request->getData('contact_number')
-            );
             if ($duplicates) {
                 $this->response = $this->response->withStatus(409);
                 $this->set('duplicates', $duplicates);
@@ -243,7 +245,15 @@ class GuestsController extends AppController
             'guest_type' => $this->request->getData('guest_type') ?? 'local',
         ]);
 
-        if (!$guests->save($guest)) {
+        $saved = $guests->getConnection()->transactional(function () use ($guests, $guest, $duplicates): bool {
+            if (!$guests->save($guest, ['atomic' => false])) {
+                return false;
+            }
+            $this->recordGuestRegistration($this->eventContext(), $guest, GuestEventsTable::VIA_GUESTS, $duplicates);
+
+            return true;
+        });
+        if (!$saved) {
             $this->validationFailed($guest->getErrors());
 
             return;
@@ -255,25 +265,56 @@ class GuestsController extends AppController
     }
 
     /**
-     * PATCH /api/guests/{id}
+     * PATCH/PUT /api/guests/{id} — change a guest's details (final review G3).
+     *
+     * Lock, then check, then change, then record: each changed field is
+     * recorded with before and after. A new name is `renamed` and needs a
+     * reason (GU2: past invoices show the guest's current name); the other
+     * fields are `details_updated`. An edit that changes nothing is refused
+     * (400) and records nothing.
      */
     public function edit(int $id): void
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
         $this->authorize(Permissions::GUESTS_GUEST_MANAGE);
         $guests = $this->fetchTable('Guests');
-        $guest = $this->scopeToProperty($guests->find()->where(['Guests.id' => $id]))->firstOrFail();
+        $this->scopeToProperty($guests->find()->where(['Guests.id' => $id]))->firstOrFail();
 
-        $guests->patchEntity($guest, [
-            'full_name' => $this->request->getData('full_name'),
-            'nationality' => $this->request->getData('nationality'),
-            'address' => $this->request->getData('address'),
-            'contact_number' => $this->request->getData('contact_number'),
-            'email' => $this->request->getData('email'),
-            'guest_type' => $this->request->getData('guest_type'),
-        ], ['accessibleFields' => ['property_id' => false]]);
+        $data = [];
+        foreach (GuestEventsTable::FIELDS as $field) {
+            if ($this->request->getData($field) !== null) {
+                $data[$field] = $this->request->getData($field);
+            }
+        }
 
-        if (!$guests->save($guest)) {
+        $guest = $guests->getConnection()->transactional(function () use ($guests, $id, $data) {
+            $guest = $guests->find()->where(['Guests.id' => $id])->epilog('FOR UPDATE')->firstOrFail();
+            $before = GuestEventsTable::detailsOf($guest);
+            $guests->patchEntity($guest, $data, ['accessibleFields' => ['property_id' => false]]);
+            $changes = GuestEventsTable::diff($before, GuestEventsTable::detailsOf($guest));
+            if ($changes === []) {
+                throw new BadRequestException('Nothing to change: the guest already reads like this.');
+            }
+            if (!$guests->save($guest, ['atomic' => false])) {
+                return $guest;
+            }
+            /** @var \App\Model\Table\GuestEventsTable $events */
+            $events = $this->fetchTable('GuestEvents');
+            if (isset($changes['full_name'])) {
+                $events->record($this->eventContext(), GuestEventsTable::RENAMED, $guest, [
+                    'changes' => ['full_name' => $changes['full_name']],
+                ]);
+                unset($changes['full_name']);
+            }
+            if ($changes !== []) {
+                $events->record($this->eventContext(), GuestEventsTable::DETAILS_UPDATED, $guest, [
+                    'changes' => $changes,
+                ]);
+            }
+
+            return $guest;
+        });
+        if ($guest->getErrors()) {
             $this->validationFailed($guest->getErrors());
 
             return;
@@ -281,6 +322,50 @@ class GuestsController extends AppController
 
         $this->set('guest', $guest);
         $this->viewBuilder()->setOption('serialize', ['guest']);
+    }
+
+    /**
+     * GET /api/guests/{id}/history[?page=] → { events, page, has_more }
+     *
+     * A guest's history, newest first (final review G3, Managers only, GU1):
+     * where they were registered from, each change with before and after,
+     * who made it and why. Imported registrations have no actor (`recorded`
+     * false). Front Desk Staff see current details only.
+     */
+    public function history(int $id): void
+    {
+        $this->request->allowMethod('get');
+        $this->authorize(Permissions::GUESTS_GUEST_VIEW_HISTORY, 'Only Managers can see who changed a guest.');
+        $guest = $this->scopeToProperty($this->fetchTable('Guests')->find()->where(['Guests.id' => $id]))
+            ->firstOrFail();
+
+        $perPage = 25;
+        $page = min(200, max(1, (int)($this->request->getQuery('page') ?? 1)));
+        $rows = $this->fetchTable('GuestEvents')->find()
+            ->where(['guest_id' => $guest->id])
+            ->orderBy(['occurred_at' => 'DESC', 'id' => 'DESC'])
+            ->limit($perPage + 1)->offset(($page - 1) * $perPage)
+            ->all()->toList();
+        $hasMore = count($rows) > $perPage;
+        $rows = array_slice($rows, 0, $perPage);
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($r) => $r->actor_id, $rows))));
+        $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        $events = array_map(fn($r) => [
+            'id' => (int)$r->id,
+            'at' => $r->occurred_at,
+            'event' => $r->event_type,
+            'actor' => $r->actor_id !== null ? ($names[$r->actor_id] ?? null) : null,
+            'actor_role' => $r->actor_role,
+            'recorded' => $r->source !== 'import',
+            'reason' => $r->reason,
+            'changes' => $r->changes,
+            'snapshot' => $r->snapshot,
+        ], $rows);
+
+        $this->set(['events' => $events, 'page' => $page, 'has_more' => $hasMore]);
+        $this->viewBuilder()->setOption('serialize', ['events', 'page', 'has_more']);
     }
 
     private function validationFailed(array $errors): void
