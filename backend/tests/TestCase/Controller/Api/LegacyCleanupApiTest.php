@@ -92,7 +92,9 @@ class LegacyCleanupApiTest extends TestCase
         $this->callAs($this->deskToken, 'POST', '/api/guests/search', ['q' => 'Url']);
         $this->assertResponseOk();
         $this->assertSame(['Url Guest'], array_column($this->responseJson()['guests'], 'full_name'));
-        $this->callAs($this->deskToken, 'POST', '/api/guests/match', ['full_name' => 'Url Guest']);
+        $this->callAs($this->deskToken, 'POST', '/api/guests/match', [
+            'full_name' => 'Url Guest', 'email' => "url-{$this->tag}@example.test",
+        ]);
         $this->assertResponseOk();
         $this->assertCount(1, $this->responseJson()['duplicates']);
     }
