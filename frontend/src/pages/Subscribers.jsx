@@ -11,6 +11,7 @@ import {
 } from '../api/platform'
 import ReasonModal from '../components/ReasonModal'
 import PropertyStaffModal from '../components/platform/PropertyStaffModal'
+import EnforcementPanel from '../components/platform/EnforcementPanel'
 import { useAuth } from '../context/AuthContext'
 import ConfigHistory from '../components/settings/ConfigHistory'
 import { SkeletonTable } from '../components/Skeleton'
@@ -178,6 +179,10 @@ export default function Subscribers() {
           </Card.Body>
         </Card>
       )}
+
+      {/* Subscription enforcement (G6): the phase, its preview and history. A
+          change reloads the list, whose stages show what is now enforced. */}
+      <EnforcementPanel onChanged={load} />
 
       <Card>
         <Card.Header>Registered hotels &amp; resorts</Card.Header>

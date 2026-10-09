@@ -6,7 +6,6 @@ namespace App\Test\TestCase\Controller\Api;
 use App\Model\BusinessTime;
 use App\Model\Finance\Collections;
 use App\Model\Subscription;
-use Cake\Core\Configure;
 use Cake\I18n\DateTime;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\TestSuite\IntegrationTestTrait;
@@ -34,12 +33,10 @@ class ExportsApiTest extends TestCase
     private string $adminToken;
     private string $deskToken;
     private string $today;
-    private mixed $mode;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->mode = Configure::read('App.subscriptionEnforcement');
         $tag = uniqid();
         $this->today = BusinessTime::today()->format('Y-m-d');
         $this->propertyId = $this->createProperty('Export Inn');
@@ -81,7 +78,6 @@ class ExportsApiTest extends TestCase
 
     protected function tearDown(): void
     {
-        Configure::write('App.subscriptionEnforcement', $this->mode);
         $this->cleanupScenario();
         parent::tearDown();
     }
@@ -222,7 +218,7 @@ class ExportsApiTest extends TestCase
 
     public function testAReadOnlyHotelCanStillTakeItsData(): void
     {
-        Configure::write('App.subscriptionEnforcement', Subscription::MODE_READ_ONLY);
+        $this->usePhase(Subscription::MODE_READ_ONLY);
         $this->getTableLocator()->get('Properties')->updateAll(
             ['subscription_expires_at' => BusinessTime::today()->subDays(10)->format('Y-m-d')],
             ['id' => $this->propertyId],

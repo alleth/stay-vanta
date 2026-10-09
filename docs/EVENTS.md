@@ -407,6 +407,29 @@ no service state is left as it is and counted.
 History before G4 (`RoomServiceImport`, migration `ImportRoomService`, `bin/cake activity_backfill`):
 idempotent, correlation `import-rooms-<id>`.
 
+### platform_setting_events (`PlatformSettingEvents`)
+
+Platform-wide settings (final review G6, approved 2026-10-09 as E-D1–E-D6); today the
+subscription-enforcement phase. Subject `platform_setting_id` (a `platform_settings` row). Platform
+events: no property, never in a property's Activity. Typed columns `value_before` and
+`value_after`; `changes` holds the phase and the phase in force before and after, and the ceiling.
+A change's snapshot keeps the properties per enforced stage before and after, and how many moved to
+a stricter stage (counts only). Written only by `App\Platform\Enforcement` under a `FOR UPDATE` lock
+on the setting row. Read by the Platform Owner (`GET /platform/enforcement`, E-D4). Kept
+indefinitely.
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `enforcement_phase_recorded` | | | Once, at release: the phase already in force; **no actor, no reason** (who set it and why were never recorded), source `import` |
+| `enforcement_phase_raised` | yes | | The Platform Owner moves the phase one step forward (`platform.enforcement.manage`) |
+| `enforcement_phase_lowered` | yes | | The Platform Owner moves the phase back to any earlier one (the rollback) |
+| `enforcement_ceiling_observed` | | | The app first sees a new `APP_SUBSCRIPTION_ENFORCEMENT` value (at start-up): **when it was observed, not when or by whom it was set**; source `system` |
+
+Rules (E-D3): forward one phase at a time, back to any earlier one, a reason both ways; the same
+phase is refused and records nothing. The ceiling only ever lowers the phase in force. Self-check:
+`bin/cake enforcement` (one baseline; each change starts where the last ended; the setting equals
+the last change; the ceiling seen is the ceiling now), logged at every start-up.
+
 ## Retention (final review G5)
 
 Approved 2026-10-09 as P1–P6. `App\Privacy\RetentionRoutine` (`bin/cake retention [--dry-run]

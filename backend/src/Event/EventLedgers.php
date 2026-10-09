@@ -23,5 +23,7 @@ final class EventLedgers
         'GuestEvents' => 'guest',
         // Room service availability (final review G4).
         'RoomEvents' => 'room',
+        // Platform-wide settings: the subscription-enforcement phase (final review G6).
+        'PlatformSettingEvents' => 'platform_setting',
     ];
 }

@@ -44,6 +44,11 @@ done
 # retention_runs). Never blocks the boot.
 php bin/cake.php retention --dry-run || true
 
+# Enforcement (G6): record an emergency-ceiling value the app hasn't seen
+# before (APP_SUBSCRIPTION_ENFORCEMENT; observed now, not when it was set) and
+# log the phase in force with its self-check. Never blocks the boot.
+php bin/cake.php enforcement --observe || true
+
 # Migrations run as root, and data migrations load tables, so the schema
 # cache now holds root-owned files that Apache (www-data) can't open
 # ("Permission denied" warnings), possibly describing a table a later

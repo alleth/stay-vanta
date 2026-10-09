@@ -5,7 +5,6 @@ namespace App\Test\TestCase\Controller\Api;
 
 use App\Model\BusinessTime;
 use App\Model\Subscription;
-use Cake\Core\Configure;
 use Cake\I18n\Date;
 use Cake\ORM\Entity;
 use Cake\ORM\Locator\LocatorAwareTrait;
@@ -33,12 +32,10 @@ class SubscriptionEnforcementApiTest extends TestCase
     private string $deskEmail;
     private string $adminEmail;
     private int $reservationId;
-    private mixed $mode;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->mode = Configure::read('App.subscriptionEnforcement');
         $tag = uniqid();
         $this->propertyId = $this->createProperty('Lapsed Inn');
         $this->adminEmail = "lapsed-admin-$tag@example.test";
@@ -62,7 +59,6 @@ class SubscriptionEnforcementApiTest extends TestCase
 
     protected function tearDown(): void
     {
-        Configure::write('App.subscriptionEnforcement', $this->mode);
         $this->cleanupScenario();
         parent::tearDown();
     }
@@ -72,7 +68,7 @@ class SubscriptionEnforcementApiTest extends TestCase
      */
     private function lapse(int $daysAgo, string $mode): void
     {
-        Configure::write('App.subscriptionEnforcement', $mode);
+        $this->usePhase($mode);
         $this->getTableLocator()->get('Properties')->updateAll(
             ['subscription_expires_at' => BusinessTime::today()->subDays($daysAgo)->format('Y-m-d')],
             ['id' => $this->propertyId],
@@ -182,14 +178,14 @@ class SubscriptionEnforcementApiTest extends TestCase
         $this->callAs($this->adminToken, 'GET', '/api/auth/me');
         $this->assertSame('suspended', $this->responseJson()['user']['subscription']['enforced']);
 
-        Configure::write('App.subscriptionEnforcement', Subscription::MODE_READ_ONLY);
+        $this->usePhase(Subscription::MODE_READ_ONLY);
         $this->callAs($this->adminToken, 'GET', '/api/reservations');
         $this->assertResponseOk('suspension not switched on yet: read-only');
     }
 
     public function testStatusSetInactiveByHandCountsFromTheDayItWasSet(): void
     {
-        Configure::write('App.subscriptionEnforcement', Subscription::MODE_SUSPEND);
+        $this->usePhase(Subscription::MODE_SUSPEND);
         $ownerToken = $this->makeUser(null, 'owner', 'lapsed-owner-' . uniqid() . '@example.test');
         $this->callAs($ownerToken, 'PATCH', "/api/properties/{$this->propertyId}", ['subscription_status' => 'inactive']);
         $this->assertResponseOk();

@@ -74,6 +74,15 @@ Reading it:
 
 - `GET|POST /api/properties` — owner-only create; the owner's index contains each property's admin.
 - `PATCH|PUT /api/properties/{id}` — owner-only edit, incl. `subscription_status` & `subscription_fee`.
+- `GET /api/platform/enforcement` (Platform Owner, `platform.dashboard.view`) → `{enforcement: {phase,
+  ceiling, effective, phases, preview: {properties, stages: {active, grace, read_only, suspended},
+  enforced_by_phase: {<phase>: {<stage>: n}}}, history: [{id, event, before, after, actor,
+  actor_role, source, reason, changes, snapshot, request_id, at}]}}` (G6): `phase` is what the Platform
+  Owner set, `ceiling` the emergency `APP_SUBSCRIPTION_ENFORCEMENT` (null = none), `effective` the
+  lower of the two, which is what applies. History newest first (100).
+- `POST /api/platform/enforcement` `{phase, reason}` (Platform Owner, `platform.enforcement.manage`,
+  elevated) — one phase forward or any phase back; 400 for a skipped phase, the same phase or no
+  reason, recording nothing. Answers like GET.
 - `GET /api/platform/dashboard` (Platform Owner only) — subscription revenue (week/month/YTD from
   each subscriber's monthly fee) + counts (hotels, active subscriptions, admins).
 - **Money figures are cash movement (build step 7c, decided 2026-10-03):** Collected = cash in

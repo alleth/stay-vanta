@@ -5,6 +5,7 @@ namespace App\Test\TestCase\Controller\Api;
 
 use App\Event\EventContext;
 use App\Model\Table\UsersTable;
+use App\Platform\Enforcement;
 use Cake\I18n\DateTime;
 
 /**
@@ -27,6 +28,33 @@ trait ApiScenarioTrait
      * @var list<int> Users without a property (platform owners), removed in cleanupScenario().
      */
     private array $scenarioOwnerIds = [];
+
+    /**
+     * @var string|false|null The enforcement phase row before usePhase(): false = untouched, null = absent.
+     */
+    private string|false|null $phaseBefore = false;
+
+    /**
+     * Put the platform in enforcement phase `$mode` for this test (G6). Written
+     * through the connection, as only tests may (the app changes it only with
+     * an event); restored in cleanupScenario().
+     */
+    protected function usePhase(string $mode): void
+    {
+        $connection = $this->getTableLocator()->get('Properties')->getConnection();
+        $row = $connection->execute(
+            'SELECT value FROM platform_settings WHERE setting_key = ?',
+            [Enforcement::KEY],
+        )->fetch('assoc');
+        if ($this->phaseBefore === false) {
+            $this->phaseBefore = $row === false ? null : $row['value'];
+        }
+        if ($row === false) {
+            $connection->insert('platform_settings', ['setting_key' => Enforcement::KEY, 'value' => $mode]);
+        } else {
+            $connection->update('platform_settings', ['value' => $mode], ['setting_key' => Enforcement::KEY]);
+        }
+    }
 
     /**
      * Every table holding rows for one property, children before parents
@@ -215,5 +243,14 @@ trait ApiScenarioTrait
         }
         $this->scenarioPropertyIds = [];
         $this->scenarioOwnerIds = [];
+        if ($this->phaseBefore !== false) {
+            $connection = $locator->get('Properties')->getConnection();
+            if ($this->phaseBefore === null) {
+                $connection->delete('platform_settings', ['setting_key' => Enforcement::KEY]);
+            } else {
+                $connection->update('platform_settings', ['value' => $this->phaseBefore], ['setting_key' => Enforcement::KEY]);
+            }
+            $this->phaseBefore = false;
+        }
     }
 }

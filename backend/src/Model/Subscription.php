@@ -3,10 +3,9 @@ declare(strict_types=1);
 
 namespace App\Model;
 
-use Cake\Core\Configure;
+use App\Platform\Enforcement;
 use Cake\Datasource\EntityInterface;
 use Cake\I18n\Date;
-use Cake\Log\Log;
 use Cake\ORM\TableRegistry;
 
 /**
@@ -24,11 +23,12 @@ use Cake\ORM\TableRegistry;
  *   suspended from day 38. Example (paid through Oct 10): grace Oct 11–17,
  *   read-only Oct 18 – Nov 16, suspended from Nov 17.
  *
- * Enforcement rolls out in phases (B5): `App.subscriptionEnforcement`
- * (`APP_SUBSCRIPTION_ENFORCEMENT`) = `report` (warnings only, the default),
+ * Enforcement rolls out in phases (B5): `report` (warnings only, the default),
  * `grace` (warnings as real deadlines, still nothing blocked), `read_only`
  * (read-only enforced; a suspended property stays read-only) or `suspend`
- * (everything). enforced() is the stage that actually applies.
+ * (everything). Since G6 the phase is App\Platform\Enforcement's (set by the
+ * Platform Owner, recorded; `APP_SUBSCRIPTION_ENFORCEMENT` is only an
+ * emergency ceiling). enforced() is the stage that actually applies.
  */
 final class Subscription
 {
@@ -148,18 +148,12 @@ final class Subscription
     }
 
     /**
-     * The enforcement phase in force (B5); an unknown value counts as `report`.
+     * The enforcement phase in force (B5, G6): the Platform Owner's setting,
+     * lowered by the emergency ceiling if one is set.
      */
     public static function configuredMode(): string
     {
-        $mode = (string)Configure::read('App.subscriptionEnforcement', self::MODE_REPORT);
-        if (!in_array($mode, self::MODES, true)) {
-            Log::warning(sprintf('unknown App.subscriptionEnforcement "%s": treated as report', $mode));
-
-            return self::MODE_REPORT;
-        }
-
-        return $mode;
+        return Enforcement::effective();
     }
 
     /**

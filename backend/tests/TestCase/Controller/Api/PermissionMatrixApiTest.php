@@ -49,6 +49,12 @@ class PermissionMatrixApiTest extends TestCase
     private const PROBES = [
         // Platform
         ['GET', '/api/platform/dashboard', 'platform.dashboard.view'],
+        ['GET', '/api/platform/enforcement', 'platform.dashboard.view'],
+        // Same phase: an allowed role is refused with 400 and nothing changes.
+        [
+            'POST', '/api/platform/enforcement', 'platform.enforcement.manage', '',
+            ['phase' => 'report', 'reason' => 'Matrix probe'],
+        ],
         ['POST', '/api/properties', 'platform.property.manage'],
         ['PATCH', '/api/properties/{id}', 'platform.property.manage'],
         ['PUT', '/api/properties/{id}', 'platform.property.manage'],

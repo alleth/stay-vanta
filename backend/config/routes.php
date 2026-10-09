@@ -77,6 +77,9 @@ return function (RouteBuilder $routes): void {
         $builder->get('/finance/summary', ['controller' => 'Finance', 'action' => 'summary']);
         $builder->get('/finance/seasonality', ['controller' => 'Finance', 'action' => 'seasonality']);
         $builder->get('/platform/dashboard', ['controller' => 'Platform', 'action' => 'dashboard']);
+        // Subscription enforcement (G6): the phase, its preview and history; changed with a reason.
+        $builder->get('/platform/enforcement', ['controller' => 'Platform', 'action' => 'enforcement']);
+        $builder->post('/platform/enforcement', ['controller' => 'Platform', 'action' => 'changeEnforcement']);
         // The configuration change log (step 9).
         $builder->get('/platform/property-changes', ['controller' => 'ConfigChanges', 'action' => 'propertyChanges']);
         $builder->get('/config-changes', ['controller' => 'ConfigChanges', 'action' => 'index']);

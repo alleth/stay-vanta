@@ -285,9 +285,13 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   property person's grants by the *enforced* stage: read-only keeps view permissions plus
   `Permissions::READ_ONLY_KEEPS`, and `WIND_DOWN` only via `authorizeWindDown()` (check-out,
   billing a started stay); suspended holds nothing and can't sign in. `refuseWhenReadOnly()` for
-  actions whose permission stays held but whose purpose doesn't (creating an account). The phase is
-  `APP_SUBSCRIPTION_ENFORCEMENT` = `report` (default: warnings only) → `grace` → `read_only` →
-  `suspend` (B5: move one phase at a time). Screens: `components/SubscriptionBanner.jsx`, the stage
+  actions whose permission stays held but whose purpose doesn't (creating an account). The phase
+  (`report` → `grace` → `read_only` → `suspend`, B5) is `App\Platform\Enforcement`'s since G6: a
+  `platform_settings` row the Platform Owner changes on Subscribers (`POST /platform/enforcement`,
+  `platform.enforcement.manage`, reason; one step forward, any step back), recorded in
+  `platform_setting_events`. `APP_SUBSCRIPTION_ENFORCEMENT` is only an emergency ceiling (lowers,
+  never raises; recorded when first observed at start-up by `bin/cake enforcement --observe`).
+  Tests set the phase with `ApiScenarioTrait::usePhase()`. Screens: `components/SubscriptionBanner.jsx`, the stage
   on Subscribers (`GET /properties` returns `subscription` per property).
 - **Data exports (step 10c, X1–X5):** `GET /reservations/export`, `/guests/export`,
   `/invoices/export`, `/finance/collections/export` (Manager; `*.export` permissions, kept in

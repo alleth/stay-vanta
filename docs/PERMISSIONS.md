@@ -67,6 +67,7 @@ several properties.
 | `platform.dashboard.view` | PO | Platform Owner (platform flag) | | Platform |
 | `platform.property.manage` | PO | Platform Owner (platform flag) | | Platform |
 | `platform.support_access.start` | PO | Platform Owner (platform flag) | yes | Platform |
+| `platform.enforcement.manage` | PO | Platform Owner (platform flag) | yes | Platform |
 | `operations.today.view` | M, FD | Manager, Front Desk, Property Owner, Housekeeping, Maintenance | | Operations |
 | `operations.staff.view` | M | Manager, Property Owner | | Operations |
 | `finance.collections.view` | M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Finance |
@@ -158,6 +159,8 @@ several properties.
 | `POST/PATCH/PUT/DELETE /extra-charges…` | `settings.extra_charge.manage` | |
 | `GET /config-changes` | `settings.change_log.view` | The configuration change log (step 9): the property's changes, property records excepted |
 | `GET /platform/property-changes` | `platform.property.manage` | Changes to property records (fee, subscription, name), step 9 |
+| `GET /platform/enforcement` | `platform.dashboard.view` | The subscription-enforcement phase, ceiling, phase in force, preview (properties per stage, per phase) and history (G6) |
+| `POST /platform/enforcement` | `platform.enforcement.manage` | Change the phase (G6): `phase` and `reason`; one step forward or any step back; recorded in `platform_setting_events` |
 | `GET /reservations/{id}/price` | `front_desk.reservation.view` | Where a booking's price comes from (step 9); who changed the configuration is named only with `settings.change_log.view` |
 | `GET /users` | `staff.account.view` | |
 | `POST /users`, `PATCH/PUT /users/{id}`, `POST /users/{id}/reset-password` | `staff.account.manage` | Rules kept: who may manage whom (below). Deactivating, reactivating and resetting someone else's password need a reason; changing your own needs your current password (step 10). `role` (Manager ↔ Front Desk Staff) only from the Platform Owner, with a reason; it ends the person's session (step 10b) |

@@ -61,11 +61,12 @@ return [
         // defaultTimezone (UTC); see App\Model\BusinessTime.
         'businessTimezone' => env('APP_BUSINESS_TIMEZONE', 'Asia/Manila'),
         /*
-         * Subscription enforcement phase (build step 10b, A7/B5): report |
-         * grace | read_only | suspend. See App\Model\Subscription. Ships as
-         * `report`: warnings only, nothing blocked.
+         * Emergency ceiling on the subscription-enforcement phase (G6): report |
+         * grace | read_only | suspend, or unset (no ceiling). It can only lower
+         * the phase the Platform Owner set in the app, never raise it; each new
+         * value is recorded when first observed. See App\Platform\Enforcement.
          */
-        'subscriptionEnforcement' => env('APP_SUBSCRIPTION_ENFORCEMENT', 'report'),
+        'subscriptionEnforcement' => env('APP_SUBSCRIPTION_ENFORCEMENT') ?: null,
         'base' => false,
         'dir' => 'src',
         'webroot' => 'webroot',

@@ -201,6 +201,19 @@ Set up once per environment (staging first), in the Railway dashboard:
 
 The job needs no CI gate of its own beyond the API's: it runs code already deployed on that branch.
 
+## 7. Subscription enforcement (G6)
+
+The enforcement phase is set **in the app**, by the Platform Owner on Subscribers → Enforcement,
+with a reason; every change is recorded (`platform_setting_events`) with who, when, why and the
+request id. Leave `APP_SUBSCRIPTION_ENFORCEMENT` **unset**.
+
+`APP_SUBSCRIPTION_ENFORCEMENT` is an **emergency ceiling** only, for when the app itself can't be
+used: set it (`report`, `grace`, `read_only` or `suspend`) on the `stay-vanta` service and redeploy;
+it lowers the phase in force and can never raise it. At start-up the app records the new value as
+`enforcement_ceiling_observed`: the time it was observed, not when or by whom it was set (Railway's
+own activity log has that). Remove it again once the app is usable, and lower the phase there with
+a reason. Each start-up logs the self-check (`enforcement: phase …, in force …; history consistent`).
+
 ## Local development (unchanged)
 
 `config/app_local.php` (git-ignored) overrides the env-driven defaults locally, so

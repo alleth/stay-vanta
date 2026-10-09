@@ -34,3 +34,13 @@ export const startSupport = (propertyId, reason) =>
 // End your own support session early.
 export const endOwnSupport = (id) =>
   client.post(`/platform/support-sessions/${id}/end`).then((r) => r.data.session)
+
+// Subscription enforcement (G6): the phase, the emergency ceiling, the phase
+// in force, the preview (properties per stage, per phase) and the history.
+// → { phase, ceiling, effective, phases, preview, history }
+export const getEnforcement = () =>
+  client.get('/platform/enforcement').then((r) => r.data.enforcement)
+
+// One phase forward or any phase back, with a reason. Answers like getEnforcement().
+export const changeEnforcement = (phase, reason) =>
+  client.post('/platform/enforcement', { phase, reason }).then((r) => r.data.enforcement)

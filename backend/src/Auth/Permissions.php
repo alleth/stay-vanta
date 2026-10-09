@@ -25,6 +25,7 @@ final class Permissions
     public const PLATFORM_DASHBOARD_VIEW = 'platform.dashboard.view';
     public const PLATFORM_PROPERTY_MANAGE = 'platform.property.manage';
     public const PLATFORM_SUPPORT_ACCESS_START = 'platform.support_access.start';
+    public const PLATFORM_ENFORCEMENT_MANAGE = 'platform.enforcement.manage';
 
     // Operations
     public const OPERATIONS_TODAY_VIEW = 'operations.today.view';
@@ -96,6 +97,7 @@ final class Permissions
         self::PLATFORM_DASHBOARD_VIEW,
         self::PLATFORM_PROPERTY_MANAGE,
         self::PLATFORM_SUPPORT_ACCESS_START,
+        self::PLATFORM_ENFORCEMENT_MANAGE,
         self::OPERATIONS_TODAY_VIEW,
         self::OPERATIONS_STAFF_VIEW,
         self::FINANCE_COLLECTIONS_VIEW,
@@ -148,6 +150,7 @@ final class Permissions
      */
     public const ELEVATED = [
         self::PLATFORM_SUPPORT_ACCESS_START,
+        self::PLATFORM_ENFORCEMENT_MANAGE,
         self::FINANCE_INVOICE_REVERSE,
         self::FINANCE_INVOICE_REFUND,
         self::FRONT_DESK_RESERVATION_BACKDATE,
@@ -208,6 +211,7 @@ final class Permissions
             self::PLATFORM_DASHBOARD_VIEW,
             self::PLATFORM_PROPERTY_MANAGE,
             self::PLATFORM_SUPPORT_ACCESS_START,
+            self::PLATFORM_ENFORCEMENT_MANAGE,
             self::SETTINGS_PROPERTY_VIEW,
             self::STAFF_ACCOUNT_VIEW,
             self::STAFF_ACCOUNT_MANAGE,
