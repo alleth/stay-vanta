@@ -394,6 +394,8 @@ class AppController extends Controller
             'changes' => $r->changes,
             'user_agent' => $r->user_agent,
             'client_address' => $r->client_address,
+            // When the retention routine cleared the device details (G5), else null.
+            'redacted_at' => $r->redacted_at,
             'scope' => $r->scope,
         ], $rows);
 

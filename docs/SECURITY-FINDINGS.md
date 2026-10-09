@@ -6,6 +6,29 @@ one fixed before release, so the pattern stays visible.
 
 ---
 
+## SF-2026-003 · Guest names, emails and phone numbers reached infrastructure logs
+
+| | |
+| --- | --- |
+| **Status** | Fixed in the G5 release (staging first, then production on the user's go) |
+| **Severity** | Low to medium: personal data in Railway's log storage, readable by anyone with access to the Railway project; not exposed to the public |
+| **Found** | 2026-10-09, while preparing the G5 retention proposal (reading the Apache log format and the guest API) |
+| **Fixed** | G5, decision P6: guest search and matching send their values in a POST body; the access log records method, path and protocol only, never the query string |
+| **Exploited** | No: the logs are only reachable through the Railway project |
+
+**What was wrong.** The web server's access log line recorded each request's full URL. The booking
+form's and Guests' duplicate check (`GET /guests/match?full_name=…&email=…&contact_number=…`) and
+guest search (`GET /guests?q=…`) put guest names, email addresses and phone numbers in the URL, so
+they were written to the container's stdout and kept by Railway's log storage, outside the app's
+retention routine.
+
+**Fix.** `POST /guests/match` and `POST /guests/search` take the values in the body (the GET forms
+stay one release for compatibility; the screens no longer use them). The Apache `LogFormat` logs
+`%m %U %H` instead of `%r`, so no query string reaches the log. Lines already written expire under
+Railway's own log retention. Test: `RetentionApiTest::testGuestSearchAndMatchingTravelInTheBody`.
+
+---
+
 ## SF-2026-002 · Reactivating an account revived its old session
 
 | | |

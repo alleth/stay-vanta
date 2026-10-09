@@ -402,6 +402,25 @@ Occupancy can't be set by hand (R4). `rooms.status` keeps the old combined value
 History before G4 (`RoomServiceImport`, migration `ImportRoomService`, `bin/cake activity_backfill`):
 idempotent, correlation `import-rooms-<id>`.
 
+## Retention (final review G5)
+
+Approved 2026-10-09 as P1–P6. `App\Privacy\RetentionRoutine` (`bin/cake retention [--dry-run]
+[--property N]`, run daily by a Railway cron job; each deploy logs a dry run) clears personal values
+once their period has passed and **never removes an event**: its type, actor, role, time, reason,
+request id and which fields changed all stay.
+
+| Policy | Values cleared | After |
+|---|---|---|
+| `access_device_details` | `access_events.user_agent`, `client_address` | 12 months (A11) |
+| `guest_contact_values` | phone, email, address, nationality in `guest_events.changes` (keys kept) | 24 months (P1) |
+
+Not cleared: guest names (P2), current guest records (P3, a separate proposal), Senior/PWD names and
+ID numbers (P4: tax records; the retention period is to be confirmed with the accountant), staff
+identity. A cleared event's `redacted_at` says when, telling "recorded and later cleared" from
+"never recorded". This is the one sanctioned change to an append-only ledger: the routine writes
+through the connection, so ordinary saves stay refused. Each policy of each run, dry runs included,
+is one append-only `retention_runs` row (cutoff, rows cleared, request id). Idempotent and batched.
+
 ## Planned
 
 Membership ends (`membership_ended`) arrive with Phase 3's multi-property memberships; until then

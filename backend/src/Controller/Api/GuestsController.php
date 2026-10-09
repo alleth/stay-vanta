@@ -37,7 +37,9 @@ class GuestsController extends AppController
             $query->where(['Guests.guest_type' => $type]);
         }
 
-        $search = trim((string)$this->request->getQuery('q'));
+        // The search text comes in the body of POST /guests/search (G5, P6), so
+        // a guest's name never sits in a URL; GET ?q= is kept for one release.
+        $search = trim((string)($this->request->getData('q') ?? $this->request->getQuery('q')));
         if ($search !== '') {
             $query->where(['Guests.full_name LIKE' => '%' . $search . '%']);
         }
@@ -177,9 +179,9 @@ class GuestsController extends AppController
         $guests = $this->fetchTable('Guests');
         $duplicates = $guests->findDuplicates(
             $propertyId,
-            (string)$this->request->getQuery('full_name'),
-            $this->request->getQuery('email'),
-            $this->request->getQuery('contact_number')
+            (string)$this->input('full_name'),
+            $this->input('email'),
+            $this->input('contact_number'),
         );
 
         $this->set('duplicates', $duplicates);
@@ -362,10 +364,21 @@ class GuestsController extends AppController
             'reason' => $r->reason,
             'changes' => $r->changes,
             'snapshot' => $r->snapshot,
+            // When the retention routine cleared contact values (G5), else null.
+            'redacted_at' => $r->redacted_at,
         ], $rows);
 
         $this->set(['events' => $events, 'page' => $page, 'has_more' => $hasMore]);
         $this->viewBuilder()->setOption('serialize', ['events', 'page', 'has_more']);
+    }
+
+    /**
+     * A guest detail from the body (POST, G5 P6: never in a URL), else the
+     * query string (GET, kept for one release).
+     */
+    private function input(string $field): mixed
+    {
+        return $this->request->getData($field) ?? $this->request->getQuery($field);
     }
 
     private function validationFailed(array $errors): void

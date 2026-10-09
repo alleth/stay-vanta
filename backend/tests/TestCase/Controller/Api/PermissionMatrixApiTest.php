@@ -166,6 +166,9 @@ class PermissionMatrixApiTest extends TestCase
         ['GET', '/api/reservations/export', 'front_desk.reservation.export'],
         ['GET', '/api/guests/export', 'guests.guest.export'],
         ['GET', '/api/guests/{id}/history', 'guests.guest.view_history'],
+        // Guest search and matching by POST body (G5, P6).
+        ['POST', '/api/guests/match', 'guests.guest.view'],
+        ['POST', '/api/guests/search', 'guests.guest.view'],
         // Room service (G4).
         ['POST', '/api/rooms/{id}/service', 'rooms.room.update_status', '', ['service_status' => 'maintenance', 'reason' => 'probe']],
         ['GET', '/api/rooms/{id}/history', 'rooms.room.view_history'],

@@ -149,6 +149,12 @@ release 10a; memberships, roles and support access follow in 10b). Inventory ite
 (`guest_events`, final review G3). Room service
 availability (`room_events`, G4). Known gaps (G5–G8): the A11 retention routine (guest contact
 values included, GU5); housekeeping states (Clean/Dirty/Inspected) await their own module (R5).
+**Retention (G5, built):** `App\Privacy\RetentionRoutine` / `bin/cake retention [--dry-run]` clears
+sign-in device details after 12 months and guest contact values in guest history after 24,
+setting `redacted_at` and never removing an event (the one sanctioned change to an append-only
+ledger; each run is a `retention_runs` row). Daily Railway cron; each deploy logs a dry run.
+Guest search and matching go in POST bodies, and the Apache log drops query strings (P6,
+`SF-2026-003`): keep guest details out of URLs.
 
 **Event recording standard** (all new ledgers; the shared foundation is build step 5):
 - **Tables:** `<subject>_events` (`reservation_events`, `invoice_events`, `food_order_events`,

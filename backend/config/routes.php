@@ -225,6 +225,9 @@ return function (RouteBuilder $routes): void {
         // Guests module.
         $builder->get('/guests/stats', ['controller' => 'Guests', 'action' => 'stats']);
         $builder->get('/guests/match', ['controller' => 'Guests', 'action' => 'match']);
+        // Guest details in the body, never the URL (G5, P6); the GETs stay a release.
+        $builder->post('/guests/match', ['controller' => 'Guests', 'action' => 'match']);
+        $builder->post('/guests/search', ['controller' => 'Guests', 'action' => 'index']);
         $builder->get('/guests/export', ['controller' => 'Guests', 'action' => 'export']);
         // A guest's history (G3, Managers).
         $builder->get('/guests/{id}/history', ['controller' => 'Guests', 'action' => 'history'])

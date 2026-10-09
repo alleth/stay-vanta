@@ -1,6 +1,13 @@
 #!/bin/sh
 set -e
 
+# A job container (a Railway cron service with STAYVANTA_JOB set) runs that
+# one job and exits: no migrations (the API service runs those) and no web
+# server. `retention` is the daily retention routine (G5, P5).
+if [ "${STAYVANTA_JOB:-}" = "retention" ]; then
+  exec php bin/cake.php retention
+fi
+
 # Railway injects $PORT; fall back to 8080 for local `docker run`.
 PORT="${PORT:-8080}"
 sed -ri "s/^Listen .*/Listen ${PORT}/" /etc/apache2/ports.conf
@@ -31,6 +38,11 @@ until php bin/cake.php migrations migrate --no-lock; do
   echo "DB not ready, retrying migrations in 3s (${n}/${max})..."
   sleep 3
 done
+
+# Retention (G5, P5): the daily Railway cron job clears expired personal
+# values; each deploy logs what it would clear now (a dry run, recorded in
+# retention_runs). Never blocks the boot.
+php bin/cake.php retention --dry-run || true
 
 # Migrations run as root, and data migrations load tables, so the schema
 # cache now holds root-owned files that Apache (www-data) can't open

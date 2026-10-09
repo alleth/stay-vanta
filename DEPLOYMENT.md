@@ -177,6 +177,30 @@ Hotfixes take the same path (main → staging → promote), just faster. Never c
 
 ---
 
+## 6. Retention cron job (G5)
+
+The retention routine (`bin/cake retention`, `App\Privacy\RetentionRoutine`) clears sign-in device
+details after 12 months and guest contact values in guest history after 24, keeping every event.
+It runs once a day as its own Railway **cron service** in each environment; every API deploy also
+logs a dry run (`retention --dry-run`) of what would be cleared now. Each run, dry or real, is a
+`retention_runs` row.
+
+Set up once per environment (staging first), in the Railway dashboard:
+
+1. **New → GitHub Repo** → this repo; name the service `retention`.
+2. **Settings → Source:** Root Directory `backend`; branch `main` on staging, `production` on
+   production (the same branch as that environment's `stay-vanta` API).
+3. **Settings → Deploy → Cron Schedule:** `0 19 * * *` (03:00 Manila, UTC+8). Leave the start command
+   empty: the image's entrypoint decides.
+4. **Variables:** `STAYVANTA_JOB=retention` (the entrypoint then runs only the routine and exits: no
+   migrations, no web server), plus the API's database and app variables as **references**, never
+   literals: `DATABASE_URL=${{MySQL.MYSQL_PUBLIC_URL}}`, `SECURITY_SALT=${{stay-vanta.SECURITY_SALT}}`,
+   `DEBUG=false`, `APP_FULL_BASE_URL=${{stay-vanta.APP_FULL_BASE_URL}}`.
+5. Run it once (**Deploy → Run now**) and check its log: one line per policy and the check, which
+   must say 0 past the cutoff. Until October 2027 nothing is due, so it clears 0 rows.
+
+The job needs no CI gate of its own beyond the API's: it runs code already deployed on that branch.
+
 ## Local development (unchanged)
 
 `config/app_local.php` (git-ignored) overrides the env-driven defaults locally, so

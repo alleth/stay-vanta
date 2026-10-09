@@ -136,7 +136,7 @@ several properties.
 | Booking or moving a check-in before today | `front_desk.reservation.backdate` | Rule kept: a walk-in without it is forced to today, not refused. Needs `reason` (step 8) |
 | Editing a checked-in/checked-out stay | `front_desk.reservation.correct` | Refused with **400**, not 403, today; Phase 1 keeps the status code. Needs `reason` (step 8) |
 | `DELETE /reservations/{id}` | `front_desk.reservation.delete` | Soft delete; needs `reason` (step 8) |
-| `GET /guests`, `/guests/stats`, `/guests/match`, `/guests/{id}` | `guests.guest.view` | |
+| `GET /guests`, `/guests/stats`, `/guests/match`, `/guests/{id}`, `POST /guests/search`, `POST /guests/match` | `guests.guest.view` | The POST forms carry search text and match details in the body, never the URL (G5, P6); the GET forms stay one release |
 | `POST /guests`, `PATCH/PUT /guests/{id}` | `guests.guest.manage` | Recorded in `guest_events` (G3). Creating despite look-alike guests (`force`) and renaming need `reason`; an edit that changes nothing is 400 |
 | `GET /food-orders`, `GET /food-orders/{id}`, `GET /food-menu-items` | `pos.sale.view` | |
 | `POST /food-orders`, `/food-orders/{id}/serve`, `/food-orders/{id}/cancel` | `pos.sale.manage` | Cancelling a served and paid order also needs `pos.sale.cancel_paid`; `refund: {returned, method}` records money returned for a paid sale (needs `reason`) |

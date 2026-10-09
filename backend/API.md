@@ -398,7 +398,12 @@ Reading it:
   unpaginated window (500).
 - `GET /api/guests/stats` — total/local/foreign count **today's registrations only**; `in_house`
   is current (distinct guests with a `checked_in` reservation).
-- `GET /api/guests/match?full_name=&email=&contact_number=` — de-dup candidates.
+- `GET /api/guests/match?full_name=&email=&contact_number=` — de-dup candidates. **Use
+  `POST /api/guests/match` with the same fields in the body** (G5, P6: guest details never in a
+  URL); the GET stays one release. Likewise **`POST /api/guests/search` `{q}`** (other filters as
+  query params) answers like `GET /api/guests?q=`.
+- Access and guest history lines carry `redacted_at`: when the retention routine (G5) cleared the
+  device details (12 months) or contact values (24 months); null otherwise.
 - `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`).
 - **G3 (guest accountability):** every registration and change is a `guest_events` row. `force`
   past look-alikes needs `reason` (400 without; nothing created). `PATCH` changing `full_name` needs

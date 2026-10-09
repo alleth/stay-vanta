@@ -76,6 +76,11 @@ export default function AccessHistory({ load }) {
                   {[device, e.client_address && `reported address ${e.client_address}`].filter(Boolean).join(' · ')}
                 </div>
               )}
+              {/* Kept 12 months, then cleared by the retention routine (G5);
+                  the event itself stays. */}
+              {e.redacted_at && (
+                <div className="text-xs text-muted">Device details cleared after 12 months</div>
+              )}
             </li>
           )
         })}
