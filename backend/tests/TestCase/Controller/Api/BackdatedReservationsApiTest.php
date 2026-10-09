@@ -361,7 +361,7 @@ class BackdatedReservationsApiTest extends TestCase
         $stay = $this->recordPastStay(-5, -2, ['guest_name' => 'Paid Guest']);
 
         $this->authedAs($this->adminToken);
-        $this->post("/api/reservations/{$stay['id']}/payment", json_encode(['payment_status' => 'paid']));
+        $this->post("/api/reservations/{$stay['id']}/post-room-charge", json_encode([]));
         $this->assertResponseOk((string)$this->_response->getBody());
 
         $this->authedAs($this->adminToken);
@@ -414,13 +414,14 @@ class BackdatedReservationsApiTest extends TestCase
         $this->assertSame(1, $stats['checked_out_today']);
         $this->assertSame(0, $stats['booked']);
         $this->assertSame(0, $stats['cancelled_today']);
-        // Neither was marked paid — a finished stay still owing counts.
-        $this->assertSame(2, $stats['unpaid']);
+        // Both finished stays are owed and not billed yet (the old `unpaid`
+        // figure went in G8).
+        $this->assertSame(2, $stats['not_billed']);
         // Nothing has been charged to an invoice yet.
         $this->assertSame(0, $stats['open_invoices']);
     }
 
-    public function testOnceSettledAReservationCantBeMarkedUnpaidEditedOrDeleted(): void
+    public function testOnceSettledAReservationCantBeReversedEditedOrDeleted(): void
     {
         // A booking that isn't checked in yet: before this rule, only stays
         // already under way were locked once their charge was posted.
@@ -446,7 +447,7 @@ class BackdatedReservationsApiTest extends TestCase
         $reservations->saveOrFail($reservations->get($id)->set('guest_id', $guest->id));
 
         $this->authedAs($this->adminToken);
-        $this->post("/api/reservations/{$id}/payment", json_encode(['payment_status' => 'paid']));
+        $this->post("/api/reservations/{$id}/post-room-charge", json_encode([]));
         $this->assertResponseOk((string)$this->_response->getBody());
 
         $line = $this->getTableLocator()->get('InvoiceLines')->find()
@@ -456,7 +457,7 @@ class BackdatedReservationsApiTest extends TestCase
         $this->assertResponseOk((string)$this->_response->getBody());
 
         $this->authedAs($this->adminToken);
-        $this->post("/api/reservations/{$id}/payment", json_encode(['payment_status' => 'unpaid']));
+        $this->post("/api/reservations/{$id}/reverse-room-charge", json_encode(['reason' => 'Wrong guest']));
         $this->assertResponseCode(400);
 
         $this->authedAs($this->adminToken);

@@ -15,7 +15,8 @@ use Cake\Http\Response;
 class GuestsController extends AppController
 {
     /**
-     * GET /api/guests[?guest_type=local|foreign][?q=name][?page=&limit=]
+     * GET /api/guests[?guest_type=local|foreign][?page=&limit=]
+     * POST /api/guests/search {q} (same filters as query params)
      *
      * Paginated (the registry only grows). `total`/`page`/`limit` are always
      * returned, but `limit` only enforces the 5-100 window a caller opts into
@@ -27,6 +28,11 @@ class GuestsController extends AppController
     public function index(): void
     {
         $this->authorize(Permissions::GUESTS_GUEST_VIEW);
+        // Search text travels in the body (G5, P6), so a guest's name never
+        // sits in a URL or the access log (G8 removed GET ?q=).
+        if (trim((string)$this->request->getQuery('q')) !== '') {
+            throw new BadRequestException('Send search text in the body: POST /api/guests/search.');
+        }
         $guests = $this->fetchTable('Guests');
         $query = $this->scopeToProperty(
             $guests->find()->orderBy(['Guests.created' => 'DESC']),
@@ -37,9 +43,7 @@ class GuestsController extends AppController
             $query->where(['Guests.guest_type' => $type]);
         }
 
-        // The search text comes in the body of POST /guests/search (G5, P6), so
-        // a guest's name never sits in a URL; GET ?q= is kept for one release.
-        $search = trim((string)($this->request->getData('q') ?? $this->request->getQuery('q')));
+        $search = trim((string)$this->request->getData('q'));
         if ($search !== '') {
             $query->where(['Guests.full_name LIKE' => '%' . $search . '%']);
         }
@@ -162,14 +166,16 @@ class GuestsController extends AppController
     }
 
     /**
-     * GET /api/guests/match?full_name=&email=&contact_number=
+     * POST /api/guests/match {full_name, email?, contact_number?}
      *
      * Returns existing guests that look like the same person (see
      * GuestsTable::findDuplicates). The Front Desk / Guests forms call this to
-     * warn the receptionist before creating a possible duplicate.
+     * warn the receptionist before creating a possible duplicate. The details
+     * travel in the body, never the URL (G5, P6; G8 removed the GET form).
      */
     public function match(): void
     {
+        $this->request->allowMethod('post');
         $this->authorize(Permissions::GUESTS_GUEST_VIEW);
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -179,9 +185,9 @@ class GuestsController extends AppController
         $guests = $this->fetchTable('Guests');
         $duplicates = $guests->findDuplicates(
             $propertyId,
-            (string)$this->input('full_name'),
-            $this->input('email'),
-            $this->input('contact_number'),
+            (string)$this->request->getData('full_name'),
+            $this->request->getData('email'),
+            $this->request->getData('contact_number'),
         );
 
         $this->set('duplicates', $duplicates);
@@ -370,15 +376,6 @@ class GuestsController extends AppController
 
         $this->set(['events' => $events, 'page' => $page, 'has_more' => $hasMore]);
         $this->viewBuilder()->setOption('serialize', ['events', 'page', 'has_more']);
-    }
-
-    /**
-     * A guest detail from the body (POST, G5 P6: never in a URL), else the
-     * query string (GET, kept for one release).
-     */
-    private function input(string $field): mixed
-    {
-        return $this->request->getData($field) ?? $this->request->getQuery($field);
     }
 
     private function validationFailed(array $errors): void

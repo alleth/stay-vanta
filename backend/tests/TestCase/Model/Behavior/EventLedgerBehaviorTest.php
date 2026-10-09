@@ -147,14 +147,26 @@ class EventLedgerBehaviorTest extends TestCase
         $this->assertSame('Guest was double-charged', $this->events->get($event->id)->reason);
     }
 
-    public function testDuringTheGraceWindowTheReasonMayBeMissing(): void
+    public function testNoLedgerHasAReasonGraceLeft(): void
     {
-        $event = $this->inTransaction(fn() => $this->events->record(
-            $this->context(),
-            FoodOrderEventsTable::CANCELLED_AFTER_PAYMENT,
-            $this->order(['status' => 'served']),
-        ));
-        $this->assertNull($this->events->get($event->id)->reason);
+        // G8 closed the last window (POS paid cancellations): every type that
+        // requires a reason now refuses to record without one.
+        try {
+            $this->inTransaction(fn() => $this->events->record(
+                $this->context(),
+                FoodOrderEventsTable::CANCELLED_AFTER_PAYMENT,
+                $this->order(['status' => 'served']),
+            ));
+            $this->fail('recorded without a reason');
+        } catch (ReasonRequiredException) {
+            $this->addToAssertionCount(1);
+        }
+        foreach (glob(ROOT . '/src/Model/Table/*EventsTable.php') ?: [] as $file) {
+            $class = 'App\\Model\\Table\\' . basename($file, '.php');
+            if (defined("$class::REASON_GRACE")) {
+                $this->assertSame([], constant("$class::REASON_GRACE"), "$class::REASON_GRACE");
+            }
+        }
     }
 
     public function testLedgerRowsCanNeitherChangeNorBeRemoved(): void

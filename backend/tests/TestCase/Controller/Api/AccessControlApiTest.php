@@ -76,8 +76,8 @@ class AccessControlApiTest extends TestCase
     {
         $urls = [
             '/api/auth/me', '/api/rooms', '/api/reservations', '/api/guests', '/api/inventory-items',
-            '/api/food-orders', '/api/invoices', '/api/users', '/api/reports/operations',
-            '/api/reports/daily-collection',
+            '/api/food-orders', '/api/invoices', '/api/users', '/api/operations/today',
+            '/api/finance/collections',
         ];
         foreach ($urls as $url) {
             $this->callAs(null, 'GET', $url);
@@ -120,22 +120,14 @@ class AccessControlApiTest extends TestCase
             // Platform-owner only.
             'create a property' => [['admin', 'receptionist'], 'POST', '/api/properties', ['name' => 'X']],
             'platform dashboard' => [['admin', 'receptionist'], 'GET', '/api/platform/dashboard'],
-            'platform dashboard (old path)' => [['admin', 'receptionist'], 'GET', '/api/reports/owner-dashboard'],
             // Manager only (money detail and staff activity).
             'finance summary' => [['owner', 'receptionist'], 'GET', '/api/finance/summary'],
-            'manager revenue figures (old path)' => [['owner', 'receptionist'], 'GET', '/api/reports/admin-dashboard'],
             'seasonality' => [['owner', 'receptionist'], 'GET', '/api/finance/seasonality'],
-            'seasonality (old path)' => [['owner', 'receptionist'], 'GET', '/api/reports/monthly-summary'],
             'staff activity feed' => [['owner', 'receptionist'], 'GET', '/api/operations/activity'],
-            'staff activity feed (old path)' => [['owner', 'receptionist'], 'GET', '/api/reports/activity'],
             // Staff on a property only; the platform owner has no property operations view.
             'operations' => [['owner'], 'GET', '/api/operations/today'],
-            'operations (old path)' => [['owner'], 'GET', '/api/reports/operations'],
             // Front Desk Staff may see one day only.
             'monthly collection' => [['receptionist'], 'GET', '/api/finance/collections?month=1&year=2026'],
-            'monthly collection (old path)' => [
-                ['receptionist'], 'GET', '/api/reports/daily-collection?month=1&year=2026',
-            ],
             'date-range collection' => [
                 ['receptionist'], 'GET', '/api/finance/collections?from=2026-01-01&to=2026-01-31',
             ],
@@ -176,7 +168,6 @@ class AccessControlApiTest extends TestCase
     {
         $urls = [
             '/api/finance/summary', '/api/finance/seasonality', '/api/operations/activity',
-            '/api/reports/admin-dashboard', '/api/reports/monthly-summary', '/api/reports/activity',
         ];
         foreach ($urls as $url) {
             $this->callAs($this->adminToken, 'GET', $url);
@@ -186,7 +177,7 @@ class AccessControlApiTest extends TestCase
 
     public function testPlatformOwnerCanUsePlatformDashboard(): void
     {
-        foreach (['/api/platform/dashboard', '/api/reports/owner-dashboard'] as $url) {
+        foreach (['/api/platform/dashboard'] as $url) {
             $this->callAs($this->ownerToken, 'GET', $url);
             $this->assertResponseOk("GET $url for owner");
         }
@@ -194,7 +185,7 @@ class AccessControlApiTest extends TestCase
 
     public function testFrontDeskStaffGetOperationsWithoutStaffData(): void
     {
-        foreach (['/api/operations/today', '/api/reports/operations'] as $url) {
+        foreach (['/api/operations/today'] as $url) {
             $this->callAs($this->receptionistToken, 'GET', $url);
             $this->assertResponseOk();
             $operations = $this->responseJson()['operations'];
@@ -209,7 +200,7 @@ class AccessControlApiTest extends TestCase
 
     public function testFrontDeskStaffCanSeeOneDaysCollection(): void
     {
-        foreach (['/api/finance/collections', '/api/reports/daily-collection'] as $url) {
+        foreach (['/api/finance/collections'] as $url) {
             $this->callAs($this->receptionistToken, 'GET', $url);
             $this->assertResponseOk("GET $url for receptionist");
             $this->callAs($this->adminToken, 'GET', $url . '?month=1&year=2026');

@@ -95,15 +95,6 @@ return function (RouteBuilder $routes): void {
         // Role definitions, read-only (step 10b).
         $builder->get('/roles', ['controller' => 'Roles', 'action' => 'index']);
 
-        // Old /reports/* paths, served by the same actions until the frontend has
-        // moved off them for a release (build step 3); then remove these lines.
-        $builder->get('/reports/owner-dashboard', ['controller' => 'Platform', 'action' => 'dashboard']);
-        $builder->get('/reports/admin-dashboard', ['controller' => 'Finance', 'action' => 'adminDashboard']);
-        $builder->get('/reports/daily-collection', ['controller' => 'Finance', 'action' => 'collections']);
-        $builder->get('/reports/monthly-summary', ['controller' => 'Finance', 'action' => 'seasonality']);
-        $builder->get('/reports/operations', ['controller' => 'Operations', 'action' => 'today']);
-        $builder->get('/reports/activity', ['controller' => 'Operations', 'action' => 'activity']);
-
         // Staff (users).
         $builder->get('/users', ['controller' => 'Users', 'action' => 'index']);
         $builder->post('/users', ['controller' => 'Users', 'action' => 'add']);
@@ -217,15 +208,10 @@ return function (RouteBuilder $routes): void {
             '/reservations/{id}/reverse-room-charge',
             ['controller' => 'Reservations', 'action' => 'reverseRoomCharge'],
         )->setPatterns(['id' => '\d+'])->setPass(['id']);
-        // Old "Mark paid / Mark unpaid" path: `paid` posts the room charge, `unpaid`
-        // is refused. Remove once the frontend has moved off it (build step 3).
-        $builder->post('/reservations/{id}/payment', ['controller' => 'Reservations', 'action' => 'payment'])
-            ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         // Guests module.
         $builder->get('/guests/stats', ['controller' => 'Guests', 'action' => 'stats']);
-        $builder->get('/guests/match', ['controller' => 'Guests', 'action' => 'match']);
-        // Guest details in the body, never the URL (G5, P6); the GETs stay a release.
+        // Guest details in the body, never the URL (G5, P6).
         $builder->post('/guests/match', ['controller' => 'Guests', 'action' => 'match']);
         $builder->post('/guests/search', ['controller' => 'Guests', 'action' => 'index']);
         $builder->get('/guests/export', ['controller' => 'Guests', 'action' => 'export']);
@@ -273,7 +259,8 @@ return function (RouteBuilder $routes): void {
         $builder->post('/invoices/{id}/lines/{lineId}/reverse', ['controller' => 'Invoices', 'action' => 'reverseLine'])
             ->setPatterns(['id' => '\d+', 'lineId' => '\d+'])->setPass(['id', 'lineId']);
 
-        $builder->fallbacks();
+        // No catch-all routes in this scope (G8): every API action is reached
+        // only through a named route above, each with an access-matrix probe.
     });
 
     $routes->scope('/', function (RouteBuilder $builder): void {

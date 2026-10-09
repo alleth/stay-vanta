@@ -78,14 +78,18 @@ class PosCancellationApiTest extends TestCase
     #[DataProvider('cancelProvider')]
     public function testWhoMayCancelWhat(string $role, string $status, string $payment, int $expected): void
     {
+        // A Manager cancelling a paid, served sale must say why (G8 closed the
+        // grace): without a reason it's refused with 400 and nothing changes.
+        $needsReason = $expected === 200 && $status === 'served' && $payment === 'paid';
         foreach ([[], ['reason' => 'Guest changed their mind']] as $body) {
+            $want = !$body && $needsReason ? 400 : $expected;
             $id = $this->order($status, $payment);
             $this->callAs($this->tokens[$role], 'POST', "/api/food-orders/$id/cancel", $body);
-            $this->assertResponseCode($expected, $body ? 'with a reason' : 'without a reason');
+            $this->assertResponseCode($want, $body ? 'with a reason' : 'without a reason');
 
             $now = $this->getTableLocator()->get('FoodOrders')->get($id)->status;
-            $this->assertSame($expected === 200 ? 'cancelled' : $status, $now);
-            if ($expected === 403) {
+            $this->assertSame($want === 200 ? 'cancelled' : $status, $now);
+            if ($want === 403) {
                 $this->assertStringContainsString('Manager', (string)$this->responseJson()['message']);
             }
         }

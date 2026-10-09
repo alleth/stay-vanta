@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { P } from '../auth/permissions'
 import { formatMoney } from '../utils/format'
 import { SkeletonTable } from '../components/Skeleton'
-import { roomStatusLabel } from '../utils/roles'
+import { roomServiceLabel, roomStatusLabel } from '../utils/roles'
 import { roomLabel, sourceLabel } from '../utils/bookingLabels'
 import {
   listRooms, deleteRoom, listRoomRates, listBookingSources, listPromoRates, deletePromoRate,
@@ -28,7 +28,7 @@ import RolesPanel from '../components/settings/RolesPanel'
 // other modules (Front Desk sets a room's status; POS keeps the menu; Finance
 // the receipt booklets), and every price shows where it came from.
 
-const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning' }
+const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning', out_of_service: 'secondary' }
 const fmtDate = (s) => (s ? new Date(s).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 
 // Where a row's current price came from: its latest price change (or its
@@ -164,7 +164,12 @@ export default function Settings() {
                     <tr key={room.id}>
                       <td className="font-semibold">{room.room_number}</td>
                       <td>{room.room_type ?? '—'}</td>
-                      <td><Badge bg={ROOM_VARIANT[room.status]}>{roomStatusLabel(room.status)}</Badge></td>
+                      <td>
+                        {/* Occupancy, unless a vacant room is off service (G4; never read from `status`, G8). */}
+                        {room.status !== 'occupied' && (room.service_status ?? 'in_service') !== 'in_service'
+                          ? <Badge bg={ROOM_VARIANT[room.service_status]}>{roomServiceLabel(room.service_status)}</Badge>
+                          : <Badge bg={ROOM_VARIANT[room.status]}>{roomStatusLabel(room.status)}</Badge>}
+                      </td>
                       {canManageRooms && (
                         <td className="whitespace-nowrap text-right">
                           <Button size="sm" variant="outline-primary" className="mr-1"

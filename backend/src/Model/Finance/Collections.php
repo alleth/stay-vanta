@@ -6,14 +6,13 @@ namespace App\Model\Finance;
 use App\Model\BusinessTime;
 use App\Model\Table\FoodOrderEventsTable;
 use App\Model\Table\InvoiceEventsTable;
-use Cake\Core\Configure;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\ORM\Query\SelectQuery;
 
 /**
  * The one definition of a property's money figures. Every report that shows
  * Collected, Refunded, Net Collected or Outstanding reads it from here:
- * Finance (collections, summary, seasonality and their old /reports paths)
+ * Finance (collections, summary, seasonality)
  * and Operations (today's money, the POS trend).
  *
  * Since build step 7c-2 (decided 2026-10-03, D1–D8) the figures are **cash
@@ -23,10 +22,10 @@ use Cake\ORM\Query\SelectQuery;
  * refund lines by when they were written), Net Collected = in − out. A past
  * day never changes once it has ended. Outstanding = open invoices now.
  *
- * `App.collectedModel` (env APP_COLLECTED_MODEL) = `historical` brings back
- * the model before 7c-2 from the same data (a refund lowers the day its
- * invoice or sale was collected; nothing counts as Refunded): the rollback
- * switch, kept for one release.
+ * historical() still computes the model before 7c-2 from the same data, but
+ * only for the read-only restatement comparison (`bin/cake cash_restatement`).
+ * Reports always use cash movement: the one-release rollback switch
+ * (`APP_COLLECTED_MODEL`) was retired in G8 (L-D4).
  *
  * Windows are stored-timezone bounds `[from, to)` built with BusinessTime
  * (the hotel's day, not UTC's); null leaves that side open. One query per
@@ -36,8 +35,8 @@ class Collections
 {
     use LocatorAwareTrait;
 
+    /** The model every report uses (reported as `model` for API stability). */
     public const MODEL_CASH = 'cash';
-    public const MODEL_HISTORICAL = 'historical';
 
     /**
      * @param int $propertyId The property whose money this is.
@@ -47,19 +46,8 @@ class Collections
     }
 
     /**
-     * Which model the reports use: `cash` unless configured `historical`.
-     */
-    public static function model(): string
-    {
-        return Configure::read('App.collectedModel') === self::MODEL_HISTORICAL
-            ? self::MODEL_HISTORICAL
-            : self::MODEL_CASH;
-    }
-
-    /**
-     * The figures every report shows for `[from, to)`, under the configured
-     * model: cash in (invoice and POS parts), cash out (the same parts) and
-     * Net Collected.
+     * The figures every report shows for `[from, to)`: cash in (invoice and
+     * POS parts), cash out (the same parts) and Net Collected.
      *
      * @param string|null $from Stored-timezone lower bound, inclusive; null for no bound.
      * @param string|null $to Stored-timezone upper bound, exclusive; null for no bound.
@@ -67,9 +55,7 @@ class Collections
      */
     public function figures(?string $from, ?string $to): array
     {
-        return self::model() === self::MODEL_HISTORICAL
-            ? $this->historical($from, $to)
-            : $this->cashMovement($from, $to);
+        return $this->cashMovement($from, $to);
     }
 
     /**
@@ -102,22 +88,12 @@ class Collections
     }
 
     /**
-     * Net Collected per period (the headline numbers).
-     *
-     * @return array{week: float, month: float, ytd: float, all_time: float}
-     */
-    public function byPeriod(): array
-    {
-        return array_map(fn(array $f) => $f['net'], $this->figuresByPeriod());
-    }
-
-    /**
      * The model before 7c-2, from today's data: settled invoices by
      * `settled_at` and paid sales by `created`, each less the refund events
      * against it, so a refund lowers the day its invoice or sale was
      * collected (pre-7c refund lines already sit inside the invoice total).
-     * Nothing counts as Refunded and Net equals Collected. Used by the
-     * rollback switch and as the "before" of the restatement report.
+     * Nothing counts as Refunded and Net equals Collected. Used only as the
+     * "before" of the read-only restatement report, never by a screen.
      *
      * @return array<string, mixed> As figures().
      */

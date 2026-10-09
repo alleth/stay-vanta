@@ -15,7 +15,11 @@ use Cake\Http\Exception\ForbiddenException;
 class RoomsController extends AppController
 {
     /**
-     * GET /api/rooms[?status=available]
+     * GET /api/rooms[?status=occupied|available][?service_status=in_service|maintenance|out_of_service]
+     *
+     * `status` is occupancy only; service availability is `service_status`
+     * (G4). `status=maintenance` is refused: it read the combined value G8
+     * retires.
      */
     public function index(): void
     {
@@ -26,8 +30,20 @@ class RoomsController extends AppController
         );
 
         $status = $this->request->getQuery('status');
-        if ($status !== null) {
+        if ($status !== null && $status !== '') {
+            if (!in_array($status, ['occupied', 'available'], true)) {
+                throw new BadRequestException(
+                    'status must be occupied or available; use service_status for maintenance.',
+                );
+            }
             $query->where(['Rooms.status' => $status]);
+        }
+        $service = $this->request->getQuery('service_status');
+        if ($service !== null && $service !== '') {
+            if (!in_array($service, RoomsTable::SERVICE_STATUSES, true)) {
+                throw new BadRequestException('service_status must be in_service, maintenance or out_of_service.');
+            }
+            $query->where(['Rooms.service_status' => $service]);
         }
 
         $this->set('rooms', $query->all());

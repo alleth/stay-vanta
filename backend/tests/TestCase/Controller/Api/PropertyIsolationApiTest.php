@@ -134,7 +134,7 @@ class PropertyIsolationApiTest extends TestCase
     {
         $urls = [
             '/api/rooms', '/api/guests', '/api/reservations', '/api/inventory-items', '/api/invoices',
-            '/api/food-orders', '/api/users', '/api/stock-movements', '/api/guests/match?full_name=' . urlencode(self::B_GUEST),
+            '/api/food-orders', '/api/users', '/api/stock-movements',
         ];
         foreach ([$this->adminToken, $this->receptionistToken] as $token) {
             foreach ($urls as $url) {
@@ -143,6 +143,12 @@ class PropertyIsolationApiTest extends TestCase
                 }
                 $this->callAs($token, 'GET', $url);
                 $this->assertResponseOk("GET $url");
+                $this->assertNothingOfTheirs($url);
+            }
+            // Guest search and matching send the guest's name in the body (G5, P6).
+            foreach (['/api/guests/search' => ['q' => self::B_GUEST], '/api/guests/match' => ['full_name' => self::B_GUEST]] as $url => $body) {
+                $this->callAs($token, 'POST', $url, $body);
+                $this->assertResponseOk("POST $url");
                 $this->assertNothingOfTheirs($url);
             }
         }
@@ -159,14 +165,14 @@ class PropertyIsolationApiTest extends TestCase
 
     public function testReportsOnlyCoverOurProperty(): void
     {
-        foreach (['/api/operations/today', '/api/reports/operations'] as $url) {
+        foreach (['/api/operations/today'] as $url) {
             $this->callAs($this->adminToken, 'GET', $url . '?property_id=' . $this->theirs);
             $this->assertResponseOk();
             $this->assertNothingOfTheirs($url);
             $this->assertSame(0, $this->responseJson()['operations']['rooms']['total']);
         }
 
-        foreach (['/api/finance/collections', '/api/reports/daily-collection'] as $url) {
+        foreach (['/api/finance/collections'] as $url) {
             $this->callAs($this->adminToken, 'GET', $url . '?property_id=' . $this->theirs);
             $this->assertResponseOk();
             $this->assertEquals(0, $this->responseJson()['collection']['outstanding']['total'], $url);
@@ -205,7 +211,6 @@ class PropertyIsolationApiTest extends TestCase
             ['PATCH', '/api/guests/' . $b['guest'], ['full_name' => 'Renamed']],
             ['PATCH', '/api/reservations/' . $b['reservation'], ['total_guests' => 2]],
             ['POST', '/api/reservations/' . $b['reservation'] . '/cancel', []],
-            ['POST', '/api/reservations/' . $b['reservation'] . '/payment', ['payment_status' => 'paid']],
             ['POST', '/api/reservations/' . $b['reservation'] . '/post-room-charge', []],
             ['DELETE', '/api/reservations/' . $b['reservation'], ['reason' => 'Not ours']],
             ['PATCH', '/api/inventory-items/' . $b['item'], ['name' => 'Renamed']],

@@ -68,29 +68,24 @@ Reading it:
 
 ## Properties, Platform, Finance, Operations
 
-> **Paths (build step 3).** New paths are `/api/platform/*`, `/api/finance/*` and
-> `/api/operations/*`. The old `/api/reports/*` paths still answer, served by the same actions,
-> until the frontend has been off them for a release; then they're removed. Don't use them in new
-> code.
+> **Paths (build step 3).** Paths are `/api/platform/*`, `/api/finance/*` and `/api/operations/*`.
+> The old `/api/reports/*` paths were removed in G8 (404), as were CakePHP's catch-all
+> `/api/<controller>/<action>` routes: only the routes listed here exist.
 
 - `GET|POST /api/properties` — owner-only create; the owner's index contains each property's admin.
 - `PATCH|PUT /api/properties/{id}` — owner-only edit, incl. `subscription_status` & `subscription_fee`.
-- `GET /api/platform/dashboard` (Platform Owner only; old `/api/reports/owner-dashboard`) — subscription revenue (week/month/YTD from
+- `GET /api/platform/dashboard` (Platform Owner only) — subscription revenue (week/month/YTD from
   each subscriber's monthly fee) + counts (hotels, active subscriptions, admins).
 - **Money figures are cash movement (build step 7c, decided 2026-10-03):** Collected = cash in
   (settled invoices at the full amount settled, by `settled_at`; paid POS sales by `created`),
   Refunded = cash out on the day the money went back (refund events by `occurred_at`; pre-7c
   downpayment refund lines by when written), Net Collected = in − out. All from
-  `AppModelFinanceCollections`; `APP_COLLECTED_MODEL=historical` (rollback only, one release)
-  returns the model before 7c-2 from the same data (`model` in each response says which).
+  `App\Model\Finance\Collections`. `model` in each response is always `cash` (the rollback
+  switch to the pre-7c-2 model was retired in G8; that model survives only in `bin/cake cash_restatement`).
 - `GET /api/finance/summary` (**Manager only**, own property) → `{summary: {collected: {week, month,
   ytd, all_time}, cash: {<period>: {collected, refunded, net}}, outstanding: {total, count}, model}}`:
   `collected` per period is **Net Collected** (the headline, same keys as before 7c-2).
-- Old `GET /api/reports/admin-dashboard` (Manager only) keeps its old shape: cards (inventory items,
-  occupied rooms, guests today, open food orders) + collected revenue (week/month/YTD/all-time) +
-  `outstanding` `{total, count}` (see below).
-- `GET /api/finance/collections[?date=YYYY-MM-DD | ?month=&year= | ?from=&to=]` (old
-  `/api/reports/daily-collection`) — cash movement in the window; defaults to today:
+- `GET /api/finance/collections[?date=YYYY-MM-DD | ?month=&year= | ?from=&to=]` — cash movement in the window; defaults to today:
   `invoices` / `food_orders` `{total, count}` = cash in by part, `total` = **Net Collected**,
   `collected` `{invoices, pos, total}`, `refunded` `{invoices, pos, total, by_method}`, `net`,
   `refunds` (each: `at`, `kind` invoice|pos, `type`, `invoice_id`/`order_id`, `guest`, `amount`,
@@ -100,14 +95,12 @@ Reading it:
   not collected until settled, and not tied to the window.
 - All report dates/weeks/months are the **hotel's** (`App.businessTimezone`, default
   Asia/Manila), not UTC — see `App\Model\BusinessTime`.
-- `GET /api/finance/seasonality[?year=YYYY]` (**Manager only**, own property; old
-  `/api/reports/monthly-summary`) — seasonality per
+- `GET /api/finance/seasonality[?year=YYYY]` (**Manager only**, own property) — seasonality per
   calendar month of the year (default current): count of non-cancelled reservations (bucketed by
   `check_in`) and `revenue` = Net Collected, with its `collected` and `refunded` parts. One pair of queries
   per month rather than `GROUP BY MONTH(...)` (`ONLY_FULL_GROUP_BY` avoidance). Powers the
   Revenue page's Analytics → "Seasonality" chart.
-- `GET /api/operations/today` (**Manager + Front Desk Staff**, own property; Platform Owner → 403;
-  old `/api/reports/operations`) — the
+- `GET /api/operations/today` (**Manager + Front Desk Staff**, own property; Platform Owner → 403) — the
   operational Dashboard in one call, as `operations`:
   - `rooms` `{total, occupied, available, reserved, maintenance, occupancy_rate}` — `reserved` is
     derived, not a room status: an `available` room held by a `booked` reservation covering today
@@ -145,7 +138,7 @@ Reading it:
   `edited` stays in the reservation's history), `reservation_id`, `guest`, `room`, dates, `reason`,
   `recorded`, `backdated_entry`, `changed` (which discounts). `staff.members[].actions_today` counts
   the distinct requests each person made today that recorded anything in any ledger.
-- `GET /api/operations/activity[?page=N]` (**Manager only**, own property; old `/api/reports/activity`) — the full feed behind the
+- `GET /api/operations/activity[?page=N]` (**Manager only**, own property) — the full feed behind the
   Dashboard's Staff card ("View all activity"): the same merged stock-movement + food-order
   events as `operations.activity`, newest first, 25 per page → `{activity, page, has_more}`.
   `page` is 1–40 (each ledger is read to the end of the page before merging, so depth costs).
@@ -241,7 +234,9 @@ Reading it:
   issued (deactivate instead).
 
 ## Front Desk
-- `GET|POST /api/rooms` — create **owner/admin only**.
+- `GET|POST /api/rooms[?status=occupied|available][?service_status=in_service|maintenance|out_of_service]`
+  — create **owner/admin only**. `status` is occupancy only; `status=maintenance` is refused (400,
+  G8): filter service with `service_status`.
 - `PATCH|PUT /api/rooms/{id}` — changing `room_number`/`room_type` is **Manager only** (enforced by
   diffing incoming vs current values). **Occupancy can't be set by hand** (G4, R4): a `status`
   different from the current one is 400.
@@ -279,17 +274,16 @@ Reading it:
   invoice is the source of truth for billing, not `payment_status`.**
   `billing=not_billed` = a stay that has started (`checked_in`/`checked_out`) with no room charge
   posted (correlated `NOT EXISTS` on `reservation` invoice lines); future bookings aren't in it. The
-  same set as the stats' `not_billed`. Any other `billing` value → 400. (Old filter
-  `payment_status=unpaid` still works until removed; it also excludes cancelled.)
+  same set as the stats' `not_billed`. Any other `billing` value → 400. The old
+  `payment_status=` filter is refused with 400 (G8): nothing keeps `payment_status` true.
   `since` is the table's
   window (booked/checked-in always; checked-out/cancelled only if that happened on/after it);
   `on_date` = non-cancelled stays touching the date (Calendar tab). `limit` is clamped 5–100 only
   when passed; omitted, it's the old wide window (200) — Food & Orders' checked-in picker relies on it.
-- `GET /api/reservations/stats` → `{booked, checked_out_today, cancelled_today, not_billed, unpaid,
+- `GET /api/reservations/stats` → `{booked, checked_out_today, cancelled_today, not_billed,
   open_invoices}` (Front Desk summary cards, counted in the database; `not_billed` = the
-  `billing=not_billed` set above; `unpaid` = the old figure (non-cancelled, `payment_status`
-  unpaid), kept until the old screens are gone; `open_invoices` = the property's invoices not yet
-  settled, of any kind).
+  `billing=not_billed` set above; `open_invoices` = the property's invoices not yet settled, of any
+  kind). The old `unpaid` figure was removed in G8.
 - **Reservation accountability (build step 8):** every action below records one
   `reservation_events` row (who, role, before/after, when, reason, request id) under a lock on the
   reservation; a repeat of the same action is refused (400/404/422) and records nothing. Reasons
@@ -379,11 +373,8 @@ Reading it:
   invoice, so the stay reads Billed (Settled once that invoice is settled). Idempotent. **400**
   with a reason when nothing can be posted: cancelled ("A cancelled reservation can't be
   billed."), no guest ("Add a guest first to post the room charge."), no resolvable room rate
-  (rolled back, no empty invoice left). Also sets `payment_status = paid` for older screens.
-- `POST /api/reservations/{id}/payment` (old "Mark paid / Mark unpaid", removed in a later
-  release) — `{payment_status: paid}` does exactly what `post-room-charge` does;
-  `{payment_status: unpaid}` is **always 400** since build step 3 (it left the posted charge on the
-  invoice). Use `reverse-room-charge` instead.
+  (rolled back, no empty invoice left). Also sets `payment_status = paid` (nothing reads it).
+  The old `POST /api/reservations/{id}/payment` (Mark paid / Mark unpaid) was removed in G8 (404).
 - `POST /api/reservations/{id}/reverse-room-charge` `{reason}` — **Manager only**
   (`finance.invoice.reverse`, elevated: 400 without a reason). Under a `FOR UPDATE` lock on the
   reservation, reverses every active `reservation`-sourced line (room charge, extras) and, if any
@@ -393,15 +384,15 @@ Reading it:
   400 when the invoice is settled, or when no room charge is posted. Returns the reservation.
 
 ## Guests
-- `GET /api/guests[?guest_type=&q=&page=&limit=]` → `{guests,total,page,limit}`. `limit` is only
+- `GET /api/guests[?guest_type=&page=&limit=]` → `{guests,total,page,limit}`; `?q=` is refused
+  (400, G8): search with **`POST /api/guests/search` `{q}`** (other filters as query params), which
+  answers the same. `limit` is only
   clamped 5–100 when passed; omitting it (charge-to-room picker, booking combobox) returns a wide
   unpaginated window (500).
 - `GET /api/guests/stats` — total/local/foreign count **today's registrations only**; `in_house`
   is current (distinct guests with a `checked_in` reservation).
-- `GET /api/guests/match?full_name=&email=&contact_number=` — de-dup candidates. **Use
-  `POST /api/guests/match` with the same fields in the body** (G5, P6: guest details never in a
-  URL); the GET stays one release. Likewise **`POST /api/guests/search` `{q}`** (other filters as
-  query params) answers like `GET /api/guests?q=`.
+- `POST /api/guests/match` `{full_name, email?, contact_number?}` — de-dup candidates, in the body
+  so guest details never reach a URL or a log (G5, P6). The GET form was removed in G8.
 - Access and guest history lines carry `redacted_at`: when the retention routine (G5) cleared the
   device details (12 months) or contact values (24 months); null otherwise.
 - `GET|PATCH /api/guests/{id}` · `POST /api/guests` (409 + `duplicates` on a look-alike unless `force`).
@@ -437,8 +428,8 @@ Reading it:
 - `GET /api/food-orders/{id}` · `POST /api/food-orders/{id}/{serve|cancel}` — a **receptionist may
   not cancel a `served` + `paid` order** (owner/admin only). Cancel restocks and removes invoice lines.
   Cancelling a served + paid order takes `{reason}` (the elevated `pos.sale.cancel_paid`): stored on
-  the `cancelled_after_payment` event. Accepted but not yet required (grace window, docs/EVENTS.md);
-  once the window closes, a missing reason is a 400.
+  the `cancelled_after_payment` event; a missing reason is a 400 and changes nothing (the grace
+  window closed in G8).
   Cancelling a **paid** sale takes `refund: {returned, method}` and `refund_key` (step 7c):
   `returned: true` records a `refunded` event (cash out today; needs `reason` and a method),
   false or absent keeps the sale collected. A repeated key is 409. The order list carries

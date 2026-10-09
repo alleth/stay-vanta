@@ -93,9 +93,9 @@ class PermissionsTest extends TestCase
     }
 
     /**
-     * frontend/src/auth/permissions.js mirrors this class: the same names, and
-     * the same role map as the fallback for sessions from before
-     * user.permissions existed. A typo there would silently hide a screen.
+     * frontend/src/auth/permissions.js mirrors this class: the same names. A
+     * typo there would silently hide a screen. The role map it once mirrored
+     * (ROLE_FALLBACK) was removed in G8: screens read only user.permissions.
      */
     public function testTheFrontendMirrorsTheseDefinitions(): void
     {
@@ -114,15 +114,7 @@ class PermissionsTest extends TestCase
             fn($value) => is_string($value),
         );
         $this->assertSame($backend, $frontend, 'P in permissions.js must match the Permissions constants');
-
-        preg_match('/export const ROLE_FALLBACK = \{(.*?)\R\}/s', $js, $fallback);
-        preg_match_all('/^  ([a-z]+): \[(.*?)^  \],\r?$/ms', $fallback[1] ?? '', $roles, PREG_SET_ORDER);
-        $map = [];
-        foreach ($roles as [, $role, $list]) {
-            preg_match_all('/P\.([A-Z_]+)/', $list, $names);
-            $map[$role] = array_map(fn($name) => $frontend[$name] ?? "unknown $name", $names[1]);
-        }
-        $this->assertSame(Permissions::ROLE_GRANTS, $map, 'ROLE_FALLBACK must match Permissions::ROLE_GRANTS');
+        $this->assertStringNotContainsString('ROLE_FALLBACK', $js, 'screens must not guess permissions from a role');
     }
 
     public function testTheFrontendOnlyNamesDefinedPermissions(): void

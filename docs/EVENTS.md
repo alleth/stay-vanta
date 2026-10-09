@@ -116,10 +116,11 @@ POS sales. Subject `food_order_id`; activity subject `food_order`. Typed columns
 | `placed` | | | A sale is placed (`FoodOrdersTable::place()`) |
 | `served` | | | An open sale is served |
 | `cancelled` | | | A sale is cancelled, other than below |
-| `cancelled_after_payment` | yes | yes | A served and paid sale is cancelled (`pos.sale.cancel_paid`) |
+| `cancelled_after_payment` | yes | | A served and paid sale is cancelled (`pos.sale.cancel_paid`) |
 | `refunded` | yes | | Money is returned for a paid sale ("Was money returned?" yes on cancelling it, or `POST /food-orders/{id}/refund` later): `amount` negative, `method`; once per sale |
 
-Grace for `cancelled_after_payment` ends in the cleanup release after step 5.
+The grace for `cancelled_after_payment` ended in G8 (production had recorded none without a
+reason). No ledger has a grace entry left.
 
 Recorded by `FoodOrdersTable::place()`, `serve()` and `cancelOrder()`, each in one transaction
 with the order row locked (`FOR UPDATE`) before its check, so a double click can't serve or

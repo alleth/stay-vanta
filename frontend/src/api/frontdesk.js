@@ -57,7 +57,7 @@ export const listReservations = (propertyId, params = {}) =>
 export const pageReservations = (propertyId, params = {}) =>
   client.get('/reservations', { params: withProp(params, propertyId) }).then((r) => r.data)
 
-// The summary cards → {booked, checked_out_today, cancelled_today, unpaid, open_invoices}.
+// The summary cards → {booked, checked_out_today, cancelled_today, not_billed, open_invoices}.
 export const reservationStats = (propertyId) =>
   client.get('/reservations/stats', { params: withProp({}, propertyId) }).then((r) => r.data)
 

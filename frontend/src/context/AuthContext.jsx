@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import client, { getToken, setToken } from '../api/client'
-import { ROLE_FALLBACK } from '../auth/permissions'
 
 const AuthContext = createContext(null)
 
@@ -40,10 +39,10 @@ export function AuthProvider({ children }) {
   }
 
   const role = user?.role ?? null
-  // What this person may do (docs/PERMISSIONS.md). Sent by the server; a
-  // session from before it was sent falls back to the role's fixed list.
+  // What this person may do (docs/PERMISSIONS.md), as the server sent it.
+  // Nothing is guessed from the role (G8 removed that fallback).
   const granted = useMemo(
-    () => new Set(user?.permissions ?? ROLE_FALLBACK[user?.role] ?? []),
+    () => new Set(user?.permissions ?? []),
     [user],
   )
   const value = {

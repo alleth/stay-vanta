@@ -111,14 +111,14 @@ export function CollectionsReport({ allowMonthly }) {
       {!rangeInvalid && data && (
         <>
           {/* Cash movement (build step 7c): money in, money back, the difference,
-              each on the day it moved. The fallbacks read a server from before 7c-2. */}
+              each on the day it moved. */}
           <StatTiles
             money
             className="mb-2"
             tiles={[
-              { label: 'Net collected', value: data.net ?? data.total, variant: 'primary' },
-              { label: 'Collected', value: data.collected?.total ?? data.total },
-              { label: 'Refunded', value: data.refunded?.total ?? 0, variant: data.refunded?.total > 0 ? 'danger' : undefined },
+              { label: 'Net collected', value: data.net, variant: 'primary' },
+              { label: 'Collected', value: data.collected.total },
+              { label: 'Refunded', value: data.refunded.total, variant: data.refunded.total > 0 ? 'danger' : undefined },
               // Not part of the window above: what's billed right now but not
               // yet collected, until the invoice is settled (Invoices tab).
               { label: 'Outstanding', value: data.outstanding?.total ?? 0 },

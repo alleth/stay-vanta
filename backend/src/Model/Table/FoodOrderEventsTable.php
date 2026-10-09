@@ -34,11 +34,10 @@ class FoodOrderEventsTable extends Table
     public const REQUIRES_REASON = [self::CANCELLED_AFTER_PAYMENT, self::REFUNDED];
 
     /**
-     * Accepted without a reason until the compatibility window closes (the
-     * POS released before step 5 can't send one). Emptied in the cleanup
-     * release; see docs/EVENTS.md.
+     * None: the window that let a paid cancellation go without a reason
+     * (while the POS from before step 5 was still in use) closed in G8.
      */
-    public const REASON_GRACE = [self::CANCELLED_AFTER_PAYMENT];
+    public const REASON_GRACE = [];
 
     /**
      * @param array<string, mixed> $config Table config.

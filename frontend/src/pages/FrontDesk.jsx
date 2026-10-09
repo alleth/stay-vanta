@@ -74,6 +74,11 @@ function resolveBaseRate(rates, roomId) {
 }
 
 const ROOM_VARIANT = { available: 'success', occupied: 'danger', maintenance: 'warning', out_of_service: 'secondary' }
+// A room can be sold when nobody is in it and it's in service (G4). Occupancy is
+// `status` (occupied | available), service is `service_status`: never read
+// maintenance from `status` (G8).
+const inService = (r) => (r.service_status ?? 'in_service') === 'in_service'
+const sellable = (r) => r.status !== 'occupied' && inService(r)
 const RES_VARIANT = { booked: 'secondary', checked_in: 'primary', checked_out: 'success', cancelled: 'dark' }
 
 // The statutory discounts a guest can qualify for. A booking carries one
@@ -268,7 +273,7 @@ export default function FrontDesk() {
   const [reservationDate, setReservationDate] = useState(null)
   const [calDate, setCalDate] = useState(todayStr)
   const [resFilter, setResFilter] = useState('today') // today | week | all
-  // Set by clicking the "To collect → unpaid" figure: the table then lists
+  // Set by clicking the Receivables "not billed" figure: the table then lists
   // exactly what that number counts.
   const [resBilling, setResBilling] = useState(null) // null | 'not_billed'
   // Controlled so the summary cards can jump to the list behind a number.
@@ -333,13 +338,13 @@ export default function FrontDesk() {
     refresh()
   }, [refresh])
 
-  const availableRooms = useMemo(() => rooms.filter((r) => r.status === 'available'), [rooms])
+  const availableRooms = useMemo(() => rooms.filter(sellable), [rooms])
 
   // At-a-glance counts. A `booked` reservation is a pending stay; once checked in
   // the room is "occupied" (counted there, not as a reservation). The checked-out
   // and cancelled cards monitor what happened *today*.
   const counts = useMemo(() => ({
-    available: rooms.filter((r) => r.status === 'available').length,
+    available: rooms.filter(sellable).length,
     occupied: rooms.filter((r) => r.status === 'occupied').length,
     // A vacant room off service (G4): maintenance, or out of service until further notice.
     maintenance: rooms.filter((r) => r.status !== 'occupied' && (r.service_status ?? 'in_service') === 'maintenance').length,
@@ -366,7 +371,8 @@ export default function FrontDesk() {
   }, [calReservations, calDate])
 
   const availableOnDate = useMemo(
-    () => rooms.filter((r) => r.status !== 'maintenance' && !occupiedOnDate.has(r.id)),
+    // Only rooms in service can be sold (G4); occupancy comes from the stays.
+    () => rooms.filter((r) => inService(r) && !occupiedOnDate.has(r.id)),
     [rooms, occupiedOnDate],
   )
 
@@ -1334,9 +1340,10 @@ function ReservationModal({
               <Form.Label>Room</Form.Label>
               <Form.Select value={form.room_id} onChange={set('room_id')} required>
                 {rooms.map((r) => (
-                  <option key={r.id} value={r.id} disabled={!stayEnded && r.status !== 'available' && r.id !== reservation?.room_id}>
+                  <option key={r.id} value={r.id} disabled={!stayEnded && !sellable(r) && r.id !== reservation?.room_id}>
                     {r.room_number} — {r.room_type ?? 'Room'}
-                    {r.status !== 'available' ? ` (${roomStatusLabel(r.status)})` : ''}
+                    {r.status === 'occupied' ? ` (${roomStatusLabel('occupied')})`
+                      : !inService(r) ? ` (${roomServiceLabel(r.service_status)})` : ''}
                   </option>
                 ))}
               </Form.Select>

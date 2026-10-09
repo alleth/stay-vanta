@@ -99,7 +99,7 @@ function CollectedTodayKpi({ revenue, pos }) {
   return (
     <SummaryGroup label="Net collected today">
       <div className="sv-serif text-[1.75rem] font-bold leading-none tabular-nums">
-        {formatMoney(revenue.net ?? revenue.collected)}
+        {formatMoney(revenue.net)}
       </div>
       <div className="mt-1 text-xs text-muted">
         {revenue.refunded > 0 ? `${formatMoney(revenue.collected)} collected less refunds` : 'collected'}

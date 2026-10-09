@@ -84,8 +84,8 @@ class CollectionFiguresApiTest extends TestCase
         return $this->responseJson();
     }
 
-    /** The collection report: new path first, old path kept until it's removed. */
-    private const COLLECTIONS = ['/api/finance/collections', '/api/reports/daily-collection'];
+    /** The collection report (the old /reports path was removed in G8; the figures are unchanged). */
+    private const COLLECTIONS = ['/api/finance/collections'];
 
     public function testTodaysCollection(): void
     {
@@ -143,9 +143,8 @@ class CollectionFiguresApiTest extends TestCase
         $pastIsThisYear = $this->past->setTimezone(BusinessTime::timezone())->format('Y')
             === BusinessTime::now()->format('Y');
         $new = $this->getJson($this->adminToken, '/api/finance/summary')['summary'];
-        $old = $this->getJson($this->adminToken, '/api/reports/admin-dashboard')['dashboard'];
 
-        foreach (['/api/finance/summary' => $new['collected'], 'admin-dashboard' => $old['revenue']] as $path => $by) {
+        foreach (['/api/finance/summary' => $new['collected']] as $path => $by) {
             $this->assertEquals(1250, $by['week'], $path);
             $this->assertEquals(1250, $by['month'], $path);
             $this->assertEquals($pastIsThisYear ? 1720 : 1250, $by['ytd'], $path);
@@ -153,13 +152,12 @@ class CollectionFiguresApiTest extends TestCase
         }
         $this->assertEquals(450, $new['outstanding']['total']);
         $this->assertSame(2, $new['outstanding']['count']);
-        $this->assertEquals(450, $old['outstanding']['total']);
     }
 
     public function testSeasonalityRevenueForThisMonth(): void
     {
         $now = BusinessTime::now();
-        foreach (['/api/finance/seasonality', '/api/reports/monthly-summary'] as $path) {
+        foreach (['/api/finance/seasonality'] as $path) {
             $report = $this->getJson($this->adminToken, $path . '?year=' . $now->format('Y'))['report'];
             $month = $report['months'][(int)$now->format('n') - 1];
 
@@ -169,7 +167,7 @@ class CollectionFiguresApiTest extends TestCase
 
     public function testOperationsCollectedToday(): void
     {
-        foreach (['/api/operations/today', '/api/reports/operations'] as $path) {
+        foreach (['/api/operations/today'] as $path) {
             $ops = $this->getJson($this->receptionistToken, $path)['operations'];
 
             $this->assertEquals(1250, $ops['revenue_today']['collected'], $path);

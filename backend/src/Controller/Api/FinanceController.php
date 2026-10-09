@@ -15,10 +15,8 @@ use Cake\I18n\Date;
  * Finance: money the property has collected and is still owed.
  *
  * GET /api/finance/collections, /api/finance/summary, /api/finance/seasonality.
- * The old /api/reports/daily-collection, /admin-dashboard and /monthly-summary
- * routes point here too until they're removed (build step 3 compatibility
- * window). Every figure comes from App\Model\Finance\Collections, the one
- * definition of Collected and Outstanding (build step 7a).
+ * Every figure comes from App\Model\Finance\Collections, the one definition
+ * of Collected and Outstanding (build step 7a).
  */
 class FinanceController extends AppController
 {
@@ -45,47 +43,9 @@ class FinanceController extends AppController
                 'net' => $f['net'],
             ], $periods),
             'outstanding' => $money->outstanding(),
-            'model' => Collections::model(),
+            'model' => Collections::MODEL_CASH,
         ]);
         $this->viewBuilder()->setOption('serialize', ['summary']);
-    }
-
-    /**
-     * GET /api/reports/admin-dashboard  (Manager only) — the old response
-     * shape, kept until the old route is removed. New code calls summary().
-     */
-    public function adminDashboard(): void
-    {
-        $this->authorize(Permissions::FINANCE_ANALYTICS_VIEW, 'Only a Manager can view revenue by period.');
-        $propertyId = (int)$this->effectivePropertyId();
-
-        $inventoryItems = $this->fetchTable('InventoryItems')
-            ->find()->where(['property_id' => $propertyId])->count();
-
-        $occupiedRooms = $this->fetchTable('Rooms')
-            ->find()->where(['property_id' => $propertyId, 'status' => 'occupied'])->count();
-
-        $guestsToday = $this->countDistinct(
-            $this->fetchTable('Reservations')
-                ->find()
-                ->where(['property_id' => $propertyId, 'status' => 'checked_in', 'guest_id IS NOT' => null]),
-            'guest_id',
-        );
-
-        $openFoodOrders = $this->fetchTable('FoodOrders')
-            ->find()->where(['property_id' => $propertyId, 'status' => 'open'])->count();
-
-        $this->set('dashboard', [
-            'cards' => [
-                'inventory_items' => $inventoryItems,
-                'occupied_rooms' => $occupiedRooms,
-                'guests_today' => $guestsToday,
-                'open_food_orders' => $openFoodOrders,
-            ],
-            'revenue' => $this->money($propertyId)->byPeriod(),
-            'outstanding' => $this->money($propertyId)->outstanding(),
-        ]);
-        $this->viewBuilder()->setOption('serialize', ['dashboard']);
     }
 
     /**
@@ -195,10 +155,7 @@ class FinanceController extends AppController
 
         $money = $this->money($propertyId);
         $figures = $money->figures($from, $to);
-        // Under the historical (rollback) model refunds aren't a figure of their own.
-        $refunds = Collections::model() === Collections::MODEL_CASH
-            ? $this->describeRefunds($money->refunds($from, $to))
-            : [];
+        $refunds = $this->describeRefunds($money->refunds($from, $to));
 
         $this->set('collection', [
             'scope' => $scope,
@@ -214,7 +171,7 @@ class FinanceController extends AppController
             'refunds' => $refunds,
             // Not part of the window: what's still owed right now.
             'outstanding' => $money->outstanding(),
-            'model' => Collections::model(),
+            'model' => Collections::MODEL_CASH,
         ]);
         $this->viewBuilder()->setOption('serialize', ['collection']);
     }

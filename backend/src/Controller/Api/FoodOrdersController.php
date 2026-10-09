@@ -181,14 +181,11 @@ class FoodOrdersController extends AppController
 
         // An order that has been both served and paid is closed business:
         // reversing it takes pos.sale.cancel_paid (a Manager), not just
-        // pos.sale.manage, and a reason. The reason is accepted but not yet
-        // required until the POS that sends one has replaced the old one
-        // (FoodOrderEventsTable::REASON_GRACE; required from the cleanup release).
+        // pos.sale.manage, and a reason (required since G8 closed the grace).
         if ($order->status === 'served' && $order->payment_status === 'paid') {
             $this->authorizeElevated(
                 Permissions::POS_SALE_CANCEL_PAID,
                 'A paid, served order can only be cancelled by a Manager.',
-                reasonOptional: true,
             );
         }
 

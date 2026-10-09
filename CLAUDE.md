@@ -28,8 +28,9 @@ Implementation Plan (links in the user's memory, not in the repo).
 
 **Names below are the official ones, in the code since the naming release (step 3, 2026-10-02).**
 Old addresses forward (`/dashboard` for hotel staff → `/operations`, `/revenue` → `/finance`,
-`/food` → `/pos`), and the old `/api/reports/*` and `/reservations/{id}/payment` routes still
-answer until they're removed a release later; never call them from new code.
+`/food` → `/pos`). The old `/api/reports/*` and `/reservations/{id}/payment` routes were removed
+in G8, along with the API's catch-all `/api/<controller>/<action>` routes: an API action is reached
+only through a named route in `config/routes.php`.
 
 ### Principles
 1. **One module per business area**, named with a noun (never a page type like "Dashboard" or a
@@ -224,8 +225,8 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   its per-property check is logged). `FeedEquivalenceApiTest` keeps the old two-table merge as the
   reference the feed must match. Expected 4xx answers are logged as
   one `info` line (`App\Error\AppErrorLogger`), not as errors. Approved decisions (2026-10-03): hybrid tables,
-  POS as the pilot ledger, a reason for `pos.sale.cancel_paid` (accepted-not-required until the
-  cleanup release: `REASON_GRACE`), minimal snapshots (guest id + display name only) with one
+  POS as the pilot ledger, a reason for `pos.sale.cancel_paid` (required since G8 closed its
+  `REASON_GRACE`; no ledger has a grace entry left), minimal snapshots (guest id + display name only) with one
   controlled redaction routine, CI gates deployment (Railway "Wait for CI", working on staging and
   production since 2026-10-03; see below). **The activity feed becomes an
   event feed** (one line per business event, with who did it) when the invoice and reservation
@@ -251,8 +252,8 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   `ProtectedRoute module="/path"` and `/dashboard`. Scope keeps the Platform Owner on platform
   screens even though they hold some hotel permissions today. Pages use `can()` for what they
   offer; the only role checks left are the staff hierarchy in `Staff.jsx` and display labels.
-  A session without `user.permissions` falls back to `ROLE_FALLBACK` (remove it a release after
-  Phase 1 ships). Every check on the frontend must also exist on the backend.
+  Screens read only `user.permissions` (G8 removed the `ROLE_FALLBACK` role map). Every check on
+  the frontend must also exist on the backend.
 - **Adding an endpoint or permission:** add the catalog row and endpoint-map row to
   `docs/PERMISSIONS.md`, the constant (and grants) to `Permissions`, and a probe to
   `PermissionMatrixApiTest::PROBES` — `testEveryApiRouteHasAProbe` fails on an unmapped route.
@@ -264,10 +265,9 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   platform) from the active membership or the flag; `AppController::access()` holds it, and
   `boundPropertyId()` / `effectivePropertyId()` / `permissions()` read it. New accounts get a
   membership in the same transaction (`membership_granted`); the import (`MembershipImport`)
-  made the rest. `users.role` / `users.property_id` are still written for one release, and an
-  account that never had a membership falls back to them (logged as "membership fallback used";
-  remove it once those lines stop). No active membership and no flag = no access, and sign-in is
-  refused. Test users get their membership from `ApiScenarioTrait::makeUser()`.
+  made the rest. `users.role` / `users.property_id` are still written (the staff hierarchy and
+  Phase 3 read them) but never read for access: G8 removed the membership and "owner with no
+  property" fallbacks. No active membership and no flag = no access, and sign-in is refused. Test users get their membership from `ApiScenarioTrait::makeUser()`.
   **Part 2 (built):** the platform flag grants only `platform.*`, `settings.property.view` and
   `staff.account.*` (the 24 † grants are gone, F3 closed). Hotel data only through a **support
   session** (A6, `SupportSessionsController`, `support_sessions`): read-only (the Manager preset's
@@ -577,10 +577,10 @@ would make the key attacker-controlled.
   2026-10-03 as D1–D8). `figures($from, $to)` / `figuresOn($day)` / `figuresByPeriod()` return
   Collected (cash in), Refunded (cash out) and Net Collected; `refunds()` lists them;
   `outstanding()` is open invoices. Finance and Operations read every money figure from it; never
-  write a second money query. `App.collectedModel` (`APP_COLLECTED_MODEL`, default `cash`) =
-  `historical` is the one-release rollback switch (`historical()`: a refund lowers the day its
-  invoice or sale was collected). `App\Model\Finance\Restatement` (`bin/cake cash_restatement`,
-  read-only) lists what differs between the two models per property.
+  write a second money query. Reports are always cash movement (G8 retired the
+  `APP_COLLECTED_MODEL` switch, L-D4). `historical()` (a refund lowers the day its invoice or sale
+  was collected) survives only for `App\Model\Finance\Restatement` (`bin/cake cash_restatement`,
+  read-only), which lists what differs between the two models per property.
 - **Collected = cash in**: settled invoices at the full amount settled (by `settled_at`, stamped in
   `InvoicesTable::settle`) + `paid` `food_orders.total` (by `created`; a later cancellation doesn't
   undo it). **Refunded = cash out** on the day it went back: `refunded` / `refunded_on_cancel`

@@ -37,8 +37,9 @@ Approved 2026-10-03. They explain the catalog; follow them when you add to it.
   foundation exists (steps 5–8). In Phase 1 this is only a flag.
 - **New modules define their permissions before implementation**, as part of the design review:
   catalog rows, endpoint map rows and access-matrix probes land with the first endpoint.
-- **Gates are on actions, not routes.** The API scope has `fallbacks()`, so an action can also be
-  reached at `/api/<controller>/<action>`. A check inside the action covers every route to it.
+- **Gates are on actions, not routes.** A check inside the action covers every route to it. The
+  API scope has no catch-all routes (removed in G8): an action is reachable only through a named
+  route below, and every named route has an access-matrix probe.
 - **Screens combine permission, scope and context, never permission alone.** A Hub tile or route
   opens for a person in its scope (platform or property) who holds its permission
   (`frontend/src/nav.js`, `canOpen()`). The Platform Owner holds some hotel permissions today and
@@ -118,13 +119,13 @@ several properties.
 
 | Endpoint (action) | Permission | Notes |
 |---|---|---|
-| `GET /platform/dashboard`, `GET /reports/owner-dashboard` | `platform.dashboard.view` | |
+| `GET /platform/dashboard` | `platform.dashboard.view` | |
 | `POST /properties`, `PATCH/PUT /properties/{id}` | `platform.property.manage` | |
 | `GET /properties` | `settings.property.view` | Staff see their own property only; the Platform Owner sees all, with Managers (scope, not permission) |
-| `GET /operations/today`, `GET /reports/operations` | `operations.today.view` | Staff and activity sections only with `operations.staff.view` |
-| `GET /operations/activity`, `GET /reports/activity` | `operations.staff.view` | |
-| `GET /finance/collections`, `GET /reports/daily-collection` | `finance.collections.view` | A month or date range also needs `finance.collections.view_range` |
-| `GET /finance/summary`, `GET /reports/admin-dashboard`, `GET /finance/seasonality`, `GET /reports/monthly-summary` | `finance.analytics.view` | |
+| `GET /operations/today` | `operations.today.view` | Staff and activity sections only with `operations.staff.view` |
+| `GET /operations/activity` | `operations.staff.view` | |
+| `GET /finance/collections` | `finance.collections.view` | A month or date range also needs `finance.collections.view_range` |
+| `GET /finance/summary`, `GET /finance/seasonality` | `finance.analytics.view` | |
 | `GET /invoices`, `GET /invoices/{id}`, `GET /receipt-series` | `finance.invoice.view` | Booklets are listed to settle against |
 | `POST /invoices/{id}/settle` | `finance.invoice.settle` | Locked, recorded once; a second settle is 400 |
 | `POST /reservations/{id}/reverse-room-charge` | `finance.invoice.reverse` | Front Desk's Reverse room charge: needs `reason`; open invoice only |
@@ -132,11 +133,11 @@ several properties.
 | `POST /invoices/{id}/refund` | `finance.invoice.refund` | Needs `reason`, `amount`, `method`; settled invoices only, up to what's refundable; a repeated `refund_key` is 409 (build step 7c) |
 | `POST/PATCH/PUT/DELETE /receipt-series…` | `finance.receipt_series.manage` | |
 | `GET /reservations`, `GET /reservations/stats` | `front_desk.reservation.view` | |
-| `POST /reservations`, `PATCH/PUT /reservations/{id}` (a booking), `POST /reservations/{id}/{transition}`, `POST /reservations/{id}/post-room-charge`, `POST /reservations/{id}/payment` (legacy) | `front_desk.reservation.manage` | |
+| `POST /reservations`, `PATCH/PUT /reservations/{id}` (a booking), `POST /reservations/{id}/{transition}`, `POST /reservations/{id}/post-room-charge` | `front_desk.reservation.manage` | |
 | Booking or moving a check-in before today | `front_desk.reservation.backdate` | Rule kept: a walk-in without it is forced to today, not refused. Needs `reason` (step 8) |
 | Editing a checked-in/checked-out stay | `front_desk.reservation.correct` | Refused with **400**, not 403, today; Phase 1 keeps the status code. Needs `reason` (step 8) |
 | `DELETE /reservations/{id}` | `front_desk.reservation.delete` | Soft delete; needs `reason` (step 8) |
-| `GET /guests`, `/guests/stats`, `/guests/match`, `/guests/{id}`, `POST /guests/search`, `POST /guests/match` | `guests.guest.view` | The POST forms carry search text and match details in the body, never the URL (G5, P6); the GET forms stay one release |
+| `GET /guests`, `/guests/stats`, `/guests/{id}`, `POST /guests/search`, `POST /guests/match` | `guests.guest.view` | Search text and match details travel in the body, never the URL (G5, P6); `GET /guests?q=` is refused (G8) |
 | `POST /guests`, `PATCH/PUT /guests/{id}` | `guests.guest.manage` | Recorded in `guest_events` (G3). Creating despite look-alike guests (`force`) and renaming need `reason`; an edit that changes nothing is 400 |
 | `GET /food-orders`, `GET /food-orders/{id}`, `GET /food-menu-items` | `pos.sale.view` | |
 | `POST /food-orders`, `/food-orders/{id}/serve`, `/food-orders/{id}/cancel` | `pos.sale.manage` | Cancelling a served and paid order also needs `pos.sale.cancel_paid`; `refund: {returned, method}` records money returned for a paid sale (needs `reason`) |

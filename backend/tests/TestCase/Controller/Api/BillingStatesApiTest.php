@@ -248,20 +248,27 @@ class BillingStatesApiTest extends TestCase
         $this->assertSame(0, $this->chargeLines($id));
     }
 
-    public function testTheOldPaymentPathPostsButNoLongerMarksUnpaid(): void
+    /**
+     * G8 removed the old Mark paid path; posting goes through
+     * post-room-charge, and the old payment_status filter is refused rather
+     * than ignored (nothing keeps payment_status true).
+     */
+    public function testTheOldPaymentPathAndFilterAreGone(): void
     {
         $id = $this->stay();
 
         $this->callAs($this->receptionistToken, 'POST', "/api/reservations/$id/payment", ['payment_status' => 'paid']);
+        $this->assertResponseCode(404);
+        $this->assertSame(0, $this->chargeLines($id), 'nothing posted');
+
+        $this->callAs($this->receptionistToken, 'POST', "/api/reservations/$id/post-room-charge");
         $this->assertResponseOk((string)$this->_response->getBody());
         $this->assertSame('billed', $this->listed($id)['billing_state']);
 
-        foreach ([$this->receptionistToken, $this->adminToken] as $token) {
-            $this->callAs($token, 'POST', "/api/reservations/$id/payment", ['payment_status' => 'unpaid']);
-            $this->assertResponseCode(400);
-        }
-        $this->assertSame('paid', $this->getTableLocator()->get('Reservations')->get($id)->payment_status);
-        $this->assertGreaterThan(0, $this->chargeLines($id), 'the posted charge stays');
+        $this->callAs($this->receptionistToken, 'GET', '/api/reservations?payment_status=unpaid');
+        $this->assertResponseCode(400);
+        $this->callAs($this->receptionistToken, 'GET', '/api/reservations/stats');
+        $this->assertArrayNotHasKey('unpaid', $this->responseJson());
     }
 
     public function testAnUnknownBillingFilterIsRejected(): void

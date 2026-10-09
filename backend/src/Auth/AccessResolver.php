@@ -5,8 +5,6 @@ namespace App\Auth;
 
 use App\Model\Entity\User;
 use App\Model\Subscription;
-use App\Model\Table\RolesTable;
-use Cake\Log\Log;
 use Cake\ORM\TableRegistry;
 
 /**
@@ -20,11 +18,9 @@ use Cake\ORM\TableRegistry;
  * grants, or, while a support session is open, read-only access to that one
  * property (Permissions::supportGrants()).
  *
- * Fallback for one release (CLAUDE.md, Permission strategy): an account that
- * has never had a membership (made outside the API and the import) is read
- * from `users.role` / `users.property_id`, and every use is logged, so the
- * fallback can be removed once those lines stop appearing. An account whose
- * membership was ended gets nothing.
+ * There is no other way in (G8 removed the one-release fallbacks): no active
+ * membership and no platform flag means no access. `users.role` /
+ * `users.property_id` are never read for access.
  */
 final class AccessResolver
 {
@@ -33,11 +29,7 @@ final class AccessResolver
      */
     public function resolve(User $user): Access
     {
-        if ($user->get('is_platform') || ($user->role === 'owner' && $user->property_id === null)) {
-            if (!$user->get('is_platform')) {
-                Log::warning(sprintf('platform flag fallback used for user %d (role owner, no flag)', (int)$user->id));
-            }
-
+        if ($user->get('is_platform')) {
             // An open support session (A6): that one property, read-only.
             $session = TableRegistry::getTableLocator()->get('SupportSessions')->find('open')
                 ->where(['SupportSessions.user_id' => $user->id])
@@ -80,22 +72,6 @@ final class AccessResolver
                 (int)$membership->get('property_id'),
                 $membership->get('role')?->get('code'),
                 (int)$membership->get('id'),
-            );
-        }
-
-        $everHad = $memberships->exists(['user_id' => $user->id]);
-        if (
-            !$everHad
-            && $user->property_id !== null
-            && array_key_exists((string)$user->role, RolesTable::PRESETS)
-        ) {
-            Log::warning(sprintf('membership fallback used for user %d (no membership on record)', (int)$user->id));
-
-            return $this->underSubscription(
-                Permissions::forRole($user->role)->toArray(),
-                (int)$user->property_id,
-                $user->role,
-                null,
             );
         }
 

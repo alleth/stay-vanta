@@ -214,25 +214,27 @@ class CashMovementTest extends TestCase
         $this->assertEquals(['not_recorded' => 900], $this->responseJson()['collection']['refunded']['by_method']);
     }
 
-    public function testTheHistoricalSettingGivesTheOldFiguresBack(): void
+    /**
+     * G8 (L-D4): the rollback switch is gone, so reports are cash movement
+     * whatever the old setting says; the model before 7c-2 is still computed,
+     * only for the read-only restatement comparison.
+     */
+    public function testTheOldModelSurvivesOnlyForTheComparison(): void
     {
         Configure::write('App.collectedModel', 'historical');
         try {
-            foreach (['2026-09-28' => 100.0, '2026-10-02' => 500.0, '2026-10-03' => 500.0] as $day => $total) {
-                $this->callAs($this->adminToken, 'GET', "/api/finance/collections?date=$day");
-                $this->assertResponseOk();
-                $c = $this->responseJson()['collection'];
-                $this->assertEquals($total, $c['total'], "Collected on $day as before 7c-2");
-                $this->assertEquals(0, $c['refunded']['total']);
-                $this->assertSame('historical', $c['model']);
-            }
-            // Refund events count against the day their invoice or sale was collected.
-            $m = (new Collections($this->events))->figuresOn('2026-10-02');
-            $this->assertSame(300.0, $m['net']);
-            $m = (new Collections($this->events))->figuresOn('2026-10-03');
-            $this->assertSame(0.0, $m['net']);
+            $this->callAs($this->adminToken, 'GET', '/api/finance/collections?date=2026-10-02');
+            $this->assertResponseOk();
+            $c = $this->responseJson()['collection'];
+            $this->assertSame('cash', $c['model'], 'the old setting is ignored');
+            $this->assertEquals(-400.0, $c['net']);
         } finally {
             Configure::delete('App.collectedModel');
         }
+        // Refund events count against the day their invoice or sale was collected.
+        $money = new Collections($this->events);
+        $day = fn(string $d) => [BusinessTime::startOf($d), BusinessTime::endOf($d)];
+        $this->assertSame(300.0, $money->historical(...$day('2026-10-02'))['net']);
+        $this->assertSame(0.0, $money->historical(...$day('2026-10-03'))['net']);
     }
 }

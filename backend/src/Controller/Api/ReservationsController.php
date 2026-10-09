@@ -59,7 +59,7 @@ class ReservationsController extends AppController
     ];
 
     /**
-     * GET /api/reservations[?status=][?payment_status=][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]
+     * GET /api/reservations[?status=][?billing=not_billed][?since=YYYY-MM-DD][?on_date=YYYY-MM-DD][?page=&limit=]
      *   → {reservations, total, page, limit}
      *
      * - `since`: the Front Desk table's "fresh start" window — stays still in
@@ -98,17 +98,11 @@ class ReservationsController extends AppController
             $query->where(['Reservations.status' => $status]);
         }
 
-        // `payment_status=unpaid` is the Unpaid card's list: the same set it
-        // counts (see stats()), so a cancelled booking never shows as owing.
-        $paymentStatus = $this->request->getQuery('payment_status');
-        if ($paymentStatus !== null && $paymentStatus !== '') {
-            if (!in_array($paymentStatus, ReservationsTable::PAYMENT_STATUSES, true)) {
-                throw new BadRequestException('payment_status must be unpaid or paid.');
-            }
-            $query->where(['Reservations.payment_status' => $paymentStatus]);
-            if ($paymentStatus === 'unpaid') {
-                $query->where(['Reservations.status !=' => 'cancelled']);
-            }
+        // The old Unpaid list read `payment_status`, which nothing keeps true
+        // (the invoice is the source of truth). Refused rather than ignored, so
+        // a caller never mistakes the whole list for the unpaid ones (G8).
+        if ((string)$this->request->getQuery('payment_status') !== '') {
+            throw new BadRequestException('payment_status is no longer a filter: use billing=not_billed.');
         }
 
         // `billing=not_billed`: the Front Desk "not billed" figure and Finance →
@@ -171,14 +165,10 @@ class ReservationsController extends AppController
     }
 
     /**
-     * GET /api/reservations/stats → {booked, checked_out_today, cancelled_today, unpaid, open_invoices}
+     * GET /api/reservations/stats → {booked, checked_out_today, cancelled_today, not_billed, open_invoices}
      *
      * The Front Desk summary cards, counted in the database rather than from
      * whatever page of reservations the table happens to have loaded.
-     *
-     * `unpaid` is every reservation still marked unpaid that isn't cancelled —
-     * a stay already checked out without being paid is exactly the one to
-     * chase, so it counts too.
      */
     public function stats(): void
     {
@@ -197,12 +187,6 @@ class ReservationsController extends AppController
                 'Reservations.status' => 'cancelled',
                 'Reservations.cancelled_at >=' => BusinessTime::startOf($today),
             ]),
-            // Old figure, kept for older screens until step 3 settles; new
-            // screens show not_billed.
-            'unpaid' => $count([
-                'Reservations.status !=' => 'cancelled',
-                'Reservations.payment_status' => 'unpaid',
-            ]),
             'not_billed' => $this->notBilled($this->scopeToProperty($reservations->find()))->count(),
             // Every open invoice (room charges, food charged to the room…):
             // money charged but not yet collected until someone settles it.
@@ -212,7 +196,7 @@ class ReservationsController extends AppController
         ]);
         $this->viewBuilder()->setOption(
             'serialize',
-            ['booked', 'checked_out_today', 'cancelled_today', 'unpaid', 'not_billed', 'open_invoices'],
+            ['booked', 'checked_out_today', 'cancelled_today', 'not_billed', 'open_invoices'],
         );
     }
 
@@ -1570,47 +1554,6 @@ class ReservationsController extends AppController
 
         return $ids === [] ? [] : $this->fetchTable('Users')->find()
             ->select(['id', 'name'])->where(['id IN' => $ids])->all()->combine('id', 'name')->toArray();
-    }
-
-    /**
-     * POST /api/reservations/{id}/payment  { payment_status: unpaid|paid }
-     *
-     * A Front Desk operational flag the receptionist toggles once the guest
-     * has settled up — independent of the booking lifecycle and of the
-     * invoice's own settled status (Food & Orders → Invoices).
-     *
-     * Marking a reservation `paid` opens (or reuses) the guest's invoice right
-     * away, ahead of check-out, and posts the room charge onto it immediately
-     * (instead of only at check-out) — so the amount is visible on Food &
-     * Orders → Invoices as soon as the guest has settled up, whether that
-     * happens at check-in or any time before check-out. Any extras ordered
-     * afterwards (additional linens, food) land on that same open tab via
-     * `openInvoiceFor()`'s find-or-create-by-guest lookup.
-     */
-    public function payment(int $id): void
-    {
-        $this->request->allowMethod('post');
-        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
-
-        $reservations = $this->fetchTable('Reservations');
-        $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
-            ->firstOrFail();
-
-        $status = $this->request->getData('payment_status');
-        if (!in_array($status, ReservationsTable::PAYMENT_STATUSES, true)) {
-            throw new BadRequestException('payment_status must be unpaid or paid.');
-        }
-        // "Mark unpaid" only flipped the flag and left the posted charge on the
-        // invoice. It's gone; the audited Reverse room charge (reason required)
-        // arrives with the invoice event records (build step 6).
-        if ($status === 'unpaid') {
-            throw new BadRequestException(
-                "Reversing a room charge isn't available yet. Cancel the reservation to reverse its charges.",
-            );
-        }
-
-        $this->postChargeOrFail($reservation);
-        $this->respondWithReservation($reservation, 200);
     }
 
     /**

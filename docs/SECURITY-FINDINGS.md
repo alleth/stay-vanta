@@ -10,7 +10,7 @@ one fixed before release, so the pattern stays visible.
 
 | | |
 | --- | --- |
-| **Status** | Fixed in the G5 release (staging first, then production on the user's go) |
+| **Status** | Fixed; in production 2026-10-09 (`51ffd14`). G8 removed the GET forms (`GET /guests?q=` refused, `GET /guests/match` gone) |
 | **Severity** | Low to medium: personal data in Railway's log storage, readable by anyone with access to the Railway project; not exposed to the public |
 | **Found** | 2026-10-09, while preparing the G5 retention proposal (reading the Apache log format and the guest API) |
 | **Fixed** | G5, decision P6: guest search and matching send their values in a POST body; the access log records method, path and protocol only, never the query string |

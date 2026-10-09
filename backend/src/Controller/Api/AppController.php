@@ -284,16 +284,11 @@ class AppController extends Controller
      *
      * @param string $permission A Permissions constant.
      * @param string|null $message Refusal message; name roles by their display names.
-     * @param bool $reasonOptional Only for a compatibility window, while a
-     *   released frontend can't send a reason yet (the ledger's REASON_GRACE).
      */
-    protected function authorizeElevated(
-        string $permission,
-        ?string $message = null,
-        bool $reasonOptional = false,
-    ): void {
+    protected function authorizeElevated(string $permission, ?string $message = null): void
+    {
         $this->authorize($permission, $message);
-        if (!$reasonOptional && $this->eventContext()->reason === null) {
+        if ($this->eventContext()->reason === null) {
             throw new ReasonRequiredException();
         }
     }

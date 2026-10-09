@@ -3,8 +3,6 @@ declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
 
-use Cake\Log\Engine\ArrayLog;
-use Cake\Log\Log;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\TestSuite\IntegrationTestTrait;
 use Cake\TestSuite\TestCase;
@@ -187,43 +185,22 @@ class LedgerWritesApiTest extends TestCase
         $this->assertSame(20.0, $this->quantity($this->eggId));
     }
 
-    public function testDuringTheGraceWindowAPaidSaleCanBeCancelledWithoutAReason(): void
+    /**
+     * G8 closed the grace window: a paid, served sale is cancelled only with
+     * a reason, and a refusal changes nothing (no event, no restock).
+     */
+    public function testAPaidSaleIsNotCancelledWithoutAReason(): void
     {
         [$orderId] = $this->placeSale();
         $this->callAs($this->deskToken, 'POST', "/api/food-orders/$orderId/serve");
-        Log::setConfig('grace_test', ['className' => ArrayLog::class, 'levels' => ['warning']]);
-        try {
-            $this->callAs($this->adminToken, 'POST', "/api/food-orders/$orderId/cancel");
-            $this->assertResponseOk();
-            /** @var \Cake\Log\Engine\ArrayLog $log */
-            $log = Log::engine('grace_test');
-            $lines = $log->read();
-        } finally {
-            Log::drop('grace_test');
-        }
+        $this->callAs($this->adminToken, 'POST', "/api/food-orders/$orderId/cancel");
+        $this->assertResponseCode(400);
+        $this->assertResponseContains('A reason is required');
 
-        $cancel = $this->getTableLocator()->get('FoodOrderEvents')->find()
-            ->where(['food_order_id' => $orderId, 'event_type' => 'cancelled_after_payment'])->firstOrFail();
-        $this->assertNull($cancel->reason);
-        // Each use of the grace window is logged: the evidence for closing it.
-        $this->assertCount(1, $lines);
-        $this->assertStringContainsString(
-            "reason grace used: food_order_events cancelled_after_payment recorded without a reason (subject $orderId)",
-            $lines[0],
-        );
-
-        // With a reason, nothing is logged.
-        [$second] = $this->placeSale();
-        $this->callAs($this->deskToken, 'POST', "/api/food-orders/$second/serve");
-        Log::setConfig('grace_test', ['className' => ArrayLog::class, 'levels' => ['warning']]);
-        try {
-            $this->callAs($this->adminToken, 'POST', "/api/food-orders/$second/cancel", ['reason' => 'Wrong table']);
-            /** @var \Cake\Log\Engine\ArrayLog $log */
-            $log = Log::engine('grace_test');
-            $this->assertSame([], $log->read());
-        } finally {
-            Log::drop('grace_test');
-        }
+        $this->assertSame('served', $this->getTableLocator()->get('FoodOrders')->get($orderId)->status);
+        $this->assertSame(['placed', 'served'], $this->getTableLocator()->get('FoodOrderEvents')->find()
+            ->where(['food_order_id' => $orderId])->orderBy(['id' => 'ASC'])->all()->extract('event_type')->toList());
+        $this->assertSame(9.0, $this->quantity($this->riceId), 'nothing restocked');
     }
 
     public function testAnOrdinaryCancelIsCancelledAndHappensOnce(): void

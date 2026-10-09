@@ -248,7 +248,7 @@ class OperationsController extends AppController
                 $status = 'occupied';
             } elseif ($service === 'out_of_service') {
                 $status = 'out_of_service';
-            } elseif ($service === 'maintenance' || $room['status'] === 'maintenance') {
+            } elseif ($service === 'maintenance') {
                 $status = 'maintenance';
             } elseif (isset($reservedRoomIds[(int)$room['id']])) {
                 $status = 'reserved';

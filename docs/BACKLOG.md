@@ -92,9 +92,9 @@ on settled invoices (`finance.invoice.refund`) approved as S1.
   logged on deploy (`bin/cake cash_restatement`). No figure changes.
 - [x] 7c-2: the switch (refund events, UI, reports), `APP_COLLECTED_MODEL=cash|historical` for
   one release. In production 2026-10-04 (`385b5b0`); restatement at the switch: nothing moved.
-- [ ] Cleanup release: remove `APP_COLLECTED_MODEL` / `Collections::historical()` and the two
-  log-only restatement migrations' command once production has run a release on `cash` without
-  a rollback (keep the pre-7c `downpayment_refund` line handling: that history stays).
+- [x] Cleanup release (G8a, L-D4): `APP_COLLECTED_MODEL` removed; `Collections::historical()`
+  kept only for the read-only `bin/cake cash_restatement` comparison (decided 2026-10-09). The
+  pre-7c `downpayment_refund` line handling stays: that history stays.
 - [ ] Settlement and downpayment collection record no payment method (refunds do): add
   `method` to `settled` / `settled_on_creation` so cash in can be reconciled by method too.
 - [ ] A mistaken refund can't be corrected yet: needs a `refund_corrected` event referencing the
@@ -122,10 +122,9 @@ Carry these into steps 6–10:
 ## Smaller items
 
 - [ ] **Step 8 follow-ups (in production 2026-10-04, `d9cda62`).** Cleanup release: stop stamping
-  `reservations.receptionist_id` (legacy since step 8, R6) and drop it from the API. A production
-  probe of a non-existent API path answers 401, not 404 (the fallback routes authenticate before
-  resolving the action), so an unauthenticated probe can't prove a route exists: verify new routes
-  with a signed-in request or the tests.
+  `reservations.receptionist_id` (legacy since step 8, R6) and drop it from the API: G8b (L-D2:
+  the column and its values stay). The catch-all routes that answered 401 for a non-existent API
+  path were removed in G8a: an unknown path now answers 404.
 
 - [ ] **Staging database sleeps when idle (observed 2026-10-04, not a blocker).** Railway stops the
   staging MySQL container about 10 minutes after its last activity ("Received SHUTDOWN from user
