@@ -166,7 +166,11 @@ class MembershipsApiTest extends TestCase
         $this->assertSame([], $this->eventsOf($deskId, 'signed_in'));
     }
 
-    public function testAnAccountThatNeverHadAMembershipFallsBackToItsRoleForOneRelease(): void
+    /**
+     * G8 (L4) removed the one-release fallback: an account that never had a
+     * membership gets nothing from its users.role / users.property_id.
+     */
+    public function testAnAccountThatNeverHadAMembershipHasNoAccess(): void
     {
         $userId = $this->legacyAccount($this->propertyId, 'receptionist', '2026-01-15 03:00:00');
         [$token, $digest] = UsersTable::issueToken();
@@ -175,12 +179,13 @@ class MembershipsApiTest extends TestCase
             ['id' => $userId],
         );
 
+        $this->callAs($token, 'GET', '/api/reservations');
+        $this->assertContains($this->_response->getStatusCode(), [401, 403]);
         $this->callAs($token, 'GET', '/api/auth/me');
-        $this->assertResponseOk();
-        $this->assertSame(
-            Permissions::forRole('receptionist')->toArray(),
-            $this->responseJson()['user']['permissions'],
-        );
+        $permissions = $this->_response->getStatusCode() === 200
+            ? $this->responseJson()['user']['permissions']
+            : [];
+        $this->assertSame([], $permissions, 'no role-based permissions without a membership');
     }
 
     public function testTheImportGivesEachAccountItsMembershipOnceAndInventsNothing(): void

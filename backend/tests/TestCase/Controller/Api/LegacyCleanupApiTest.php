@@ -81,7 +81,7 @@ class LegacyCleanupApiTest extends TestCase
 
         $this->callAs($this->deskToken, 'GET', '/api/guests?q=Url');
         $this->assertResponseCode(400);
-        $this->assertResponseContains('POST /api/guests/search');
+        $this->assertStringContainsString('POST /api/guests/search', (string)$this->responseJson()['message']);
 
         $this->callAs($this->deskToken, 'GET', '/api/guests/match?full_name=Url+Guest');
         $this->assertContains($this->_response->getStatusCode(), [404, 405], 'GET /guests/match is gone');

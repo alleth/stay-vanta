@@ -83,6 +83,16 @@ class ReservationDiscountsApiTest extends TestCase
         $user->set('api_token', $digest);
         $user->set('token_expires', new DateTime('+30 days'));
         $users->saveOrFail($user);
+        // Access comes from a membership (step 10b); G8 removed the fallback
+        // that read users.role for an account without one.
+        $this->getTableLocator()->get('PropertyMemberships')->saveOrFail(
+            $this->getTableLocator()->get('PropertyMemberships')->newEntity([
+                'user_id' => (int)$user->id,
+                'property_id' => $this->propertyId,
+                'role_id' => $this->getTableLocator()->get('Roles')->idFor('receptionist'),
+                'started_at' => new DateTime(),
+            ], ['accessibleFields' => ['*' => true]]),
+        );
 
         $this->authed();
     }
@@ -117,7 +127,7 @@ class ReservationDiscountsApiTest extends TestCase
             $this->getTableLocator()->get('ReservationDiscounts')->deleteAll(['reservation_id IN' => $ids]);
         }
         $reservations->deleteAll(['property_id' => $this->propertyId]);
-        foreach (['Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'Users'] as $name) {
+        foreach (['Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'PropertyMemberships', 'Users'] as $name) {
             $this->getTableLocator()->get($name)->deleteAll(['property_id' => $this->propertyId]);
         }
         // Ledger rows refuse ORM deletes: clear them through the connection.

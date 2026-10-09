@@ -97,6 +97,16 @@ class BackdatedReservationsApiTest extends TestCase
         $user->set('api_token', $digest);
         $user->set('token_expires', new DateTime('+30 days'));
         $users->saveOrFail($user);
+        // Access comes from a membership (step 10b); G8 removed the fallback
+        // that read users.role for an account without one.
+        $this->getTableLocator()->get('PropertyMemberships')->saveOrFail(
+            $this->getTableLocator()->get('PropertyMemberships')->newEntity([
+                'user_id' => (int)$user->id,
+                'property_id' => $this->propertyId,
+                'role_id' => $this->getTableLocator()->get('Roles')->idFor($role),
+                'started_at' => new DateTime(),
+            ], ['accessibleFields' => ['*' => true]]),
+        );
 
         return $token;
     }
@@ -167,7 +177,7 @@ class BackdatedReservationsApiTest extends TestCase
             $this->getTableLocator()->get('InvoiceLines')->deleteAll(['invoice_id IN' => $invoiceIds]);
         }
         $this->getTableLocator()->get('Reservations')->deleteAll(['property_id' => $this->propertyId]);
-        $tables = ['FoodOrders', 'Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'Users'];
+        $tables = ['FoodOrders', 'Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'PropertyMemberships', 'Users'];
         foreach ($tables as $name) {
             $this->getTableLocator()->get($name)->deleteAll(['property_id' => $this->propertyId]);
         }
