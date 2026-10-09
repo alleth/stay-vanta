@@ -83,7 +83,9 @@ final class RetentionRoutine
             $rows = $policy === self::ACCESS_DEVICE_DETAILS
                 ? $this->clearDeviceDetails($cutoff, $now, $dryRun, $propertyId)
                 : $this->clearGuestContactValues($cutoff, $now, $dryRun, $propertyId);
-            $this->recordRun($policy, $table, $cutoff, $rows, $dryRun, $propertyId, $correlation, $now);
+            // A run is dated when it really ran, even a preview of another
+            // date (whose date shows only in its cutoff): never invent a time.
+            $this->recordRun($policy, $table, $cutoff, $rows, $dryRun, $propertyId, $correlation, DateTime::now());
             $result[$policy] = ['cutoff' => $cutoff->format('Y-m-d H:i:s'), 'rows' => $rows, 'dry_run' => $dryRun];
             Log::info(sprintf(
                 'retention %s%s: %d %s row(s) %s (cutoff %s, run %s)',

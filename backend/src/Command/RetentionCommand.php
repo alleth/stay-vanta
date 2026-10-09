@@ -9,9 +9,10 @@ use Cake\Console\Arguments;
 use Cake\Console\ConsoleIo;
 use Cake\Console\ConsoleOptionParser;
 use Cake\Datasource\ConnectionManager;
+use Cake\I18n\DateTime;
 
 /**
- * `bin/cake retention [--dry-run] [--property N]`
+ * `bin/cake retention [--dry-run [--as-of YYYY-MM-DD]] [--property N]`
  *
  * The retention routine (final review G5): clears personal values past their
  * retention period (sign-in device details after 12 months, guest contact
@@ -32,7 +33,8 @@ class RetentionCommand extends Command
         return $parser
             ->setDescription('Clear personal values past their retention period; events are kept.')
             ->addOption('dry-run', ['boolean' => true, 'help' => 'Count what would be cleared; change nothing'])
-            ->addOption('property', ['help' => 'Only this property id']);
+            ->addOption('property', ['help' => 'Only this property id'])
+            ->addOption('as-of', ['help' => 'With --dry-run only: preview as if today were this date (YYYY-MM-DD)']);
     }
 
     /**
@@ -44,9 +46,17 @@ class RetentionCommand extends Command
     {
         /** @var \Cake\Database\Connection $connection */
         $connection = ConnectionManager::get('default');
-        $routine = new RetentionRoutine($connection);
         $propertyId = $args->getOption('property') !== null ? (int)$args->getOption('property') : null;
         $dryRun = (bool)$args->getOption('dry-run');
+        // A preview of a future date never changes anything: clearing early
+        // would cut a retention period short.
+        $asOf = $args->getOption('as-of');
+        if ($asOf !== null && !$dryRun) {
+            $io->error('--as-of previews only: use it with --dry-run.');
+
+            return static::CODE_ERROR;
+        }
+        $routine = new RetentionRoutine($connection, $asOf !== null ? new DateTime((string)$asOf) : null);
 
         foreach ($routine->run($dryRun, $propertyId) as $policy => $r) {
             $io->out(sprintf(

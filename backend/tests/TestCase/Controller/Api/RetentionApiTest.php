@@ -7,6 +7,7 @@ use App\Event\EventContext;
 use App\Model\Table\AccessEventsTable;
 use App\Model\Table\GuestEventsTable;
 use App\Privacy\RetentionRoutine;
+use Cake\Console\TestSuite\ConsoleIntegrationTestTrait;
 use Cake\Database\Connection;
 use Cake\Datasource\EntityInterface;
 use Cake\I18n\DateTime;
@@ -27,6 +28,7 @@ use LogicException;
 class RetentionApiTest extends TestCase
 {
     use ApiScenarioTrait;
+    use ConsoleIntegrationTestTrait;
     use IntegrationTestTrait;
     use LocatorAwareTrait;
 
@@ -180,6 +182,23 @@ class RetentionApiTest extends TestCase
         $this->assertSame([[true, 1], [false, 1]], array_map(fn($r) => [(bool)$r->dry_run, (int)$r->rows_cleared], $runs));
         $this->assertSame('access_events', $runs[1]->table_name);
         $this->assertStringStartsWith('retention-', $runs[1]->correlation_id);
+    }
+
+    public function testAPreviewOfAFutureDateNeverClearsAnything(): void
+    {
+        $event = $this->signIn('-1 month');
+
+        $this->exec('retention --as-of 2099-01-01 --property ' . $this->propertyId);
+        $this->assertExitError('--as-of without --dry-run is refused');
+
+        $this->exec('retention --dry-run --as-of 2099-01-01 --property ' . $this->propertyId);
+        $this->assertExitSuccess();
+        $this->assertOutputContains('would be cleared');
+        $this->assertSame('203.0.113.7', $this->reload('AccessEvents', $event)->client_address, 'a preview changes nothing');
+        $run = $this->getTableLocator()->get('RetentionRuns')->find()
+            ->where(['property_id' => $this->propertyId])->orderBy(['id' => 'DESC'])->firstOrFail();
+        $this->assertTrue((bool)$run->dry_run);
+        $this->assertLessThan($run->cutoff->getTimestamp(), $run->occurred_at->getTimestamp(), 'dated when it really ran, not 2099');
     }
 
     public function testOrdinaryUpdatesOfAnEventStayRefused(): void
