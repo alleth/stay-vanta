@@ -108,7 +108,7 @@ function editBlockReason(r, canCorrect) {
 // three separate tiles for parts of the same whole. Solid saturated fills
 // read correctly in both themes, so the segments need no dark: pairs.
 function RoomsOccupancy({ counts }) {
-  const total = counts.available + counts.occupied + counts.maintenance
+  const total = counts.available + counts.occupied + counts.maintenance + (counts.outOfService ?? 0)
   const pct = (n) => (total > 0 ? `${(n / total) * 100}%` : '0%')
   return (
     <>
@@ -118,10 +118,11 @@ function RoomsOccupancy({ counts }) {
       </div>
       <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-subtle"
         role="img"
-        aria-label={`${counts.occupied} occupied, ${counts.available} vacant, ${counts.maintenance} in maintenance`}>
+        aria-label={`${counts.occupied} occupied, ${counts.available} vacant, ${counts.maintenance} in maintenance, ${counts.outOfService ?? 0} out of service`}>
         <div className="bg-red-500" style={{ width: pct(counts.occupied) }} />
         <div className="bg-emerald-500" style={{ width: pct(counts.available) }} />
         <div className="bg-amber-500" style={{ width: pct(counts.maintenance) }} />
+        <div className="bg-slate-500" style={{ width: pct(counts.outOfService ?? 0) }} />
       </div>
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
         <span className="inline-flex items-center gap-1">
@@ -133,6 +134,11 @@ function RoomsOccupancy({ counts }) {
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-amber-500" />{counts.maintenance} maintenance
         </span>
+        {counts.outOfService > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-slate-500" />{counts.outOfService} out of service
+          </span>
+        )}
       </div>
     </>
   )
@@ -335,7 +341,9 @@ export default function FrontDesk() {
   const counts = useMemo(() => ({
     available: rooms.filter((r) => r.status === 'available').length,
     occupied: rooms.filter((r) => r.status === 'occupied').length,
-    maintenance: rooms.filter((r) => r.status === 'maintenance').length,
+    // A vacant room off service (G4): maintenance, or out of service until further notice.
+    maintenance: rooms.filter((r) => r.status !== 'occupied' && (r.service_status ?? 'in_service') === 'maintenance').length,
+    outOfService: rooms.filter((r) => r.status !== 'occupied' && r.service_status === 'out_of_service').length,
     reservations: resStats.booked,
     checkedOutToday: resStats.checked_out_today,
     cancelledToday: resStats.cancelled_today,
