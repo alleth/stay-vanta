@@ -166,6 +166,8 @@ Reading it:
 ## Staff
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate
   your own account**) · `POST /api/users/{id}/reset-password` (also nulls `api_token`).
+  Since Phase 3d-1 the list (and who you may open: 404 otherwise) is the people with an active
+  membership at the property, and a user row no longer embeds its `property`.
   `GET` → `{users: [{…, role, role_id, role_name, manageable}], assignable_roles: [{id, code, name,
   kind, description, permission_count, holders}]}` (Phase 3a; 3c-2 adds the role's id, kind,
   description, permission count and holder count; built-ins first, then custom roles):

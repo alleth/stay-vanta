@@ -25,7 +25,10 @@ use LogicException;
  *   the window closes;
  * - `snapshotOf($subject)`: the minimal facts to keep as they were then (ids
  *   and display names, never contact details or ID numbers);
- * - optionally `summaryOf($subject, $type)`: what the activity feed shows.
+ * - optionally `summaryOf($subject, $type)`: what the activity feed shows;
+ * - optionally `propertyOfSubject($subject)`: the subject's property when it
+ *   isn't the subject's own `property_id` column (a person's is their
+ *   membership's, Phase 3d-1).
  *
  * Two ways in, both requiring the transaction of the change they describe
  * (if the event can't be written, the change rolls back with it):
@@ -170,7 +173,9 @@ class EventLedgerBehavior extends Behavior
             ));
         }
 
-        $rawProperty = $subject->get('property_id');
+        $rawProperty = method_exists($table, 'propertyOfSubject')
+            ? $table->propertyOfSubject($subject)
+            : $subject->get('property_id');
         if (array_key_exists('propertyId', $options)) {
             if (!$this->getConfig('platformEvents')) {
                 throw new LogicException('Only a ledger with platform events sets an event\x27s property.');

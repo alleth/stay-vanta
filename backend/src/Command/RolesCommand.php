@@ -59,6 +59,18 @@ class RolesCommand extends Command
         }
         $io->out(sprintf('roles: %d custom role(s), each checked against its history', $check['custom_roles'] ?? 0));
         $io->out(sprintf('roles: %d active membership(s), at most one per person', $check['memberships'] ?? 0));
+        $legacy = $check['legacy'] ?? null;
+        if ($legacy !== null) {
+            // Phase 3d: the retiring users.role / users.property_id, compared with the memberships.
+            $io->out(sprintf(
+                'roles: legacy user columns: %d role, %d property, %d platform disagreement(s);'
+                . ' %d staff without an active membership',
+                $legacy['role'],
+                $legacy['property'],
+                $legacy['platform'],
+                $legacy['without_membership'],
+            ));
+        }
         $io->out($check['complete']
             ? sprintf('roles: data, code and history agree (%d event(s))', $check['events'] ?? 0)
             : 'roles: DRIFT: ' . implode('; ', $check['warnings']));

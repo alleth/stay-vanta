@@ -94,15 +94,19 @@ class PermissionsTest extends TestCase
     }
 
     /**
-     * users.role is compatibility-only (Phase 3c-2, C2-D4): a person's role is
-     * their membership's. Only the console's account creation and the one-time
-     * membership import read the column; Phase 3d drops it.
+     * users.role and users.property_id are compatibility-only (Phase 3c-2,
+     * Phase 3d-1): a person's role and property are their membership's, the
+     * Platform Owner is users.is_platform. Only the one-time imports (step
+     * 10a/10b, already run everywhere) read the columns; 3d-3 drops them.
      */
-    public function testNothingReadsTheLegacyRoleColumn(): void
+    public function testNothingReadsTheLegacyUserColumns(): void
     {
-        $allowed = ['Command/CreateUserCommand.php', 'Event/MembershipImport.php'];
-        $pattern = '/\$(?:user|target|subject|this->currentUser)\??->role\b(?!\s*=[^=>])|[\'"]Users\.role[\'"]'
-            . '|\$(?:user|subject)->get\([\'"]role[\'"]\)/';
+        $allowed = ['Event/MembershipImport.php', 'Event/AccessBackfill.php'];
+        // A user entity is $user / $target / currentUser; `$subject` is a
+        // user only for its role (other ledgers' subjects own a property_id).
+        $pattern = '/\$(?:user|target|this->currentUser)\??->(?:role|property_id)\b(?!\s*=[^=>])'
+            . '|\$subject->role\b|[\'"]Users\.(?:role|property_id)[\'"]'
+            . '|\$user->get\([\'"](?:role|property_id)[\'"]\)|\$subject->get\([\'"]role[\'"]\)/';
         $found = [];
         $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(APP));
         foreach ($files as $file) {

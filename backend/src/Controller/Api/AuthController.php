@@ -224,7 +224,8 @@ class AuthController extends AppController
      */
     private function propertyOf(User $user): ?int
     {
-        return $user->property_id !== null ? (int)$user->property_id : null;
+        // Their membership's (Phase 3d-1), the same answer the ledger gives.
+        return $user->is_platform ? null : AccessEventsTable::propertyOfPerson((int)$user->id);
     }
 
     /**

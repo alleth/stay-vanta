@@ -537,9 +537,16 @@ class OperationsController extends AppController
     {
         // Who works here and in what role, from their memberships (Phase 3a):
         // higher roles (more permissions) first, then by name.
+        // People with an active membership here (Phase 3d-1), never users.property_id.
         $candidates = $this->fetchTable('Users')->find()
             ->select(['id', 'name'])
-            ->where(['property_id' => $propertyId, 'is_active' => true, 'is_platform' => false])
+            ->where([
+                'Users.id IN' => $this->fetchTable('PropertyMemberships')->find('active')
+                    ->select(['PropertyMemberships.user_id'])
+                    ->where(['PropertyMemberships.property_id' => $propertyId]),
+                'is_active' => true,
+                'is_platform' => false,
+            ])
             ->disableHydration()
             ->all()->toList();
         $roles = StaffHierarchy::rolesOf(array_map(fn($u) => (int)$u['id'], $candidates), $propertyId);

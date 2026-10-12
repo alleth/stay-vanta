@@ -10,6 +10,7 @@ use App\Model\Table\AccessEventsTable;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
+use Cake\ORM\Query\SelectQuery;
 
 /**
  * Staff management.
@@ -67,9 +68,8 @@ class UsersController extends AppController
     {
         $users = $this->fetchTable('Users')->find()
             ->where(['Users.is_platform' => false])
-            ->contain(['Properties'])
             ->orderBy(['Users.name' => 'ASC']);
-        $list = $this->scopeToProperty($users)->all()->toList();
+        $list = $this->staffAt($users, $this->effectivePropertyId())->all()->toList();
         $roles = StaffHierarchy::rolesOf(array_map(fn($u) => (int)$u->id, $list), $this->boundPropertyId());
         $staff = [];
         foreach ($list as $user) {
@@ -142,8 +142,11 @@ class UsersController extends AppController
             if (!$users->save($user, ['atomic' => false])) {
                 return false;
             }
+            // Recorded before the membership exists, so its property is named
+            // here rather than looked up (Phase 3d-1).
             $this->recordAccess($this->eventContext(), AccessEventsTable::ACCOUNT_CREATED, $user, [
-                'changes' => ['after' => $this->accountValues($user, $role)],
+                'changes' => ['after' => $this->accountValues($user, $role, $propertyId)],
+                'propertyId' => $propertyId,
             ]);
             $this->grantMembership($user, $role, $propertyId);
 
@@ -513,14 +516,15 @@ class UsersController extends AppController
      * email address (contact details stay out of ledgers).
      *
      * @param array{id: int, code: string, name: string} $role The role it starts with.
+     * @param int $propertyId Where it starts.
      * @return array<string, mixed>
      */
-    private function accountValues(User $user, array $role): array
+    private function accountValues(User $user, array $role, int $propertyId): array
     {
         return [
             'name' => $user->name,
             'role' => $this->roleValues($role),
-            'property_id' => $user->property_id !== null ? (int)$user->property_id : null,
+            'property_id' => $propertyId,
             'is_active' => (bool)$user->is_active,
         ];
     }
@@ -562,12 +566,29 @@ class UsersController extends AppController
         $users = $this->fetchTable('Users');
         $query = $users->find()->where(['Users.id' => $id, 'Users.is_platform' => false]);
 
-        // Property staff are confined to their own property.
+        // Property staff are confined to their own property: people with an
+        // active membership there (Phase 3d-1), never users.property_id.
         if ($this->boundPropertyId() !== null) {
-            $query->where(['Users.property_id' => $this->boundPropertyId()]);
+            $this->staffAt($query, $this->boundPropertyId());
         }
 
         return $query->firstOrFail();
+    }
+
+    /**
+     * Narrow a Users query to the people working at a property: an active
+     * membership there (Phase 3d-1). No property: the platform's view of
+     * everyone; property staff without one see nobody.
+     */
+    private function staffAt(SelectQuery $query, ?int $propertyId): SelectQuery
+    {
+        if ($propertyId === null) {
+            return $this->access()->platform ? $query : $query->where(['1 = 0']);
+        }
+
+        return $query->where(['Users.id IN' => $this->fetchTable('PropertyMemberships')->find('active')
+            ->select(['PropertyMemberships.user_id'])
+            ->where(['PropertyMemberships.property_id' => $propertyId])]);
     }
 
     /**

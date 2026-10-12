@@ -8,6 +8,7 @@ use ArrayObject;
 use Cake\Datasource\EntityInterface;
 use Cake\Event\EventInterface;
 use Cake\ORM\Table;
+use Cake\ORM\TableRegistry;
 
 /**
  * Access ledger (build step 10, approved 2026-10-05): every change to who can
@@ -152,6 +153,40 @@ class AccessEventsTable extends Table
         if ($entity->isNew()) {
             $entity->set('scope', $entity->get('property_id') === null ? self::SCOPE_PLATFORM : self::SCOPE_PROPERTY);
         }
+    }
+
+    /**
+     * The property of an event about a person (EventLedgerBehavior hook):
+     * none for the Platform Owner, else their membership's.
+     *
+     * @param \Cake\Datasource\EntityInterface $subject The user.
+     */
+    public function propertyOfSubject(EntityInterface $subject): ?int
+    {
+        if ($subject->get('is_platform') || $subject->get('id') === null) {
+            return null;
+        }
+
+        return self::propertyOfPerson((int)$subject->get('id'));
+    }
+
+    /**
+     * Where a person works, for the events about them (Phase 3d-1, 3D-D3):
+     * their active membership's property; else their most recent
+     * membership's; else none (a platform-scope event). Never users.property_id.
+     * Events already recorded keep the property they were recorded with.
+     */
+    public static function propertyOfPerson(int $userId): ?int
+    {
+        $row = TableRegistry::getTableLocator()->get('PropertyMemberships')->find()
+            ->select(['property_id'])
+            ->where(['user_id' => $userId])
+            // Active first (no end), then the latest to start.
+            ->orderBy(fn($exp, $q) => $q->expr('CASE WHEN ended_at IS NULL THEN 0 ELSE 1 END'))
+            ->orderBy(['started_at' => 'DESC', 'id' => 'DESC'])
+            ->disableHydration()->first();
+
+        return $row !== null ? (int)$row['property_id'] : null;
     }
 
     /**

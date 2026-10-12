@@ -361,6 +361,7 @@ final class RoleDefinitions
         if ($duplicated > 0) {
             $result['warnings'][] = "$duplicated person(s) hold more than one active membership";
         }
+        $result['legacy'] = $this->legacyColumns();
         $result['complete'] = $result['warnings'] === [];
         $summary = implode(', ', array_map(fn($k, $v) => "$k $v", array_keys($result['roles']), $result['roles']));
         $line = sprintf(
@@ -374,6 +375,46 @@ final class RoleDefinitions
         $result['complete'] ? Log::info($line) : Log::warning($line);
 
         return $result;
+    }
+
+    /**
+     * How far the retiring columns users.role / users.property_id still agree
+     * with the memberships (Phase 3d-1, its own log line, never part of the
+     * role drift above): values that exist and differ, and property staff
+     * with no active membership (who can't sign in). A warning when anything
+     * differs; never fixed here. Null once the columns are gone (3d-3).
+     *
+     * @return array{role: int, property: int, platform: int, without_membership: int}|null
+     */
+    private function legacyColumns(): ?array
+    {
+        $users = $this->connection->getSchemaCollection()->describe('users');
+        if (!$users->hasColumn('role') || !$users->hasColumn('property_id')) {
+            return null;
+        }
+        $count = fn(string $sql): int => (int)$this->connection->execute($sql)->fetchColumn(0);
+        $active = 'JOIN property_memberships m ON m.user_id = u.id AND m.ended_at IS NULL';
+        $legacy = [
+            'role' => $count("SELECT COUNT(*) FROM users u $active JOIN roles r ON r.id = m.role_id"
+                . ' WHERE u.role IS NOT NULL AND u.role <> r.code'),
+            'property' => $count("SELECT COUNT(*) FROM users u $active"
+                . ' WHERE u.property_id IS NOT NULL AND u.property_id <> m.property_id'),
+            'platform' => $count('SELECT COUNT(*) FROM users u WHERE u.is_platform = 1'
+                . " AND u.role IS NOT NULL AND u.role <> 'owner'"),
+            'without_membership' => $count('SELECT COUNT(*) FROM users u WHERE u.is_platform = 0 AND NOT EXISTS'
+                . ' (SELECT 1 FROM property_memberships m WHERE m.user_id = u.id AND m.ended_at IS NULL)'),
+        ];
+        $line = sprintf(
+            'legacy user columns: %d role and %d property disagreement(s) with memberships, %d platform;'
+                . ' %d staff without an active membership',
+            $legacy['role'],
+            $legacy['property'],
+            $legacy['platform'],
+            $legacy['without_membership'],
+        );
+        $legacy['role'] + $legacy['property'] + $legacy['platform'] > 0 ? Log::warning($line) : Log::info($line);
+
+        return $legacy;
     }
 
     /**

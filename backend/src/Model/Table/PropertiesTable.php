@@ -38,8 +38,8 @@ class PropertiesTable extends Table
         $this->setDisplayField('name');
         $this->setPrimaryKey('id');
         $this->addBehavior('Timestamp');
-
-        $this->hasMany('Users');
+        // Who works here is property_memberships (Phase 3d-1); no association
+        // over users.property_id, which is retired.
     }
 
     public function validationDefault(Validator $validator): Validator

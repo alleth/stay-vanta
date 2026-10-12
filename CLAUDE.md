@@ -269,9 +269,15 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   platform) from the active membership or the flag; `AppController::access()` holds it, and
   `boundPropertyId()` / `effectivePropertyId()` / `permissions()` read it. New accounts get a
   membership in the same transaction (`membership_granted`); the import (`MembershipImport`)
-  made the rest. `users.role` / `users.property_id` are still written (dropped in Phase 3d) but
-  never read for access or for who manages whom: G8 removed the membership and "owner with no
-  property" fallbacks. No active membership and no flag = no access, and sign-in is refused. Test users get their membership from `ApiScenarioTrait::makeUser()`.
+  made the rest. `users.role` / `users.property_id` are still written (Phase 3d: 3d-2 stops
+  writing, 3d-3 archives them to `legacy_user_columns` and drops them) but, since 3d-1, read by
+  nothing at request time: access events take the person's property from their membership
+  (`AccessEventsTable::propertyOfPerson()`), staff lists, `findManageable()` and the Operations
+  Staff card select people with an active membership at the property, and there is no
+  Users↔Properties association. `PermissionsTest` allows only the one-time imports
+  (`MembershipImport`, `AccessBackfill`) to read them; `bin/cake roles --observe` logs how far they
+  still agree with the memberships. G8 removed the membership and "owner with no property"
+  fallbacks. No active membership and no flag = no access, and sign-in is refused. Test users get their membership from `ApiScenarioTrait::makeUser()`.
   **Part 2 (built):** the platform flag grants only `platform.*`, `settings.property.view` and
   `staff.account.*` (the 24 † grants are gone, F3 closed). Hotel data only through a **support
   session** (A6, `SupportSessionsController`, `support_sessions`): read-only (the Manager preset's
@@ -300,8 +306,8 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   account creation or as a role change, after `lockAssignableRole()` (an archive can't race it). A
   role change **ends the membership and starts a new one** at the same moment (never edits
   `role_id`), and events carry roles as `{id, code, name}`. `users.role` is compatibility-only: a
-  built-in's code, empty for a custom-role holder, read by nothing but `create_user` and the
-  import (`PermissionsTest` keeps it so) until 3d drops it. Every signed-in response carries
+  built-in's code, empty for a custom-role holder, read by nothing but the one-time imports
+  (`PermissionsTest` keeps it so) until 3d drops it. Every signed-in response carries
   `X-Permissions-Version` (`Access::version()`, `PermissionsVersionMiddleware`); `AuthContext`
   re-reads `/auth/me` when it changes or after a 403, and the Hub says when access was lost. A
   role-definition edit signs nobody out; a role change, deactivation or password reset does.

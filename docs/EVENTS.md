@@ -290,9 +290,12 @@ whoever acted (the Manager who reset a password, the person signing in). Typed c
 (`property` | `platform`), `user_agent` and `client_address` (sign-ins only, as the edge
 reported them: kept to recognise a sign-in, never used to allow or refuse, A4). **Platform
 events** (the Platform Owner's own account and sign-ins) have no `property_id` (`scope =
-platform`, A2) and are never indexed. **Only account administration is indexed** for the feed
+platform`, A2) and are never indexed. A person's events are recorded at their membership's
+property (Phase 3d-1: the active membership's, else the most recent one's, else none), never
+`users.property_id`; `account_created`, written before the membership exists, names its property.
+Events already recorded keep their property. **Only account administration is indexed** for the feed
 (`FEED_TYPES`: created, deactivated, reactivated, password reset); sign-ins never are (A9).
-Snapshot: `{name, role}` of the person (never their email). Written by `AuthController` and
+Snapshot: `{name, role, role_name}` of the person from their membership (never their email). Written by `AuthController` and
 `UsersController` (and `create_user`, as `system`), each under a `FOR UPDATE` lock on the user
 row, in the change's own transaction.
 

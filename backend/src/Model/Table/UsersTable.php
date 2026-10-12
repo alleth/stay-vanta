@@ -55,8 +55,8 @@ class UsersTable extends Table
         $this->setDisplayField('name');
         $this->setPrimaryKey('id');
         $this->addBehavior('Timestamp');
-
-        $this->belongsTo('Properties');
+        // A person's property is their membership's (Phase 3d-1); no
+        // association over users.property_id, which is retired.
     }
 
     public function validationDefault(Validator $validator): Validator
