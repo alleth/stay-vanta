@@ -6,6 +6,28 @@ one fixed before release, so the pattern stays visible.
 
 ---
 
+## SF-2026-004 · A Manager could switch off or rename a fellow Manager
+
+| | |
+| --- | --- |
+| **Status** | Fixed in Permissions Phase 3a (`1ea4e25`, on staging 2026-10-12; production on the user's go) |
+| **Severity** | Low to medium: a Manager could deactivate (sign out and lock out), reactivate or rename another Manager at the same property, against the documented rule that Managers manage only Front Desk Staff |
+| **Found** | 2026-10-12, while moving the staff hierarchy from role codes to permissions (Phase 3a) |
+| **Fixed** | Phase 3a: `App\Auth\StaffHierarchy` decides who manages whom for every account action (create, edit, reset password, access history): only roles whose permissions are a strict subset of yours |
+| **Exploited** | No: production and staging access events show no account change by a Manager to another Manager |
+
+**What was wrong.** `UsersController::edit()` confined a Manager to their own property but checked
+the role of the account being changed only for a role change. Renaming, deactivating and
+reactivating a peer Manager were allowed, and the Staff screen offered Deactivate on every row but
+your own. Only a peer's password reset was refused, by a separate role-code check. A Manager could
+also read a peer Manager's access history.
+
+**Fix.** Every action on someone else's account requires `StaffHierarchy::manages()` (403
+otherwise); the staff list returns `manageable` and the screens offer only those actions. Tests:
+`StaffHierarchyApiTest::testAManagerManagesFrontDeskStaffButNeverAPeer`.
+
+---
+
 ## SF-2026-003 · Guest names, emails and phone numbers reached infrastructure logs
 
 | | |
