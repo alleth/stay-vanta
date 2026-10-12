@@ -328,17 +328,17 @@ class PermissionMatrixApiTest extends TestCase
     public function testAUserWithNoPermissionsIsRefusedEverywhere(): void
     {
         $token = $this->makeUser($this->propertyId, 'receptionist', 'matrix-none-' . uniqid() . '@example.test');
-        $roles = $this->getTableLocator()->get('Roles');
-        $empty = $roles->saveOrFail($roles->newEntity(
-            ['code' => 'test-none-' . uniqid(), 'name' => 'No grants', 'scope' => 'property'],
-            ['accessibleFields' => ['*' => true]],
-        ));
+        // Through the connection: the app changes roles only through
+        // RoleDefinitions (G7), and this stand-in role is test scaffolding.
+        $connection = $this->getTableLocator()->get('Roles')->getConnection();
+        $connection->insert('roles', ['code' => 'test-none-' . uniqid(), 'name' => 'No grants', 'scope' => 'property']);
+        $emptyId = (int)$connection->getDriver()->lastInsertId('roles');
         $this->getTableLocator()->get('PropertyMemberships')
-            ->updateAll(['role_id' => $empty->id], ['user_id' => $this->userIdFor($token)]);
+            ->updateAll(['role_id' => $emptyId], ['user_id' => $this->userIdFor($token)]);
         try {
             $this->assertRefusedEverywhere($token);
         } finally {
-            $roles->delete($empty);
+            $connection->delete('roles', ['id' => $emptyId]);
         }
     }
 
