@@ -161,6 +161,16 @@ class PermissionMatrixApiTest extends TestCase
         ['GET', '/api/roles', 'settings.role.view'],
         ['GET', '/api/roles/history', 'settings.role.view'],
         ['GET', '/api/platform/role-history', 'platform.dashboard.view'],
+        // The role catalog (Phase 3b). Probes carry no name or reason: an allowed
+        // role is refused with 400 or 404 and nothing is created.
+        ['GET', '/api/platform/roles', 'platform.dashboard.view'],
+        ['POST', '/api/platform/roles', 'platform.role.manage'],
+        ['GET', '/api/platform/roles/{id}', 'platform.dashboard.view'],
+        ['PATCH', '/api/platform/roles/{id}', 'platform.role.manage'],
+        ['POST', '/api/platform/roles/{id}/preview', 'platform.role.manage'],
+        ['POST', '/api/platform/roles/{id}/review', 'platform.role.manage'],
+        ['POST', '/api/platform/roles/{id}/archive', 'platform.role.manage'],
+        ['POST', '/api/platform/roles/{id}/restore', 'platform.role.manage'],
         // Data exports (step 10c): no range in the probe, so a holder gets 400 and nothing is recorded.
         ['GET', '/api/reservations/export', 'front_desk.reservation.export'],
         ['GET', '/api/guests/export', 'guests.guest.export'],

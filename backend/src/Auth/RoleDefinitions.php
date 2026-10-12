@@ -9,6 +9,9 @@ use App\Model\Table\RolePermissionsTable;
 use App\Model\Table\RolesTable;
 use Cake\Database\Connection;
 use Cake\Datasource\EntityInterface;
+use Cake\Http\Exception\BadRequestException;
+use Cake\Http\Exception\ConflictException;
+use Cake\Http\Exception\NotFoundException;
 use Cake\I18n\DateTime;
 use Cake\Log\Log;
 use Cake\ORM\TableRegistry;
@@ -320,6 +323,22 @@ final class RoleDefinitions
                 }
                 $result['roles'][self::PLATFORM_CODE] = count($replayed);
             }
+            // Custom roles (Phase 3b) have no code to match: their history must
+            // replay to the grants they hold.
+            $custom = 0;
+            foreach ($this->roles()->find()->where(['kind' => 'custom'])->all() as $role) {
+                $data = $this->held((int)$role->id);
+                $replayed = $this->replay((int)$role->id);
+                sort($data);
+                sort($replayed);
+                if ($replayed !== $data) {
+                    $result['warnings'][] = "{$role->code}: the history doesn't replay to the grants held";
+                }
+                $custom++;
+            }
+            if ($custom > 0) {
+                $result['roles']['custom roles'] = $custom;
+            }
             $result['events'] = $this->events()->find()->count();
         }
         $result['complete'] = $result['warnings'] === [];
@@ -333,6 +352,202 @@ final class RoleDefinitions
         $result['complete'] ? Log::info($line) : Log::warning($line);
 
         return $result;
+    }
+
+    /**
+     * Create a custom role (Phase 3b, the Platform Owner): blank with the
+     * given permissions, or as a copy of `$copyFromId` with that role's
+     * permissions at this moment (a copy never follows its source later).
+     * Records `role_created` or `role_copied`, then one `permission_granted`
+     * per permission, all under the request's id.
+     *
+     * @param \App\Event\EventContext $context The Platform Owner's request, with its reason.
+     * @param list<string> $permissions For a blank role.
+     */
+    public function createCustom(
+        EventContext $context,
+        string $name,
+        ?string $description,
+        ?int $copyFromId,
+        array $permissions,
+    ): EntityInterface {
+        $name = $this->validName($name);
+
+        $work = function () use ($context, $name, $description, $copyFromId, $permissions) {
+            $this->requireUniqueName($name, null);
+            $source = null;
+            if ($copyFromId !== null) {
+                $source = $this->roles()->find()
+                    ->where(['id' => $copyFromId, 'scope' => 'property'])->epilog('FOR UPDATE')->first();
+                if ($source === null) {
+                    throw new BadRequestException('Choose a role a person can hold at a property to copy.');
+                }
+                $permissions = $this->held((int)$source->id);
+            }
+            $permissions = $this->validPermissions($permissions);
+            $role = $this->roles()->newEntity([
+                'code' => $this->newCode($name),
+                'name' => $name,
+                'description' => $this->cleanDescription($description),
+                'scope' => 'property',
+                'kind' => 'custom',
+                'is_preset' => false,
+                'copied_from_role_id' => $source?->get('id'),
+            ], ['accessibleFields' => ['*' => true]]);
+            $this->roles()->saveOrFail($role, ['roleDefinitions' => true, 'atomic' => false]);
+            if ($source !== null) {
+                $this->record($context, RoleEventsTable::ROLE_COPIED, $role, null, [
+                    'source' => ['id' => (int)$source->id, 'code' => $source->code, 'name' => $source->name],
+                    'template' => $permissions,
+                ]);
+            } else {
+                $this->record($context, RoleEventsTable::ROLE_CREATED, $role, null, [
+                    'role' => ['before' => null, 'after' => $name],
+                ]);
+            }
+            foreach ($permissions as $permission) {
+                $this->addGrant($context, $role, $permission);
+            }
+
+            return $role;
+        };
+
+        return $this->connection->transactional($work);
+    }
+
+    /**
+     * Change a custom role's name, description and/or permissions (Phase 3b).
+     * `$version` is the role's latest event id the editor previewed; a role
+     * changed since is refused (E3b-D2), so nobody overwrites what they didn't
+     * see. Each difference is one event under the request's id.
+     *
+     * @param list<string>|null $permissions The whole new set, or null to leave them.
+     */
+    public function updateCustom(
+        EventContext $context,
+        int $roleId,
+        int $version,
+        ?string $name,
+        ?string $description,
+        ?array $permissions,
+    ): EntityInterface {
+        $work = function () use ($context, $roleId, $version, $name, $description, $permissions) {
+            $role = $this->lockedCustom($roleId);
+            if ($role->get('archived_at') !== null) {
+                throw new BadRequestException('Restore this role before changing it.');
+            }
+            $this->requireVersion((int)$role->id, $version);
+            $changed = 0;
+            if ($name !== null && $this->validName($name) !== $role->get('name')) {
+                $name = $this->validName($name);
+                $this->requireUniqueName($name, (int)$role->id);
+                $before = $role->get('name');
+                $role->set('name', $name);
+                $this->roles()->saveOrFail($role, ['roleDefinitions' => true, 'atomic' => false]);
+                $this->record($context, RoleEventsTable::ROLE_RENAMED, $role, null, [
+                    'name' => ['before' => $before, 'after' => $name],
+                ]);
+                $changed++;
+            }
+            if ($description !== null && $this->cleanDescription($description) !== $role->get('description')) {
+                $before = $role->get('description');
+                $role->set('description', $this->cleanDescription($description));
+                $this->roles()->saveOrFail($role, ['roleDefinitions' => true, 'atomic' => false]);
+                $this->record($context, RoleEventsTable::ROLE_DESCRIPTION_CHANGED, $role, null, [
+                    'description' => ['before' => $before, 'after' => $role->get('description')],
+                ]);
+                $changed++;
+            }
+            if ($permissions !== null) {
+                $wanted = $this->validPermissions($permissions);
+                $held = $this->held((int)$role->id);
+                foreach (array_diff($wanted, $held) as $permission) {
+                    $this->addGrant($context, $role, $permission);
+                    $changed++;
+                }
+                foreach (array_diff($held, $wanted) as $permission) {
+                    $this->removeGrant($context, $role, $permission);
+                    $changed++;
+                }
+            }
+            if ($changed === 0) {
+                throw new BadRequestException('Nothing to change.');
+            }
+
+            return $role;
+        };
+
+        return $this->connection->transactional($work);
+    }
+
+    /**
+     * Archive a custom role: only when no active membership holds it (PH-D6).
+     */
+    public function archive(EventContext $context, int $roleId): EntityInterface
+    {
+        return $this->connection->transactional(function () use ($context, $roleId) {
+            $role = $this->lockedCustom($roleId);
+            if ($role->get('archived_at') !== null) {
+                throw new BadRequestException('This role is already archived.');
+            }
+            $held = TableRegistry::getTableLocator()->get('PropertyMemberships')->find()
+                ->where(['role_id' => (int)$role->id, 'ended_at IS' => null])->count();
+            if ($held > 0) {
+                throw new BadRequestException(sprintf(
+                    'Reassign the %d %s who hold this role first.',
+                    $held,
+                    $held === 1 ? 'person' : 'people',
+                ));
+            }
+            $role->set('archived_at', $context->now);
+            $this->roles()->saveOrFail($role, ['roleDefinitions' => true, 'atomic' => false]);
+            $this->record($context, RoleEventsTable::ROLE_ARCHIVED, $role);
+
+            return $role;
+        });
+    }
+
+    /**
+     * Restore an archived custom role.
+     */
+    public function restore(EventContext $context, int $roleId): EntityInterface
+    {
+        return $this->connection->transactional(function () use ($context, $roleId) {
+            $role = $this->lockedCustom($roleId);
+            if ($role->get('archived_at') === null) {
+                throw new BadRequestException('This role isn\'t archived.');
+            }
+            $role->set('archived_at', null);
+            $this->roles()->saveOrFail($role, ['roleDefinitions' => true, 'atomic' => false]);
+            $this->record($context, RoleEventsTable::ROLE_RESTORED, $role);
+
+            return $role;
+        });
+    }
+
+    /**
+     * Decide a permission new in the catalog for a custom role (PH-D5,
+     * E3b-D3): add it (`permission_granted`) or decline it
+     * (`permission_declined`), with a reason. Either clears the review flag.
+     */
+    public function review(EventContext $context, int $roleId, string $permission, bool $add): EntityInterface
+    {
+        return $this->connection->transactional(function () use ($context, $roleId, $permission, $add) {
+            $role = $this->lockedCustom($roleId);
+            $pending = array_column(RoleCatalog::pendingReview((int)$role->id), 'permission');
+            if (!in_array($permission, $pending, true)) {
+                throw new BadRequestException('This permission isn\'t waiting for a decision on this role.');
+            }
+            if ($add) {
+                $this->addGrant($context, $role, $this->validPermissions([$permission])[0]);
+            } else {
+                $this->record($context, RoleEventsTable::PERMISSION_DECLINED, $role, $permission, [
+                    'permission' => ['before' => false, 'after' => false],
+                ]);
+            }
+
+            return $role;
+        });
     }
 
     /**
@@ -360,31 +575,164 @@ final class RoleDefinitions
         if (!$this->ledgerReady()) {
             return;
         }
+        // An import is dated in the past: today's commit and count would say
+        // something that wasn't true then, so it keeps neither. Otherwise the
+        // impact (R-D6) is the same count the editor shows: active memberships
+        // of active accounts, also by property.
+        $snapshot = [];
+        if ($context->source !== EventContext::SOURCE_IMPORT) {
+            $impact = RoleCatalog::memberships($role);
+            $snapshot = [
+                'commit' => $context->source === EventContext::SOURCE_SYSTEM ? self::commit() : null,
+                'active_memberships' => $impact['total'],
+                'memberships_by_property' => array_column($impact['properties'], 'count', 'name'),
+            ];
+        }
         $this->events()->record($context, $type, $role, [
             'columns' => ['permission' => $permission],
             'changes' => $changes ?: null,
-            // An import is dated in the past: today's commit and count would say
-            // something that wasn't true then, so it keeps neither.
-            'snapshot' => $context->source === EventContext::SOURCE_IMPORT ? [] : [
-                'commit' => self::commit(),
-                'active_memberships' => $this->activeMemberships($role),
-            ],
+            'snapshot' => $snapshot,
         ]);
     }
 
     /**
-     * How many active memberships hold the role now (the platform role: how
-     * many accounts hold the platform flag).
+     * Grant one permission to a role and record it.
      */
-    private function activeMemberships(EntityInterface $role): int
+    private function addGrant(EventContext $context, EntityInterface $role, string $permission): void
     {
-        $locator = TableRegistry::getTableLocator();
-        if ($role->get('code') === self::PLATFORM_CODE) {
-            return $locator->get('Users')->find()->where(['is_platform' => true, 'is_active' => true])->count();
+        $this->grants()->saveOrFail($this->grants()->newEntity(
+            ['role_id' => (int)$role->id, 'permission' => $permission],
+            ['accessibleFields' => ['*' => true]],
+        ), ['roleDefinitions' => true, 'atomic' => false]);
+        $this->record($context, RoleEventsTable::PERMISSION_GRANTED, $role, $permission, [
+            'permission' => ['before' => false, 'after' => true],
+        ]);
+    }
+
+    /**
+     * Revoke one permission from a role and record it.
+     */
+    private function removeGrant(EventContext $context, EntityInterface $role, string $permission): void
+    {
+        $row = $this->grants()->find()->where(['role_id' => (int)$role->id, 'permission' => $permission])->first();
+        if ($row === null) {
+            return;
+        }
+        $this->grants()->deleteOrFail($row, ['roleDefinitions' => true, 'atomic' => false]);
+        $this->record($context, RoleEventsTable::PERMISSION_REVOKED, $role, $permission, [
+            'permission' => ['before' => true, 'after' => false],
+        ]);
+    }
+
+    /**
+     * A custom role under a FOR UPDATE lock; a system role is refused (PH-D1).
+     */
+    private function lockedCustom(int $roleId): EntityInterface
+    {
+        $role = $this->roles()->find()->where(['id' => $roleId, 'scope' => 'property'])->epilog('FOR UPDATE')->first();
+        if ($role === null) {
+            throw new NotFoundException('No such role.');
+        }
+        if ($role->get('kind') !== 'custom') {
+            throw new BadRequestException(
+                'Built-in roles change only with a release. Copy this role to customise it.',
+            );
         }
 
-        return $locator->get('PropertyMemberships')->find()
-            ->where(['role_id' => (int)$role->get('id'), 'ended_at IS' => null])->count();
+        return $role;
+    }
+
+    /**
+     * Refuse a change prepared against an older state of the role (E3b-D2).
+     */
+    private function requireVersion(int $roleId, int $version): void
+    {
+        if (RoleCatalog::version($roleId) !== $version) {
+            throw new ConflictException(
+                'This role changed since you opened it. Reload it to see the latest before saving.',
+            );
+        }
+    }
+
+    /**
+     * A role name: trimmed, 1–60 characters.
+     */
+    private function validName(string $name): string
+    {
+        $name = trim(preg_replace('/\s+/', ' ', $name) ?? '');
+        if ($name === '' || mb_strlen($name) > 60) {
+            throw new BadRequestException('A role name is 1 to 60 characters.');
+        }
+
+        return $name;
+    }
+
+    /**
+     * Role names are unique, whatever their case.
+     */
+    private function requireUniqueName(string $name, ?int $exceptId): void
+    {
+        foreach ($this->roles()->find()->select(['id', 'name'])->disableHydration()->all() as $row) {
+            if ((int)$row['id'] !== $exceptId && mb_strtolower((string)$row['name']) === mb_strtolower($name)) {
+                throw new BadRequestException("There is already a role called \"{$row['name']}\".");
+            }
+        }
+    }
+
+    /**
+     * A new role's code: a slug of its first name, never reused.
+     */
+    private function newCode(string $name): string
+    {
+        $base = trim((string)preg_replace('/[^a-z0-9]+/', '-', strtolower($name)), '-') ?: 'role';
+        $base = substr($base, 0, 24);
+        $taken = $this->roles()->find()->select(['code'])->disableHydration()->all()->extract('code')->toList();
+        $taken = [...$taken, 'owner', 'admin', 'receptionist', self::PLATFORM_CODE];
+        $code = $base;
+        $n = 2;
+        while (in_array($code, $taken, true)) {
+            $code = $base . '-' . $n++;
+        }
+
+        return $code;
+    }
+
+    /**
+     * A description: trimmed, at most 500 characters, null when empty.
+     */
+    private function cleanDescription(?string $description): ?string
+    {
+        $description = trim((string)$description);
+        if (mb_strlen($description) > 500) {
+            throw new BadRequestException('A role description is at most 500 characters.');
+        }
+
+        return $description === '' ? null : $description;
+    }
+
+    /**
+     * A custom role's permissions: property permissions from the catalog,
+     * never `platform.*` (PH-D3), at least one, each once.
+     *
+     * @param array<mixed> $permissions As sent.
+     * @return list<string>
+     */
+    private function validPermissions(array $permissions): array
+    {
+        $list = array_values(array_unique(array_map('strval', $permissions)));
+        if ($list === []) {
+            throw new BadRequestException('A role needs at least one permission.');
+        }
+        foreach ($list as $permission) {
+            if (!in_array($permission, Permissions::ALL, true)) {
+                throw new BadRequestException("\"$permission\" isn't a permission the platform defines.");
+            }
+            if (str_starts_with($permission, 'platform.')) {
+                throw new BadRequestException('Platform permissions are reserved for the Platform Owner.');
+            }
+        }
+
+        return $list;
     }
 
     /**

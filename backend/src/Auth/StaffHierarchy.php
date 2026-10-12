@@ -20,6 +20,13 @@ use Cake\ORM\TableRegistry;
 final class StaffHierarchy
 {
     /**
+     * The kinds of role a person can be given. Custom roles (Phase 3b) are
+     * defined and reviewed first; giving them to people is Phase 3c, which
+     * adds `custom` here. Archived roles are never offered.
+     */
+    public const ASSIGNABLE_KINDS = ['system'];
+
+    /**
      * Whether the actor may manage someone holding `$targetRoleId`.
      */
     public static function manages(Access $actor, ?int $targetRoleId): bool
@@ -49,14 +56,15 @@ final class StaffHierarchy
     }
 
     /**
-     * The roles a person can hold at a property, oldest first.
+     * The roles a person can be given at a property, oldest first.
      *
      * @return list<array{id: int, code: string, name: string}>
      */
     public static function propertyRoles(): array
     {
         $rows = TableRegistry::getTableLocator()->get('Roles')->find()
-            ->select(['id', 'code', 'name'])->where(['scope' => 'property'])
+            ->select(['id', 'code', 'name'])
+            ->where(['scope' => 'property', 'kind IN' => self::ASSIGNABLE_KINDS, 'archived_at IS' => null])
             ->orderBy(['id' => 'ASC'])->disableHydration()->all()->toList();
 
         return array_map(fn($r) => ['id' => (int)$r['id'], 'code' => $r['code'], 'name' => $r['name']], $rows);

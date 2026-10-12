@@ -207,8 +207,25 @@ Reading it:
   spreadsheet would run as a formula is prefixed with an apostrophe.
 
 ## Roles (step 10b)
-- `GET /api/roles` — **Manager** (`settings.role.view`): `{roles: [{code, name, preset, permissions}]}`,
-  read-only; property roles only.
+- `GET /api/roles` — **Manager** (`settings.role.view`): `{roles: [{code, name, description, kind,
+  preset, permissions}]}`, read-only; property roles, built-in (`kind` `system`) and custom, not
+  archived (E3b-D5).
+- **Role catalog (Phase 3b, Platform Owner):**
+  - `GET /api/platform/roles` → `{roles: [{id, code, name, description, kind, archived_at,
+    copied_from: {id, name}|null, permission_count, memberships: {total, properties: [{id, name,
+    count}]}}]}`.
+  - `GET /api/platform/roles/{id}` → `{role: {…as above, version, permissions: [{permission, module,
+    elevated, held, mark: template|initial|added|removed|null}], template: {source, permissions,
+    copied_at}|null, since_creation: {added, removed}, review: [{permission, granted_to, at}]}}`.
+  - `POST /api/platform/roles` `{name, description?, copy_from?, permissions?, reason}` (201): blank
+    with `permissions`, or a copy of role `copy_from` with its permissions then. Property permissions
+    only (`platform.*` refused), at least one; names unique.
+  - `POST /api/platform/roles/{id}/preview` `{permissions, version}` → `{preview: {added, removed,
+    modules_lost, modules_gained, elevated_added, memberships, version, stale}}`; writes nothing.
+  - `PATCH /api/platform/roles/{id}` `{version, name?, description?, permissions?, reason}`: custom
+    roles only (a built-in is 400: copy it); **409 when the role changed since `version`**.
+  - `POST /api/platform/roles/{id}/review` `{permission, decision: add|decline, reason}`;
+    `/archive` (400 while anyone holds it) and `/restore` `{reason}`. Each write answers like `GET`.
 - `GET /api/roles/history[?page=]` — **Manager** (`settings.role.view`), and the same as
   `GET /api/platform/role-history[?page=]` for the **Platform Owner** (`platform.dashboard.view`)
   (G7): `{events: [{id, event, role, role_name, permission, source, reason, changes, commit,

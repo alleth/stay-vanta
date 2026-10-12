@@ -68,6 +68,7 @@ several properties.
 | `platform.property.manage` | PO | Platform Owner (platform flag) | | Platform |
 | `platform.support_access.start` | PO | Platform Owner (platform flag) | yes | Platform |
 | `platform.enforcement.manage` | PO | Platform Owner (platform flag) | yes | Platform |
+| `platform.role.manage` | PO | Platform Owner (platform flag) | yes | Platform |
 | `operations.today.view` | M, FD | Manager, Front Desk, Property Owner, Housekeeping, Maintenance | | Operations |
 | `operations.staff.view` | M | Manager, Property Owner | | Operations |
 | `finance.collections.view` | M, FD | Manager, Front Desk, Accountant, Property Owner, POS Cashier | | Finance |
@@ -171,6 +172,9 @@ several properties.
 | `GET /roles` | `settings.role.view` | Role presets and their permissions, read-only (step 10b) |
 | `GET /roles/history` | `settings.role.view` | Every change to a role definition (G7): what, when, why (the approval), the release and how many memberships held the role |
 | `GET /platform/role-history` | `platform.dashboard.view` | The same role-definition history for the Platform Owner (G7, R-D4) |
+| `GET /platform/roles`, `GET /platform/roles/{id}` | `platform.dashboard.view` | The role catalog and one role's editor data (Phase 3b) |
+| `POST /platform/roles`, `PATCH /platform/roles/{id}`, `POST /platform/roles/{id}/review`, `/archive`, `/restore` | `platform.role.manage` | Create (blank or copy), edit, decide a new catalog permission, archive, restore a custom role; reason required; built-ins refused; a stale `version` is 409 (Phase 3b) |
+| `POST /platform/roles/{id}/preview` | `platform.role.manage` | The impact of a pending change; writes nothing (Phase 3b) |
 | `GET /reservations/export` | `front_desk.reservation.export` | CSV of reservations by check-in date (step 10c); `from`, `to` (YYYY-MM-DD, at most 366 days); recorded (`data_exported`) |
 | `GET /guests/{id}/history` | `guests.guest.view_history` | A guest's history (G3): registrations with where from, each change with before/after, renames and look-alike overrides with their reasons. Managers only (GU1) |
 | `GET /guests/export` | `guests.guest.export` | CSV of guests by registration date (step 10c); no government ID numbers (X3) |

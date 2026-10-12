@@ -112,6 +112,15 @@ export function UsersIcon({ className }) {
   )
 }
 
+export function ShieldIcon({ className }) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  )
+}
+
 export function SettingsIcon({ className }) {
   return (
     <svg {...BASE} className={className}>

@@ -13,10 +13,11 @@ use App\Auth\Permissions;
 class RolesController extends AppController
 {
     /**
-     * GET /api/roles → { roles: [{ code, name, permissions }] }
+     * GET /api/roles → { roles: [{ code, name, description, kind, preset, permissions }] }
      *
-     * The property roles only: the history-only `platform` entry (G7) holds
-     * no grants a person can be given.
+     * The property roles, built-in and custom (E3b-D5: Managers see custom
+     * roles read-only), without archived ones; not the history-only
+     * `platform` entry (G7).
      */
     public function index(): void
     {
@@ -25,8 +26,8 @@ class RolesController extends AppController
 
         $roles = $this->fetchTable('Roles')->find()
             ->contain(['RolePermissions' => fn($q) => $q->select(['role_id', 'permission'])])
-            ->where(['Roles.scope' => 'property'])
-            ->orderBy(['Roles.id' => 'ASC'])
+            ->where(['Roles.scope' => 'property', 'Roles.archived_at IS' => null])
+            ->orderBy(['Roles.kind' => 'DESC', 'Roles.id' => 'ASC'])
             ->all()
             ->map(function ($role) {
                 $permissions = array_map(fn($g) => $g->get('permission'), $role->get('role_permissions') ?? []);
@@ -35,6 +36,8 @@ class RolesController extends AppController
                 return [
                     'code' => $role->get('code'),
                     'name' => $role->get('name'),
+                    'description' => $role->get('description'),
+                    'kind' => $role->get('kind'),
                     'preset' => (bool)$role->get('is_preset'),
                     'permissions' => $permissions,
                 ];
@@ -77,19 +80,29 @@ class RolesController extends AppController
     {
         $page = max(1, (int)($this->request->getQuery('page') ?? 1));
         $limit = 50;
-        $rows = $this->fetchTable('RoleEvents')->find()
+        $query = $this->fetchTable('RoleEvents')->find()
             ->orderBy(['RoleEvents.id' => 'DESC'])
             ->limit($limit + 1)
-            ->offset(($page - 1) * $limit)
-            ->all()
-            ->toList();
+            ->offset(($page - 1) * $limit);
+        // One role's history (the role editor, Phase 3b).
+        $roleId = $this->request->getQuery('role_id');
+        if ($roleId !== null && $roleId !== '') {
+            $query->where(['RoleEvents.role_id' => (int)$roleId]);
+        }
+        $rows = $query->all()->toList();
         $hasMore = count($rows) > $limit;
         $rows = array_slice($rows, 0, $limit);
         $roleIds = array_values(array_unique(array_map(fn($r) => (int)$r->role_id, $rows)));
         $roles = $roleIds === [] ? [] : $this->fetchTable('Roles')->find()
             ->select(['id', 'code', 'name'])->where(['id IN' => $roleIds])->all()->indexBy('id')->toArray();
+        // Who: the Platform Owner for app changes (Phase 3b); releases and imports have no actor.
+        $actorIds = array_values(array_unique(array_filter(array_map(fn($r) => $r->actor_id, $rows))));
+        $actors = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
 
         $events = array_map(fn($r) => [
+            'actor' => $r->actor_id !== null ? ($actors[$r->actor_id] ?? null) : null,
+            'actor_role' => $r->actor_role,
             'id' => (int)$r->id,
             'event' => $r->event_type,
             'role' => ($roles[(int)$r->role_id] ?? null)?->get('code'),

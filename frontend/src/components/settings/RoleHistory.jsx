@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Alert, Button, ListGroup } from '../ui'
 import { Skeleton } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
+import { permissionLabel } from '../../utils/permissionLabels'
 
 const LABELS = {
   role_created: 'Role created',
@@ -10,10 +11,12 @@ const LABELS = {
   permission_revoked: 'Permission removed',
   role_imported: 'Role as it stood when history began',
   permission_imported: 'Permission held when history began',
+  role_copied: 'Role created as a copy',
+  role_description_changed: 'Description changed',
+  role_archived: 'Role archived',
+  role_restored: 'Role restored',
+  permission_declined: 'New permission declined',
 }
-
-// A permission name as screens say it: module · resource · action.
-const permissionLabel = (p) => (p ? p.replaceAll('_', ' ').split('.').join(' · ') : '')
 
 /**
  * Role-definition history (final review G7): every change to what a role may
@@ -56,7 +59,9 @@ export default function RoleHistory({ load }) {
             <div className="text-sm text-muted">
               {e.source === 'import'
                 ? 'Not recorded: who approved it and why were never kept'
-                : `Release${e.commit ? ` ${e.commit.slice(0, 7)}` : ''}`
+                : (e.source === 'web'
+                  ? `${e.actor ?? 'Unknown user'} (Platform Owner)`
+                  : `Release${e.commit ? ` ${e.commit.slice(0, 7)}` : ''}`)
                   + (e.active_memberships !== null && e.active_memberships !== undefined
                     ? ` · ${e.active_memberships} ${e.active_memberships === 1 ? 'person' : 'people'} held this role`
                     : '')}

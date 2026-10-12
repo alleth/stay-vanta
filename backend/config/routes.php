@@ -100,6 +100,22 @@ return function (RouteBuilder $routes): void {
         // Role-definition history (G7): Managers here, the Platform Owner below.
         $builder->get('/roles/history', ['controller' => 'Roles', 'action' => 'history']);
         $builder->get('/platform/role-history', ['controller' => 'Roles', 'action' => 'platformHistory']);
+        // The role catalog (Phase 3b): the Platform Owner creates, copies, edits,
+        // reviews, archives and restores custom roles; built-ins stay locked.
+        $builder->get('/platform/roles', ['controller' => 'PlatformRoles', 'action' => 'index']);
+        $builder->post('/platform/roles', ['controller' => 'PlatformRoles', 'action' => 'add']);
+        $builder->get('/platform/roles/{id}', ['controller' => 'PlatformRoles', 'action' => 'view'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->patch('/platform/roles/{id}', ['controller' => 'PlatformRoles', 'action' => 'edit'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post('/platform/roles/{id}/preview', ['controller' => 'PlatformRoles', 'action' => 'preview'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post('/platform/roles/{id}/review', ['controller' => 'PlatformRoles', 'action' => 'review'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post('/platform/roles/{id}/archive', ['controller' => 'PlatformRoles', 'action' => 'archive'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
+        $builder->post('/platform/roles/{id}/restore', ['controller' => 'PlatformRoles', 'action' => 'restore'])
+            ->setPatterns(['id' => '\d+'])->setPass(['id']);
 
         // Staff (users).
         $builder->get('/users', ['controller' => 'Users', 'action' => 'index']);

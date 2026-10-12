@@ -288,6 +288,12 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   memberships in the snapshot). `roles` / `role_permissions` refuse any other write. The start-up
   check (`bin/cake roles --observe`) reports drift between data, code and history, never fixes it,
   and records changes to the Platform Owner's code-only grants on the history-only `platform` role.
+  **Custom roles (Phase 3b):** `roles.kind` = `system` (built-ins and `platform`: code-defined,
+  locked) or `custom` (the Platform Owner's, `/platform/roles`, `platform.role.manage`): created blank
+  or copied, edited with a version check (409 when stale), archived only when unheld, each change a
+  `role_events` row with the Platform Owner as actor. `App\Auth\RoleCatalog` computes the editor's
+  data (template, changes since creation, memberships, review list, impact preview). Custom roles
+  aren't assignable until 3c (`StaffHierarchy::ASSIGNABLE_KINDS`).
   **Part 3 (built): subscription enforcement (A7).** `App\Model\Subscription::of($property)`: lapsed
   the day after `subscription_expires_at` (or the day the status was set inactive, from the property
   change log), then 7 days grace, 30 read-only, suspended (hotel days). `AccessResolver` narrows a

@@ -45,6 +45,34 @@ export const getEnforcement = () =>
 export const changeEnforcement = (phase, reason) =>
   client.post('/platform/enforcement', { phase, reason }).then((r) => r.data.enforcement)
 
-// The same role-definition history for the Platform Owner (G7) → { events, page, has_more }.
-export const platformRoleHistory = (page = 1) =>
-  client.get('/platform/role-history', { params: { page } }).then((r) => r.data)
+// The same role-definition history for the Platform Owner (G7) → { events, page, has_more };
+// `roleId` narrows it to one role (the role editor, Phase 3b).
+export const platformRoleHistory = (page = 1, roleId = null) =>
+  client.get('/platform/role-history', { params: roleId ? { page, role_id: roleId } : { page } }).then((r) => r.data)
+
+// The role catalog (Phase 3b, Platform Owner): every role → [roles]; one role's
+// editor data → role (with `version`); create, preview, save, review, archive,
+// restore. A save refused because the role changed since its version is a 409.
+export const listRoleCatalog = () =>
+  client.get('/platform/roles').then((r) => r.data.roles)
+
+export const getCatalogRole = (id) =>
+  client.get(`/platform/roles/${id}`).then((r) => r.data.role)
+
+export const createCatalogRole = (data) =>
+  client.post('/platform/roles', data).then((r) => r.data.role)
+
+export const previewCatalogRole = (id, permissions, version) =>
+  client.post(`/platform/roles/${id}/preview`, { permissions, version }).then((r) => r.data.preview)
+
+export const saveCatalogRole = (id, data) =>
+  client.patch(`/platform/roles/${id}`, data).then((r) => r.data.role)
+
+export const reviewCatalogRole = (id, permission, decision, reason) =>
+  client.post(`/platform/roles/${id}/review`, { permission, decision, reason }).then((r) => r.data.role)
+
+export const archiveCatalogRole = (id, reason) =>
+  client.post(`/platform/roles/${id}/archive`, { reason }).then((r) => r.data.role)
+
+export const restoreCatalogRole = (id, reason) =>
+  client.post(`/platform/roles/${id}/restore`, { reason }).then((r) => r.data.role)

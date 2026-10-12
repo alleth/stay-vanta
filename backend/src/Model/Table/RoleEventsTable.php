@@ -34,6 +34,16 @@ class RoleEventsTable extends Table
     public const ROLE_IMPORTED = 'role_imported';
     /** Import: a grant that existed when history began, dated by its row's `created`; no actor or reason. */
     public const PERMISSION_IMPORTED = 'permission_imported';
+    /** Phase 3b: a custom role created as a copy; the snapshot keeps its source's permissions then. Needs a reason. */
+    public const ROLE_COPIED = 'role_copied';
+    /** Phase 3b: a custom role's description changed. Needs a reason. */
+    public const ROLE_DESCRIPTION_CHANGED = 'role_description_changed';
+    /** Phase 3b: a custom role archived (no active memberships). Needs a reason. */
+    public const ROLE_ARCHIVED = 'role_archived';
+    /** Phase 3b: an archived custom role restored. Needs a reason. */
+    public const ROLE_RESTORED = 'role_restored';
+    /** Phase 3b: a permission new in the catalog explicitly not added to a custom role (E3b-D3). Needs a reason. */
+    public const PERMISSION_DECLINED = 'permission_declined';
 
     public const TYPES = [
         self::ROLE_CREATED,
@@ -42,6 +52,11 @@ class RoleEventsTable extends Table
         self::PERMISSION_REVOKED,
         self::ROLE_IMPORTED,
         self::PERMISSION_IMPORTED,
+        self::ROLE_COPIED,
+        self::ROLE_DESCRIPTION_CHANGED,
+        self::ROLE_ARCHIVED,
+        self::ROLE_RESTORED,
+        self::PERMISSION_DECLINED,
     ];
 
     public const REQUIRES_REASON = [
@@ -49,6 +64,11 @@ class RoleEventsTable extends Table
         self::ROLE_RENAMED,
         self::PERMISSION_GRANTED,
         self::PERMISSION_REVOKED,
+        self::ROLE_COPIED,
+        self::ROLE_DESCRIPTION_CHANGED,
+        self::ROLE_ARCHIVED,
+        self::ROLE_RESTORED,
+        self::PERMISSION_DECLINED,
     ];
 
     public const REASON_GRACE = [];

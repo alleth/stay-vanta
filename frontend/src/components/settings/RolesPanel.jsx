@@ -4,17 +4,12 @@ import { SkeletonCards } from '../Skeleton'
 import { listRoles, roleHistory } from '../../api/settings'
 import RoleHistory from './RoleHistory'
 import { describeError } from '../../utils/apiError'
-
-// Module part of a permission name, as screens call it.
-const MODULES = {
-  operations: 'Operations', finance: 'Finance', front_desk: 'Front Desk', guests: 'Guests', pos: 'POS',
-  rooms: 'Rooms', inventory: 'Inventory', settings: 'Settings', staff: 'Staff', platform: 'Platform',
-}
+import { MODULES } from '../../utils/permissionLabels'
 
 /**
  * Settings → Roles (step 10b, Manager): each role and what it may do, read
- * from the grants the server enforces. Read-only: editing roles (audited) is
- * Permissions Phase 3.
+ * from the grants the server enforces, built-in and custom (E3b-D5).
+ * Read-only: the Platform Owner defines roles (Phase 3b).
  */
 export default function RolesPanel() {
   const [roles, setRoles] = useState(null)
@@ -30,8 +25,8 @@ export default function RolesPanel() {
   return (
     <>
       <p className="mb-3 text-sm text-muted">
-        What each role may do at this property. Roles can&apos;t be edited yet; the Platform Owner changes a
-        person&apos;s role.
+        What each role may do at this property. The Platform Owner defines roles and changes a
+        person&apos;s role; every change and its reason are in the history below.
       </p>
       <div className="grid gap-3 lg:grid-cols-2">
         {roles.map((role) => {
@@ -44,10 +39,13 @@ export default function RolesPanel() {
             <Card key={role.code}>
               <Card.Header className="flex items-center gap-2">
                 <span className="font-semibold">{role.name}</span>
-                {role.preset && <Badge bg="secondary">Preset</Badge>}
+                {role.kind === 'custom'
+                  ? <Badge bg="info">Custom</Badge>
+                  : <Badge bg="secondary">Built-in</Badge>}
                 <span className="ml-auto text-xs text-muted">{role.permissions.length} permissions</span>
               </Card.Header>
               <Card.Body>
+                {role.description && <p className="mb-2 text-sm">{role.description}</p>}
                 <dl className="m-0 grid gap-2 text-sm">
                   {Object.entries(byModule).map(([module, list]) => (
                     <div key={module}>

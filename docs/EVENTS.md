@@ -450,10 +450,26 @@ reports it and how many active memberships held the role (R-D6). Read by Manager
 | `permission_revoked` | yes | | A permission is removed: `RoleDefinitions::revoke()`, also from a migration's `down()` ("Rolled back: …") |
 | `role_imported` | | | Import: a role as it stood when history began, dated by its row's `created`; **no actor, no reason** |
 | `permission_imported` | | | Import: a grant that existed when history began, dated by its row's `created`; **no actor, no reason**; no earlier removal is known |
+| `role_copied` | yes | | Phase 3b: a custom role created as a copy (the Platform Owner); `changes` keep the source and **its permissions at that moment** (the template); a copy never follows its source later |
+| `role_description_changed` | yes | | Phase 3b: a custom role's description changed |
+| `role_archived` | yes | | Phase 3b: a custom role archived; only with no active membership (PH-D6) |
+| `role_restored` | yes | | Phase 3b: an archived custom role restored |
+| `permission_declined` | yes | | Phase 3b: a permission granted to a built-in after a custom role was created, explicitly not added to it (PH-D5, E3b-D3) |
 
 Rules (R-D2): grants the code defines are added by `grant()`; a grant is removed only by `revoke()`,
 by name, with a reason. Any other difference between data and code, or between the data and its
 history, is a **warning** from the read-only start-up check (`bin/cake roles --observe`), never a fix.
+
+**Custom roles (Permissions Phase 3b, approved 2026-10-12 as E3b-D1–D5).** The Platform Owner
+creates (`role_created`, or `role_copied` from any role), edits and archives custom roles in the app
+(`/platform/roles`); built-ins (`kind = system`) stay code-defined and are refused (PH-D1). These
+events have the **Platform Owner as actor**, source `web`, the reason, the request id, and a
+snapshot of who held the role (`active_memberships`, `memberships_by_property`: active memberships of
+active accounts). A save carries the role's version (its latest event id) and is refused with 409
+if the role changed since (E3b-D2). A permission-set change is one `permission_granted` /
+`permission_revoked` per difference under one request id, so history replays; the start-up check
+verifies custom roles' history against their grants. Custom roles are given to people only from
+Phase 3c.
 
 ## Retention (final review G5)
 

@@ -14,6 +14,7 @@ import Guests from './pages/Guests'
 import Pos from './pages/Pos'
 import Finance from './pages/Finance'
 import Subscribers from './pages/Subscribers'
+import PlatformRoles from './pages/PlatformRoles'
 import Staff from './pages/Staff'
 import Settings from './pages/Settings'
 import PrivacyPolicy from './pages/PrivacyPolicy'
@@ -123,6 +124,14 @@ export default function App() {
           element={
             <ProtectedRoute module="/subscribers">
               <Subscribers />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="roles"
+          element={
+            <ProtectedRoute module="/roles">
+              <PlatformRoles />
             </ProtectedRoute>
           }
         />

@@ -9,6 +9,7 @@ export const P = {
   PLATFORM_PROPERTY_MANAGE: 'platform.property.manage',
   PLATFORM_SUPPORT_ACCESS_START: 'platform.support_access.start',
   PLATFORM_ENFORCEMENT_MANAGE: 'platform.enforcement.manage',
+  PLATFORM_ROLE_MANAGE: 'platform.role.manage',
   OPERATIONS_TODAY_VIEW: 'operations.today.view',
   OPERATIONS_STAFF_VIEW: 'operations.staff.view',
   FINANCE_COLLECTIONS_VIEW: 'finance.collections.view',

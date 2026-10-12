@@ -8,6 +8,7 @@
 // permission never implies where it applies.
 import {
   DashboardIcon, BuildingIcon, BoxIcon, DoorIcon, UserIcon, ReceiptIcon, UsersIcon, WalletIcon, SettingsIcon,
+  ShieldIcon,
 } from './components/icons'
 import { P } from './auth/permissions'
 
@@ -31,6 +32,11 @@ export const NAV = [
   {
     to: '/subscribers', label: 'Subscribers', blurb: 'Manage hotels & resorts',
     scope: 'platform', permission: P.PLATFORM_PROPERTY_MANAGE, group: null, Icon: BuildingIcon,
+  },
+  // The role catalog (Phase 3b, E3b-D1): beside Subscribers.
+  {
+    to: '/roles', label: 'Roles', blurb: 'What each role may do',
+    scope: 'platform', permission: P.PLATFORM_DASHBOARD_VIEW, group: null, Icon: ShieldIcon,
   },
   // Property
   {
