@@ -44,3 +44,7 @@ export const getEnforcement = () =>
 // One phase forward or any phase back, with a reason. Answers like getEnforcement().
 export const changeEnforcement = (phase, reason) =>
   client.post('/platform/enforcement', { phase, reason }).then((r) => r.data.enforcement)
+
+// The same role-definition history for the Platform Owner (G7) → { events, page, has_more }.
+export const platformRoleHistory = (page = 1) =>
+  client.get('/platform/role-history', { params: { page } }).then((r) => r.data)

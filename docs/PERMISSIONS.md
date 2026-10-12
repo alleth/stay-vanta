@@ -169,6 +169,8 @@ several properties.
 | `GET /support-sessions`, `GET /support-sessions/{id}` | `staff.access_history.view` | The property's support sessions and the requests made during each |
 | `POST /support-sessions/{id}/end` | `staff.account.manage` | The Manager ends a support session at their property (`reason` optional) |
 | `GET /roles` | `settings.role.view` | Role presets and their permissions, read-only (step 10b) |
+| `GET /roles/history` | `settings.role.view` | Every change to a role definition (G7): what, when, why (the approval), the release and how many memberships held the role |
+| `GET /platform/role-history` | `platform.dashboard.view` | The same role-definition history for the Platform Owner (G7, R-D4) |
 | `GET /reservations/export` | `front_desk.reservation.export` | CSV of reservations by check-in date (step 10c); `from`, `to` (YYYY-MM-DD, at most 366 days); recorded (`data_exported`) |
 | `GET /guests/{id}/history` | `guests.guest.view_history` | A guest's history (G3): registrations with where from, each change with before/after, renames and look-alike overrides with their reasons. Managers only (GU1) |
 | `GET /guests/export` | `guests.guest.export` | CSV of guests by registration date (step 10c); no government ID numbers (X3) |

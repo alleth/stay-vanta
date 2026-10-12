@@ -430,6 +430,31 @@ phase is refused and records nothing. The ceiling only ever lowers the phase in 
 `bin/cake enforcement` (one baseline; each change starts where the last ended; the setting equals
 the last change; the ceiling seen is the ceiling now), logged at every start-up.
 
+### role_events (`RoleEvents`)
+
+Role definitions (final review G7, approved 2026-10-12 as R-D1–R-D6): the presets (`admin` Manager,
+`receptionist` Front Desk Staff) and the permissions each holds, plus a history-only `platform` role
+for the Platform Owner's code-defined grants (R-D5). Subject `role_id`; typed column `permission`.
+Platform events: no property, never in Activity. Written only by `App\Auth\RoleDefinitions`, called
+from migrations: **no actor** (a deploy, source `system`), the reason the migration gives (the
+approval it implements), the migration as the request id (`migration-<Name>`; platform grants
+observed at start-up: `release-<commit>`), and a snapshot with the release commit when the platform
+reports it and how many active memberships held the role (R-D6). Read by Managers
+(`GET /roles/history`) and the Platform Owner (`GET /platform/role-history`). Kept indefinitely.
+
+| Event type | Requires reason | Reason grace | Recorded when |
+|---|---|---|---|
+| `role_created` | yes | | A role preset is created |
+| `role_renamed` | yes | | A role's display name changes (its code never does) |
+| `permission_granted` | yes | | A permission is added to a role (`RoleDefinitions::grant()`, or the Platform Owner's code grants observed at start-up) |
+| `permission_revoked` | yes | | A permission is removed: `RoleDefinitions::revoke()`, also from a migration's `down()` ("Rolled back: …") |
+| `role_imported` | | | Import: a role as it stood when history began, dated by its row's `created`; **no actor, no reason** |
+| `permission_imported` | | | Import: a grant that existed when history began, dated by its row's `created`; **no actor, no reason**; no earlier removal is known |
+
+Rules (R-D2): grants the code defines are added by `grant()`; a grant is removed only by `revoke()`,
+by name, with a reason. Any other difference between data and code, or between the data and its
+history, is a **warning** from the read-only start-up check (`bin/cake roles --observe`), never a fix.
+
 ## Retention (final review G5)
 
 Approved 2026-10-09 as P1–P6. `App\Privacy\RetentionRoutine` (`bin/cake retention [--dry-run]

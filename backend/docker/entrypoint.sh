@@ -49,6 +49,11 @@ php bin/cake.php retention --dry-run || true
 # log the phase in force with its self-check. Never blocks the boot.
 php bin/cake.php enforcement --observe || true
 
+# Role definitions (G7): record a change to the Platform Owner's code-defined
+# grants and log the read-only drift check (data vs code vs history). Drift is
+# reported, never fixed. Never blocks the boot.
+php bin/cake.php roles --observe || true
+
 # Migrations run as root, and data migrations load tables, so the schema
 # cache now holds root-owned files that Apache (www-data) can't open
 # ("Permission denied" warnings), possibly describing a table a later

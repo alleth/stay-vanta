@@ -8,10 +8,12 @@ import {
   updateProperty,
   propertyChanges,
   startSupport,
+  platformRoleHistory,
 } from '../api/platform'
 import ReasonModal from '../components/ReasonModal'
 import PropertyStaffModal from '../components/platform/PropertyStaffModal'
 import EnforcementPanel from '../components/platform/EnforcementPanel'
+import RoleHistory from '../components/settings/RoleHistory'
 import { useAuth } from '../context/AuthContext'
 import ConfigHistory from '../components/settings/ConfigHistory'
 import { SkeletonTable } from '../components/Skeleton'
@@ -183,6 +185,14 @@ export default function Subscribers() {
       {/* Subscription enforcement (G6): the phase, its preview and history. A
           change reloads the list, whose stages show what is now enforced. */}
       <EnforcementPanel onChanged={load} />
+
+      {/* Role-definition history (G7, R-D4): what each role may do and why it changed. */}
+      <Card className="mb-4">
+        <Card.Header>Role definitions history</Card.Header>
+        <Card.Body>
+          <RoleHistory load={platformRoleHistory} />
+        </Card.Body>
+      </Card>
 
       <Card>
         <Card.Header>Registered hotels &amp; resorts</Card.Header>

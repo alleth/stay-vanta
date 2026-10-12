@@ -203,7 +203,13 @@ Reading it:
 
 ## Roles (step 10b)
 - `GET /api/roles` — **Manager** (`settings.role.view`): `{roles: [{code, name, preset, permissions}]}`,
-  read-only.
+  read-only; property roles only.
+- `GET /api/roles/history[?page=]` — **Manager** (`settings.role.view`), and the same as
+  `GET /api/platform/role-history[?page=]` for the **Platform Owner** (`platform.dashboard.view`)
+  (G7): `{events: [{id, event, role, role_name, permission, source, reason, changes, commit,
+  active_memberships, request_id, at}], page, has_more}`, newest first, 50 a page. `source` `system`
+  = a release (no actor; `request_id` is `migration-<Name>` or `release-<commit>`), `import` = as it
+  stood when history began (dated by the row's own `created`; no reason).
 
 ## Inventory
 - `GET|POST /api/inventory-categories` — create **owner/admin only**; a name already used by the

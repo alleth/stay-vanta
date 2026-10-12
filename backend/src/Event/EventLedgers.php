@@ -25,5 +25,7 @@ final class EventLedgers
         'RoomEvents' => 'room',
         // Platform-wide settings: the subscription-enforcement phase (final review G6).
         'PlatformSettingEvents' => 'platform_setting',
+        // Role definitions: presets and their permissions (final review G7).
+        'RoleEvents' => 'role',
     ];
 }

@@ -14,3 +14,7 @@ export const configChanges = (propertyId, params = {}) =>
 // read-only → [{ code, name, preset, permissions }].
 export const listRoles = () =>
   client.get('/roles').then((r) => r.data.roles)
+
+// Every change to a role definition (G7), newest first → { events, page, has_more }. Managers.
+export const roleHistory = (page = 1) =>
+  client.get('/roles/history', { params: { page } }).then((r) => r.data)

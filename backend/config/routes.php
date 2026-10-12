@@ -97,6 +97,9 @@ return function (RouteBuilder $routes): void {
 
         // Role definitions, read-only (step 10b).
         $builder->get('/roles', ['controller' => 'Roles', 'action' => 'index']);
+        // Role-definition history (G7): Managers here, the Platform Owner below.
+        $builder->get('/roles/history', ['controller' => 'Roles', 'action' => 'history']);
+        $builder->get('/platform/role-history', ['controller' => 'Roles', 'action' => 'platformHistory']);
 
         // Staff (users).
         $builder->get('/users', ['controller' => 'Users', 'action' => 'index']);

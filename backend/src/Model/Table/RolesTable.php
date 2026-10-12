@@ -9,10 +9,14 @@ use Cake\ORM\Table;
  * Role presets (Permissions Phase 2, build step 10b). `code` is the stored
  * role value (`admin`, `receptionist`) and never changes; `name` is the
  * display name. A role's permissions are its `role_permissions` rows, changed
- * only by migration until Phase 3 makes roles editable (and audited).
+ * only through App\Auth\RoleDefinitions (G7), which records each change in
+ * `role_events`; any other write is refused. The `platform` role (scope
+ * `platform`) is history only: the Platform Owner's grants come from code.
  */
 class RolesTable extends Table
 {
+    use RoleDefinitionGuardTrait;
+
     /** The presets: stored code => display name (ROLE_LABELS on the frontend). */
     public const PRESETS = [
         'admin' => 'Manager',

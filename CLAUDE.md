@@ -277,8 +277,14 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   (`support_access_used`), shown to the Manager (banner from `/auth/me` `support_active`, Staff →
   Security) who may end it; expiry records nothing. Role changes (`PATCH /users/{id}` `role`):
   Platform Owner only, reason, ends the session. `Permissions::isView()` classifies view vs change
-  (also the basis of subscription read-only, part 3). A new grant ships as a migration calling
-  `MembershipImport::seedRoles()` (`SeedRoleGrants`).
+  (also the basis of subscription read-only, part 3). **Role definitions change only through
+  `App\Auth\RoleDefinitions` (G7)**, called from a migration with the approval as reason:
+  `grant($reason, $migration)` adds what `ROLE_GRANTS` defines, `revoke($code, [...], $reason,
+  $migration)` is the only removal (a migration's `down()` too, never a raw `DELETE`),
+  `rename()`. Each is a `role_events` row (no actor: a deploy; the release commit and active
+  memberships in the snapshot). `roles` / `role_permissions` refuse any other write. The start-up
+  check (`bin/cake roles --observe`) reports drift between data, code and history, never fixes it,
+  and records changes to the Platform Owner's code-only grants on the history-only `platform` role.
   **Part 3 (built): subscription enforcement (A7).** `App\Model\Subscription::of($property)`: lapsed
   the day after `subscription_expires_at` (or the day the status was set inactive, from the property
   change log), then 7 days grace, 30 read-only, suspended (hotel days). `AccessResolver` narrows a

@@ -1,8 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use App\Auth\RoleDefinitions;
 use App\Event\MembershipImport;
 use App\Event\RoomServiceImport;
+use App\Model\Table\RolesTable;
 use Cake\Cache\Cache;
 use Cake\Datasource\ConnectionManager;
 use Cake\ORM\TableRegistry;
@@ -43,7 +45,21 @@ class ImportRoomService extends BaseMigration
         $this->execute("UPDATE rooms SET service_status = 'in_service' WHERE id IN
             (SELECT room_id FROM room_events WHERE source = 'import')");
         $this->execute("DELETE FROM room_events WHERE source = 'import'");
-        $this->execute("DELETE FROM role_permissions WHERE permission IN
-            ('rooms.room.remove_from_service', 'rooms.room.view_history')");
+        // A recorded revocation, never a raw DELETE (G7): the grant's history stays.
+        TableRegistry::getTableLocator()->clear();
+        Cache::clear('_cake_model_');
+        /** @var \Cake\Database\Connection $connection */
+        $connection = ConnectionManager::get('default');
+        foreach (array_keys(RolesTable::PRESETS) as $code) {
+            (new RoleDefinitions($connection))->revoke(
+                $code,
+                [
+                    'rooms.room.remove_from_service',
+                    'rooms.room.view_history',
+                ],
+                'Rolled back: ImportRoomService',
+                'ImportRoomService',
+            );
+        }
     }
 }

@@ -1,8 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use App\Auth\RoleDefinitions;
 use App\Event\GuestHistoryImport;
 use App\Event\MembershipImport;
+use App\Model\Table\RolesTable;
 use Cake\Cache\Cache;
 use Cake\Datasource\ConnectionManager;
 use Cake\ORM\TableRegistry;
@@ -40,6 +42,20 @@ class ImportGuestHistory extends BaseMigration
     public function down(): void
     {
         $this->execute("DELETE FROM guest_events WHERE source = 'import'");
-        $this->execute("DELETE FROM role_permissions WHERE permission = 'guests.guest.view_history'");
+        // A recorded revocation, never a raw DELETE (G7): the grant's history stays.
+        TableRegistry::getTableLocator()->clear();
+        Cache::clear('_cake_model_');
+        /** @var \Cake\Database\Connection $connection */
+        $connection = ConnectionManager::get('default');
+        foreach (array_keys(RolesTable::PRESETS) as $code) {
+            (new RoleDefinitions($connection))->revoke(
+                $code,
+                [
+                    'guests.guest.view_history',
+                ],
+                'Rolled back: ImportGuestHistory',
+                'ImportGuestHistory',
+            );
+        }
     }
 }

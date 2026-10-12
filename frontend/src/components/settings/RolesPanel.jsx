@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Card, Alert, Badge } from '../ui'
 import { SkeletonCards } from '../Skeleton'
-import { listRoles } from '../../api/settings'
+import { listRoles, roleHistory } from '../../api/settings'
+import RoleHistory from './RoleHistory'
 import { describeError } from '../../utils/apiError'
 
 // Module part of a permission name, as screens call it.
@@ -60,6 +61,12 @@ export default function RolesPanel() {
           )
         })}
       </div>
+
+      <h2 className="mt-6 mb-2 text-sm font-semibold uppercase tracking-[0.04em] text-muted">History</h2>
+      <p className="mb-2 text-sm text-muted">
+        Every change to what a role may do, with the approval each release implemented.
+      </p>
+      <RoleHistory load={roleHistory} />
     </>
   )
 }

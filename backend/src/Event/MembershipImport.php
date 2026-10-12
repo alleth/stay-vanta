@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace App\Event;
 
-use App\Auth\Permissions;
+use App\Auth\RoleDefinitions;
 use App\Model\Table\AccessEventsTable;
 use App\Model\Table\RolesTable;
 use Cake\Database\Connection;
@@ -49,44 +49,26 @@ final class MembershipImport
     }
 
     /**
-     * Add the role presets and any grant they're missing.
+     * Add the role presets and any grant they're missing, through
+     * App\Auth\RoleDefinitions (G7), which records each change once
+     * `role_events` exists. The migrations from before G7 call this without a
+     * reason: on a fresh database they run before the ledger exists, and
+     * RoleDefinitions::import() then records what they added. New grants
+     * call RoleDefinitions::grant() directly, with the approval as reason.
      *
+     * @param string $reason Why (the approval it implements).
+     * @param string $migration The migration (or job) making the change.
      * @return array{roles: int, grants: int} What was added.
      */
-    public function seedRoles(): array
-    {
-        $result = ['roles' => 0, 'grants' => 0];
+    public function seedRoles(
+        string $reason = 'Role presets as Permissions::ROLE_GRANTS defines them',
+        string $migration = 'seedRoles',
+    ): array {
         if (!$this->hasTables()) {
-            return $result;
+            return ['roles' => 0, 'grants' => 0];
         }
-        $locator = TableRegistry::getTableLocator();
-        /** @var \App\Model\Table\RolesTable $roles */
-        $roles = $locator->get('Roles');
-        $grants = $locator->get('RolePermissions');
-        $this->connection->transactional(function () use ($roles, $grants, &$result): void {
-            foreach (RolesTable::PRESETS as $code => $name) {
-                $roleId = $roles->idFor($code);
-                if ($roleId === null) {
-                    $role = $roles->saveOrFail($roles->newEntity(
-                        ['code' => $code, 'name' => $name, 'scope' => 'property', 'is_preset' => true],
-                        ['accessibleFields' => ['*' => true]],
-                    ), ['atomic' => false]);
-                    $roleId = (int)$role->id;
-                    $result['roles']++;
-                }
-                $held = $grants->find()->select(['permission'])->where(['role_id' => $roleId])
-                    ->disableHydration()->all()->extract('permission')->toList();
-                foreach (array_diff(Permissions::ROLE_GRANTS[$code], $held) as $permission) {
-                    $grants->saveOrFail($grants->newEntity(
-                        ['role_id' => $roleId, 'permission' => $permission],
-                        ['accessibleFields' => ['*' => true]],
-                    ), ['atomic' => false]);
-                    $result['grants']++;
-                }
-            }
-        });
 
-        return $result;
+        return (new RoleDefinitions($this->connection))->grant($reason, $migration);
     }
 
     /**
@@ -100,7 +82,16 @@ final class MembershipImport
         if (!$this->hasTables()) {
             return $result;
         }
-        $this->seedRoles();
+        // The presets must exist to grant memberships; this never changes what
+        // an existing preset holds (that is RoleDefinitions', with a reason).
+        /** @var \App\Model\Table\RolesTable $presetRoles */
+        $presetRoles = TableRegistry::getTableLocator()->get('Roles');
+        foreach (array_keys(RolesTable::PRESETS) as $code) {
+            if ($presetRoles->idFor($code) === null) {
+                $this->seedRoles('Role presets created for the membership import (step 10b)', 'MembershipImport');
+                break;
+            }
+        }
 
         $locator = TableRegistry::getTableLocator();
         $users = $locator->get('Users');

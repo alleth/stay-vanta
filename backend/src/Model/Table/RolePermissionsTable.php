@@ -14,6 +14,8 @@ use Cake\ORM\Table;
  */
 class RolePermissionsTable extends Table
 {
+    use RoleDefinitionGuardTrait;
+
     /**
      * @param array<string, mixed> $config Table config.
      * @return void
