@@ -47,6 +47,12 @@ final class RoleDefinitions
     public const PLATFORM_CODE = 'platform';
 
     /**
+     * The longest code a custom role gets (Phase 3c-1): it is stored in every
+     * ledger's `actor_role` (60) and in `roles.code` (60), with room to spare.
+     */
+    public const CODE_MAX = 40;
+
+    /**
      * @param \Cake\Database\Connection $connection The application database.
      */
     public function __construct(private Connection $connection)
@@ -688,13 +694,15 @@ final class RoleDefinitions
     private function newCode(string $name): string
     {
         $base = trim((string)preg_replace('/[^a-z0-9]+/', '-', strtolower($name)), '-') ?: 'role';
-        $base = substr($base, 0, 24);
+        $base = rtrim(substr($base, 0, self::CODE_MAX), '-');
         $taken = $this->roles()->find()->select(['code'])->disableHydration()->all()->extract('code')->toList();
         $taken = [...$taken, 'owner', 'admin', 'receptionist', self::PLATFORM_CODE];
         $code = $base;
         $n = 2;
         while (in_array($code, $taken, true)) {
-            $code = $base . '-' . $n++;
+            // The suffix stays inside the cap: the base gives way to it.
+            $suffix = '-' . $n++;
+            $code = rtrim(substr($base, 0, self::CODE_MAX - strlen($suffix)), '-') . $suffix;
         }
 
         return $code;

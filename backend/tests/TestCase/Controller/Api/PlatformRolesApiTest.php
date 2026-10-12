@@ -5,6 +5,7 @@ namespace App\Test\TestCase\Controller\Api;
 
 use App\Auth\Permissions;
 use App\Auth\RoleDefinitions;
+use App\Event\EventContext;
 use App\Model\Table\RoleEventsTable;
 use Cake\Database\Connection;
 use Cake\ORM\Locator\LocatorAwareTrait;
@@ -132,6 +133,42 @@ class PlatformRolesApiTest extends TestCase
         $deskId = $this->userIdFor($this->deskToken);
         $this->callAs($this->ownerToken, 'PATCH', "/api/users/$deskId", ['role' => $role['code'], 'reason' => 'x']);
         $this->assertResponseCode(400);
+    }
+
+    /**
+     * Phase 3c-1: a custom role's code fits every column that stores it, so a
+     * holder's events can be recorded (an event that can't be saved refuses
+     * the change it records).
+     */
+    public function testRoleCodesFitEveryColumnThatStoresThem(): void
+    {
+        $ledgers = [
+            'access_events', 'config_changes', 'food_order_events', 'guest_events', 'invoice_events',
+            'platform_setting_events', 'reservation_events', 'role_events', 'room_events', 'stock_movements',
+        ];
+        $schema = $this->connection->getSchemaCollection();
+        foreach ($ledgers as $table) {
+            $this->assertGreaterThanOrEqual(60, $schema->describe($table)->getColumn('actor_role')['length'], "$table.actor_role");
+        }
+        $this->assertGreaterThanOrEqual(60, $schema->describe('roles')->getColumn('code')['length']);
+        $this->assertTrue($schema->describe('users')->getColumn('role')['null'], 'users.role is empty for a custom-role holder (C-D2)');
+
+        // Two 60-character names alike in their first 40: both codes stay within the cap.
+        $long = str_repeat('Night Audit ', 4) . 'Supervisor East Wing';
+        $first = $this->create(['name' => substr($long, 0, 60), 'permissions' => [Permissions::FINANCE_INVOICE_VIEW]]);
+        $second = $this->create(['name' => substr($long, 0, 55) . ' West', 'permissions' => [Permissions::FINANCE_INVOICE_VIEW]]);
+        foreach ([$first, $second] as $role) {
+            $this->assertLessThanOrEqual(RoleDefinitions::CODE_MAX, strlen($role['code']), $role['code']);
+            $this->assertDoesNotMatchRegularExpression('/--|-$/', $role['code']);
+        }
+        $this->assertNotSame($first['code'], $second['code']);
+        $this->assertStringEndsWith('-2', $second['code']);
+
+        // An event whose actor holds the longest code is recorded as it is.
+        $actorRole = str_pad($first['code'], RoleDefinitions::CODE_MAX, 'x');
+        $context = new EventContext($this->userIdFor($this->ownerToken), $actorRole, null, 'test-long-role', reason: 'Capacity');
+        $role = (new RoleDefinitions($this->connection))->createCustom($context, 'Capacity Check', null, null, [Permissions::FINANCE_INVOICE_VIEW]);
+        $this->assertSame($actorRole, $this->events((int)$role->id)[0]->actor_role);
     }
 
     public function testABlankRoleAndTheRulesOnCreating(): void

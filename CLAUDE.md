@@ -293,7 +293,9 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   or copied, edited with a version check (409 when stale), archived only when unheld, each change a
   `role_events` row with the Platform Owner as actor. `App\Auth\RoleCatalog` computes the editor's
   data (template, changes since creation, memberships, review list, impact preview). Custom roles
-  aren't assignable until 3c (`StaffHierarchy::ASSIGNABLE_KINDS`).
+  aren't assignable until 3c-2 (`StaffHierarchy::ASSIGNABLE_KINDS`). Since 3c-1 a new code is at
+  most 40 characters (`RoleDefinitions::CODE_MAX`), every ledger's `actor_role`, `roles.code` and
+  `users.role` hold 60, and `users.role` is nullable (empty for a custom-role holder, C-D2).
   **Part 3 (built): subscription enforcement (A7).** `App\Model\Subscription::of($property)`: lapsed
   the day after `subscription_expires_at` (or the day the status was set inactive, from the property
   change log), then 7 days grace, 30 read-only, suspended (hotel days). `AccessResolver` narrows a
