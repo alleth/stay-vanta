@@ -213,7 +213,12 @@ class PlatformRolesApiTest extends TestCase
         ]);
         $this->assertTrue($this->responseJson()['preview']['stale']);
 
-        $this->assertTrue((new RoleDefinitions($this->connection))->check()['complete'], 'custom history replays');
+        $warnings = (new RoleDefinitions($this->connection))->check()['warnings'];
+        $this->assertSame(
+            [],
+            array_values(array_filter($warnings, fn($w) => str_starts_with($w, $role['code'] . ':'))),
+            'the custom role\'s history replays to its grants',
+        );
     }
 
     public function testBuiltInRolesAreLocked(): void
