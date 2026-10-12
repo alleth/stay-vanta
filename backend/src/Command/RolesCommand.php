@@ -57,6 +57,7 @@ class RolesCommand extends Command
         foreach ($check['roles'] as $code => $count) {
             $io->out(sprintf('roles: %-13s %d grant(s)', $code, $count));
         }
+        $io->out(sprintf('roles: %d custom role(s), each checked against its history', $check['custom_roles'] ?? 0));
         $io->out($check['complete']
             ? sprintf('roles: data, code and history agree (%d event(s))', $check['events'] ?? 0)
             : 'roles: DRIFT: ' . implode('; ', $check['warnings']));

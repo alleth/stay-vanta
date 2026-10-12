@@ -340,16 +340,15 @@ final class RoleDefinitions
                 }
                 $custom++;
             }
-            if ($custom > 0) {
-                $result['roles']['custom roles'] = $custom;
-            }
+            $result['custom_roles'] = $custom;
             $result['events'] = $this->events()->find()->count();
         }
         $result['complete'] = $result['warnings'] === [];
         $summary = implode(', ', array_map(fn($k, $v) => "$k $v", array_keys($result['roles']), $result['roles']));
         $line = sprintf(
-            'roles check: %s grants; %d event(s); %s',
+            'roles check: %s grants; %d custom role(s); %d event(s); %s',
             $summary,
+            $result['custom_roles'] ?? 0,
             $result['events'] ?? 0,
             $result['complete'] ? 'data, code and history agree' : 'DRIFT: ' . implode('; ', $result['warnings']),
         );
