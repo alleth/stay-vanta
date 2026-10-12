@@ -50,8 +50,12 @@ class CorsMiddleware implements MiddlewareInterface
                 ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
                 ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept')
                 ->withHeader('Access-Control-Allow-Credentials', 'true')
-                // Let the SPA read the correlation id (shown with API errors).
-                ->withHeader('Access-Control-Expose-Headers', CorrelationIdMiddleware::HEADER)
+                // Let the SPA read the correlation id (shown with API errors)
+                // and the permissions version (refreshes screens, Phase 3c-2).
+                ->withHeader(
+                    'Access-Control-Expose-Headers',
+                    CorrelationIdMiddleware::HEADER . ', ' . PermissionsVersionMiddleware::HEADER,
+                )
                 ->withHeader('Vary', 'Origin');
         }
 

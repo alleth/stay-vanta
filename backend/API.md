@@ -16,6 +16,12 @@ the browser via CORS). The same id prefixes the request's server log lines (`[re
 access-log line (`req:<id>`) and is the `correlation_id` of every event it records. The SPA shows
 its first 8 characters as the **Reference** on error alerts.
 
+Every response to a signed-in request (refusals included) also carries **`X-Permissions-Version`**
+(Phase 3c-2): 12 hex characters that change when what the person may do changes (their role's
+grants, property, subscription narrowing or a support session), and only then. Login and `/auth/me`
+return it as `user.permissions_version`. The SPA re-reads `/auth/me` when the header differs from
+the version it holds, and after a 403. Enforcement never depends on it.
+
 ## Configuration changes (build step 9)
 
 Every write to a configuration row — room rates, promo rates, booking sources, extra charges,
@@ -63,8 +69,12 @@ Reading it:
   sign-out (`signed_out`). A failure for an address with no account isn't stored.
 - `GET /api/auth/sign-ins[?page=]` — **anyone signed in, about themselves** (no permission, like
   `/me`): their access history, newest first, 25 a page → `{events, page, has_more}`; each
-  `{id, at, event, actor, actor_role, self, proven (false = an attempt that proved nobody),
-  recorded (false = imported), source, reason, changes, user_agent, client_address, scope}`.
+  `{id, at, event, actor, actor_role, actor_role_name, self, proven (false = an attempt that proved
+  nobody), recorded (false = imported), source, reason, changes, user_agent, client_address, scope}`,
+  plus `roles_held` (Phase 3c-2): every membership, newest first, `{membership_id, property_id,
+  role (its name), started_at, ended_at, given_by, how (the event that started it), reason}`.
+  `actor_role_name` (also on guest, room, role and enforcement histories) is the role's name from
+  the roles themselves, custom roles included; null for the Platform Owner (`owner`).
 
 ## Properties, Platform, Finance, Operations
 
@@ -72,7 +82,9 @@ Reading it:
 > The old `/api/reports/*` paths were removed in G8 (404), as were CakePHP's catch-all
 > `/api/<controller>/<action>` routes: only the routes listed here exist.
 
-- `GET|POST /api/properties` — owner-only create; the owner's index contains each property's admin.
+- `GET|POST /api/properties` — owner-only create; the owner's index contains each property's
+  Managers as `users` (Phase 3c-2: people whose active membership's role holds
+  `staff.account.manage`, by permission, never `users.role`).
 - `PATCH|PUT /api/properties/{id}` — owner-only edit, incl. `subscription_status` & `subscription_fee`.
 - `GET /api/platform/enforcement` (Platform Owner, `platform.dashboard.view`) → `{enforcement: {phase,
   ceiling, effective, phases, preview: {properties, stages: {active, grace, read_only, suspended},
@@ -154,7 +166,9 @@ Reading it:
 ## Staff
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate
   your own account**) · `POST /api/users/{id}/reset-password` (also nulls `api_token`).
-  `GET` → `{users: [{…, role, role_name, manageable}], assignable_roles: [{code, name}]}` (Phase 3a):
+  `GET` → `{users: [{…, role, role_id, role_name, manageable}], assignable_roles: [{id, code, name,
+  kind, description, permission_count, holders}]}` (Phase 3a; 3c-2 adds the role's id, kind,
+  description, permission count and holder count; built-ins first, then custom roles):
   `role` / `role_name` from the person's membership; `manageable` = you may change, reset or see
   the history of that account (`StaffHierarchy`: their role's permissions a strict subset of yours;
   the Platform Owner: everyone); `assignable_roles` = the roles you may give a new account. Acting
@@ -173,6 +187,15 @@ Reading it:
   with `role` (`admin` | `receptionist`) changes the person's role at their property: **Platform
   Owner only** (403 for anyone else), `reason` required (400 without; nothing saved), and it ends
   their session (`membership_role_changed`, `session_ended`).
+- **Phase 3c-2 (custom roles):** `POST /api/users` and the role change name the role by `role_id`
+  (any non-archived property role; `role` as a code is still accepted for one release). A custom
+  role only from the Platform Owner (403 "Only the Platform Owner can give a custom role."); an
+  archived role is 400. A role change **ends** the person's membership and starts a new one at the
+  same moment (never edits it); asking for the role they already hold is 400 and records nothing.
+  `users.role` holds a built-in's code, or nothing for a custom-role holder. Events carry the role
+  as `{id, code, name}` (`membership_role_changed`: `changes.role` before/after and
+  `changes.membership` before/after ids; `membership_granted` and `account_created`:
+  `changes.after.role`).
 
 ## Support access (step 10b, A6)
 - `POST /api/platform/support-sessions` `{property_id, reason}` — **Platform Owner**

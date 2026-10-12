@@ -349,12 +349,25 @@ final class RoleDefinitions
             $result['custom_roles'] = $custom;
             $result['events'] = $this->events()->find()->count();
         }
+        // One active membership per person (Phase 3c-2, C2-D4): kept by the
+        // user-row lock every role change takes; reported here, never fixed.
+        $result['memberships'] = (int)$this->connection->execute(
+            'SELECT COUNT(*) FROM property_memberships WHERE ended_at IS NULL',
+        )->fetchColumn(0);
+        $duplicated = (int)$this->connection->execute(
+            'SELECT COUNT(*) FROM (SELECT user_id FROM property_memberships WHERE ended_at IS NULL'
+            . ' GROUP BY user_id HAVING COUNT(*) > 1) d',
+        )->fetchColumn(0);
+        if ($duplicated > 0) {
+            $result['warnings'][] = "$duplicated person(s) hold more than one active membership";
+        }
         $result['complete'] = $result['warnings'] === [];
         $summary = implode(', ', array_map(fn($k, $v) => "$k $v", array_keys($result['roles']), $result['roles']));
         $line = sprintf(
-            'roles check: %s grants; %d custom role(s); %d event(s); %s',
+            'roles check: %s grants; %d custom role(s); %d active membership(s); %d event(s); %s',
             $summary,
             $result['custom_roles'] ?? 0,
+            $result['memberships'],
             $result['events'] ?? 0,
             $result['complete'] ? 'data, code and history agree' : 'DRIFT: ' . implode('; ', $result['warnings']),
         );

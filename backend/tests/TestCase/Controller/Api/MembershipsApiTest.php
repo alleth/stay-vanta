@@ -260,7 +260,14 @@ class MembershipsApiTest extends TestCase
         $this->assertSame($this->userIdFor($ownerToken), (int)$event->actor_id);
         $this->assertSame('owner', $event->actor_role);
         $this->assertSame('Promoted to Manager', $event->reason);
-        $this->assertEquals(['role' => ['before' => 'receptionist', 'after' => 'admin']], $event->changes);
+        // Phase 3c-2: the roles by id, code and name; the membership ended and a new one started.
+        $roles = $this->getTableLocator()->get('Roles');
+        $this->assertEquals([
+            'before' => ['id' => $roles->idFor('receptionist'), 'code' => 'receptionist', 'name' => 'Front Desk Staff'],
+            'after' => ['id' => $roles->idFor('admin'), 'code' => 'admin', 'name' => 'Manager'],
+        ], $event->changes['role']);
+        $this->assertSame((int)$membership->id, $event->changes['membership']['after']);
+        $this->assertNotSame($event->changes['membership']['before'], $event->changes['membership']['after']);
         $this->assertSame((int)$membership->id, (int)$event->membership_id);
         [$ended] = $this->eventsOf($deskId, 'session_ended');
         $this->assertEquals(['because' => 'membership_role_changed'], $ended->changes);

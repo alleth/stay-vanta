@@ -8,7 +8,9 @@ export const listStaff = (propertyId) =>
 
 // The staff list with what you may do (Phase 3a): each person carries
 // `role_name` and `manageable`; `assignable_roles` are the roles you may give
-// → { users, assignable_roles: [{ code, name }] }. The server checks again.
+// → { users, assignable_roles: [{ id, code, name, kind, description,
+// permission_count, holders }] } (3c-2: custom roles for the Platform Owner).
+// Accounts and role changes name the role by `role_id`. The server checks again.
 export const staffDirectory = (propertyId) =>
   client.get('/users', { params: withProp({}, propertyId) }).then((r) => r.data)
 

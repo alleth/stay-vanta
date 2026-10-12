@@ -10,7 +10,6 @@ use App\Model\Table\AccessEventsTable;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
-use LogicException;
 
 /**
  * Staff management.
@@ -80,28 +79,42 @@ class UsersController extends AppController
                 continue;
             }
             $user->set('role', $role['code']);
+            $user->set('role_id', $role['id']);
             $user->set('role_name', $role['name']);
             $user->set('manageable', StaffHierarchy::manages($this->access(), $role['id']));
             $staff[] = $user;
         }
         // Higher roles first (more permissions), then by name.
         $weight = [];
-        foreach (StaffHierarchy::propertyRoles() as $r) {
-            $weight[$r['code']] = count(StaffHierarchy::grants($r['id']));
+        foreach (array_unique(array_map(fn($u) => $u->get('role_id'), $staff)) as $roleId) {
+            $weight[$roleId] = count(StaffHierarchy::grants($roleId));
         }
-        usort($staff, fn($a, $b) => [$weight[$b->role] ?? 0, $a->name] <=> [$weight[$a->role] ?? 0, $b->name]);
+        usort($staff, fn($a, $b) => [$weight[$b->get('role_id')] ?? 0, $a->name]
+            <=> [$weight[$a->get('role_id')] ?? 0, $b->name]);
 
         $this->set('users', $staff);
-        $this->set('assignable_roles', array_map(
-            fn($r) => ['code' => $r['code'], 'name' => $r['name']],
-            StaffHierarchy::assignable($this->access()),
-        ));
+        // What the role picker shows (Phase 3c-2): built-ins first, then
+        // custom roles (the Platform Owner's alone), with what each grants and
+        // how many people hold it.
+        $assignable = StaffHierarchy::assignable($this->access());
+        $held = $this->holderCounts(array_column($assignable, 'id'));
+        $this->set('assignable_roles', array_map(fn($r) => [
+            'id' => $r['id'],
+            'code' => $r['code'],
+            'name' => $r['name'],
+            'kind' => $r['kind'],
+            'description' => $r['description'],
+            'permission_count' => count(StaffHierarchy::grants($r['id'])),
+            'holders' => $held[$r['id']] ?? 0,
+        ], $assignable));
         $this->viewBuilder()->setOption('serialize', ['users', 'assignable_roles']);
     }
 
     /**
      * POST /api/users — create a staff member.
-     * { name, email, password, role, property_id? }
+     * { name, email, password, role_id (or, for one release, role: a code), property_id? }
+     *
+     * A custom role only from the Platform Owner (Phase 3c-2, C-D1).
      */
     public function add(): void
     {
@@ -109,7 +122,7 @@ class UsersController extends AppController
         // Read-only keeps account security (B2), not new accounts.
         $this->refuseWhenReadOnly();
 
-        $role = (string)$this->request->getData('role');
+        $role = $this->requestedRole();
         $propertyId = $this->resolveTargetProperty($role);
 
         $users = $this->fetchTable('Users');
@@ -117,19 +130,22 @@ class UsersController extends AppController
             'name' => $this->request->getData('name'),
             'email' => $this->request->getData('email'),
             'password' => $this->request->getData('password'),
-            'role' => $role,
+            // Legacy column (C-D2): a built-in's code, else empty.
+            'role' => $role['kind'] === 'system' ? $role['code'] : null,
             'property_id' => $propertyId,
             'is_active' => true,
         ]);
 
-        $saved = $users->getConnection()->transactional(function () use ($users, $user): bool {
+        $saved = $users->getConnection()->transactional(function () use ($users, $user, $role, $propertyId): bool {
+            // The role as it stands now, locked: an archive can't slip in between.
+            $role = $this->lockAssignableRole($role['id']);
             if (!$users->save($user, ['atomic' => false])) {
                 return false;
             }
             $this->recordAccess($this->eventContext(), AccessEventsTable::ACCOUNT_CREATED, $user, [
-                'changes' => ['after' => $this->accountValues($user)],
+                'changes' => ['after' => $this->accountValues($user, $role)],
             ]);
-            $this->grantMembership($user);
+            $this->grantMembership($user, $role, $propertyId);
 
             return true;
         });
@@ -157,11 +173,15 @@ class UsersController extends AppController
         }
         $name = $this->request->getData('name');
         $active = $this->request->getData('is_active');
-        $role = $this->request->getData('role');
+        $wantsRole = $this->request->getData('role_id') !== null || $this->request->getData('role') !== null;
         // Changing a role is the Platform Owner's alone (step 10b): a Manager
         // never grants or removes the Manager role.
-        if ($role !== null && !$this->access()->platform) {
+        if ($wantsRole && !$this->access()->platform) {
             throw new ForbiddenException('Only the Platform Owner can change a role.');
+        }
+        $role = $wantsRole ? $this->requestedRole() : null;
+        if ($role !== null && !StaffHierarchy::mayAssign($this->access(), $role)) {
+            throw new ForbiddenException('Only the Platform Owner can give a custom role.');
         }
 
         $user = $users->getConnection()->transactional(function () use ($users, $id, $name, $active, $role): User {
@@ -189,11 +209,12 @@ class UsersController extends AppController
                     ['is_active' => ['before' => !$isActive, 'after' => $isActive]],
                 ];
             }
-            $roleChange = null;
-            if ($role !== null && (string)$role !== $user->role) {
-                $roleChange = $this->roleChangeFor($user, (string)$role);
-                // Still written for one release, so a rollback keeps working.
-                $data['role'] = (string)$role;
+            // Compared with the role the person holds (their membership's),
+            // never users.role, which a custom-role holder doesn't have (3c-2).
+            $roleChange = $role !== null ? $this->roleChangeFor($user, $role['id']) : null;
+            if ($roleChange !== null) {
+                // Legacy column (C-D2): a built-in's code, else empty.
+                $data['role'] = $roleChange['after']['kind'] === 'system' ? $roleChange['after']['code'] : null;
             }
             if ($events === [] && $roleChange === null) {
                 throw new BadRequestException('Nothing to change.');
@@ -218,12 +239,28 @@ class UsersController extends AppController
                 $this->recordAccess($this->eventContext(), $type, $user, ['changes' => $changes]);
             }
             if ($roleChange !== null) {
-                [$membership, $roleId, $before] = $roleChange;
-                $membership->set('role_id', $roleId);
-                $this->fetchTable('PropertyMemberships')->saveOrFail($membership, ['atomic' => false]);
+                // C-D7: the membership is a timeline. The current one ends and
+                // a new one starts at the same moment; neither is edited again.
+                $memberships = $this->fetchTable('PropertyMemberships');
+                $old = $roleChange['membership'];
+                $now = $this->eventContext()->now;
+                $old->set('ended_at', $now);
+                $memberships->saveOrFail($old, ['atomic' => false]);
+                $new = $memberships->saveOrFail($memberships->newEntity([
+                    'user_id' => (int)$user->id,
+                    'property_id' => (int)$old->get('property_id'),
+                    'role_id' => $roleChange['after']['id'],
+                    'started_at' => $now,
+                ], ['accessibleFields' => ['*' => true]]), ['atomic' => false]);
                 $this->recordAccess($this->eventContext(), AccessEventsTable::MEMBERSHIP_ROLE_CHANGED, $user, [
-                    'changes' => ['role' => ['before' => $before, 'after' => $user->role]],
-                    'columns' => ['membership_id' => (int)$membership->id, 'role_id' => $roleId],
+                    'changes' => [
+                        'role' => [
+                            'before' => $this->roleValues($roleChange['before']),
+                            'after' => $this->roleValues($roleChange['after']),
+                        ],
+                        'membership' => ['before' => (int)$old->id, 'after' => (int)$new->id],
+                    ],
+                    'columns' => ['membership_id' => (int)$new->id, 'role_id' => $roleChange['after']['id']],
                 ]);
             }
             if ($sessionOpen) {
@@ -335,23 +372,20 @@ class UsersController extends AppController
     }
 
     /**
-     * What changing a person's role takes (step 10b): their active membership,
-     * locked, the new role's id, and the role before. The Platform Owner's
-     * change, with a reason (the event refuses one without).
+     * What changing a person's role takes (step 10b; Phase 3c-2): their
+     * active membership and the new role, both locked, and the role held
+     * before. Null when they already hold that role (nothing to change,
+     * nothing recorded). The Platform Owner's change, with a reason (the
+     * event refuses one without).
      *
      * A property's last active Manager may be demoted only this way: Managers
      * can't change roles or deactivate themselves, so they can never remove
      * the last Manager (A10).
      *
-     * @return array{0: \Cake\Datasource\EntityInterface, 1: int, 2: string}
+     * @return array{membership: \Cake\Datasource\EntityInterface, before: array<string, mixed>, after: array<string, mixed>}|null
      */
-    private function roleChangeFor(User $user, string $role): array
+    private function roleChangeFor(User $user, int $roleId): ?array
     {
-        // Any role a person can hold at a property (Phase 3a), not only the presets.
-        $target = StaffHierarchy::propertyRole($role);
-        if ($target === null) {
-            throw new BadRequestException('Choose a role a person can hold at a property.');
-        }
         $membership = $this->fetchTable('PropertyMemberships')->find('active')
             ->where(['PropertyMemberships.user_id' => $user->id])
             ->orderBy(['PropertyMemberships.id' => 'ASC'])
@@ -360,34 +394,110 @@ class UsersController extends AppController
         if ($membership === null) {
             throw new BadRequestException('This person has no active membership whose role could change.');
         }
+        if ((int)$membership->get('role_id') === $roleId) {
+            return null;
+        }
+        $after = $this->lockAssignableRole($roleId);
+        $before = $this->fetchTable('Roles')->find()
+            ->select(['id', 'code', 'name', 'kind'])->where(['id' => (int)$membership->get('role_id')])
+            ->disableHydration()->firstOrFail();
 
-        return [$membership, $target['id'], (string)$user->role];
+        return ['membership' => $membership, 'before' => $before, 'after' => $after];
+    }
+
+    /**
+     * The role a request names: `role_id`, or for one release `role` (a code,
+     * C2-D1), among the roles a person can hold at a property.
+     *
+     * @return array{id: int, code: string, name: string, kind: string, description: string|null}
+     */
+    private function requestedRole(): array
+    {
+        $id = $this->request->getData('role_id');
+        $role = $id !== null && $id !== ''
+            ? StaffHierarchy::propertyRole((int)$id)
+            : StaffHierarchy::propertyRole((string)$this->request->getData('role'));
+        if ($role === null) {
+            throw new BadRequestException('Choose a role a person can hold at a property.');
+        }
+
+        return $role;
+    }
+
+    /**
+     * Re-read a role with FOR UPDATE inside the transaction and check it can
+     * still be given (Phase 3c-2): property-scoped, assignable, not archived.
+     * RoleDefinitions::archive() takes the same lock, so an archive and an
+     * assignment can't both pass.
+     *
+     * @return array{id: int, code: string, name: string, kind: string}
+     */
+    private function lockAssignableRole(int $roleId): array
+    {
+        $role = $this->fetchTable('Roles')->find()
+            ->select(['id', 'code', 'name', 'kind', 'scope', 'archived_at'])
+            ->where(['id' => $roleId])->epilog('FOR UPDATE')->disableHydration()->first();
+        if (
+            $role === null || $role['scope'] !== 'property' || $role['archived_at'] !== null
+            || !in_array($role['kind'], StaffHierarchy::ASSIGNABLE_KINDS, true)
+        ) {
+            throw new BadRequestException('This role can no longer be given. Choose another.');
+        }
+
+        return ['id' => (int)$role['id'], 'code' => $role['code'], 'name' => $role['name'], 'kind' => $role['kind']];
+    }
+
+    /**
+     * A role as an event records it: id, code and name at that moment.
+     *
+     * @param array<string, mixed> $role
+     * @return array{id: int, code: string, name: string}
+     */
+    private function roleValues(array $role): array
+    {
+        return ['id' => (int)$role['id'], 'code' => (string)$role['code'], 'name' => (string)$role['name']];
+    }
+
+    /**
+     * Active holders per role: role id => count.
+     *
+     * @param list<int> $roleIds
+     * @return array<int, int>
+     */
+    private function holderCounts(array $roleIds): array
+    {
+        if ($roleIds === []) {
+            return [];
+        }
+        $counts = [];
+        foreach ($roleIds as $roleId) {
+            $counts[$roleId] = $this->fetchTable('PropertyMemberships')->find('active')
+                ->where(['PropertyMemberships.role_id' => $roleId])->count();
+        }
+
+        return $counts;
     }
 
     /**
      * Give a new account its role at its property (step 10b): the membership
      * its access is read from, recorded as `membership_granted` in the
      * caller's transaction. `users.role` / `users.property_id` are still
-     * written for one release, so a rollback keeps working.
+     * written (a built-in's code; empty for a custom role, C-D2) until 3d.
+     *
+     * @param array{id: int, code: string, name: string} $role The locked role.
      */
-    private function grantMembership(User $user): void
+    private function grantMembership(User $user, array $role, int $propertyId): void
     {
-        /** @var \App\Model\Table\RolesTable $roles */
-        $roles = $this->fetchTable('Roles');
-        $roleId = $roles->idFor((string)$user->role);
-        if ($roleId === null) {
-            throw new LogicException("No role '{$user->role}' to grant (are the presets seeded?).");
-        }
         $memberships = $this->fetchTable('PropertyMemberships');
         $membership = $memberships->saveOrFail($memberships->newEntity([
             'user_id' => (int)$user->id,
-            'property_id' => (int)$user->property_id,
-            'role_id' => $roleId,
+            'property_id' => $propertyId,
+            'role_id' => $role['id'],
             'started_at' => $this->eventContext()->now,
         ], ['accessibleFields' => ['*' => true]]), ['atomic' => false]);
         $this->recordAccess($this->eventContext(), AccessEventsTable::MEMBERSHIP_GRANTED, $user, [
-            'changes' => ['after' => ['property_id' => (int)$user->property_id, 'role' => $user->role]],
-            'columns' => ['membership_id' => (int)$membership->id, 'role_id' => $roleId],
+            'changes' => ['after' => ['property_id' => $propertyId, 'role' => $this->roleValues($role)]],
+            'columns' => ['membership_id' => (int)$membership->id, 'role_id' => $role['id']],
         ]);
     }
 
@@ -395,13 +505,14 @@ class UsersController extends AppController
      * An account's values for its creation event: never the password or the
      * email address (contact details stay out of ledgers).
      *
+     * @param array{id: int, code: string, name: string} $role The role it starts with.
      * @return array<string, mixed>
      */
-    private function accountValues(User $user): array
+    private function accountValues(User $user, array $role): array
     {
         return [
             'name' => $user->name,
-            'role' => $user->role,
+            'role' => $this->roleValues($role),
             'property_id' => $user->property_id !== null ? (int)$user->property_id : null,
             'is_active' => (bool)$user->is_active,
         ];
@@ -409,17 +520,20 @@ class UsersController extends AppController
 
     /**
      * Determine and authorise the property a new user belongs to: a role you
-     * may give (StaffHierarchy: below your own; the Platform Owner, any
-     * property role), at your own property, or the chosen one for the
-     * Platform Owner.
+     * may give (StaffHierarchy::mayAssign: a built-in below your own; the
+     * Platform Owner, any property role, custom ones included), at your own
+     * property, or the chosen one for the Platform Owner.
+     *
+     * @param array{id: int, kind: string} $role The requested role.
      */
-    private function resolveTargetProperty(string $role): int
+    private function resolveTargetProperty(array $role): int
     {
-        $target = StaffHierarchy::propertyRole($role);
-        if ($target === null || !StaffHierarchy::manages($this->access(), $target['id'])) {
-            throw new ForbiddenException($this->access()->platform
-                ? 'Choose a role a person can hold at a property.'
-                : 'You can only create accounts for roles with fewer permissions than your own.');
+        if (!StaffHierarchy::mayAssign($this->access(), $role)) {
+            throw new ForbiddenException(match (true) {
+                $role['kind'] === 'custom' => 'Only the Platform Owner can give a custom role.',
+                $this->access()->platform => 'Choose a role a person can hold at a property.',
+                default => 'You can only create accounts for roles with fewer permissions than your own.',
+            });
         }
         if (!$this->access()->platform) {
             return (int)$this->boundPropertyId();

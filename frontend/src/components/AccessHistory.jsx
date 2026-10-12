@@ -8,6 +8,36 @@ import {
 
 const fmtWhen = (s) => (s ? new Date(s).toLocaleString() : '—')
 
+const STARTED_BY = {
+  membership_granted: 'Given with the account',
+  membership_role_changed: 'Role changed',
+  membership_imported: 'On record before this history began',
+}
+
+/**
+ * Every role the person held, newest first (Phase 3c-2): a role change ends
+ * one membership and starts another, so this is their timeline.
+ */
+function RolesHeld({ memberships }) {
+  return (
+    <div className="mb-4">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.04em] text-muted">Roles held</h3>
+      <ol className="m-0 list-none space-y-1 p-0">
+        {memberships.map((m) => (
+          <li key={m.membership_id} className="text-sm">
+            <span className="font-semibold">{m.role ?? 'A role no longer on record'}</span>
+            <span className="text-xs text-muted">
+              {' · '}{fmtWhen(m.started_at)} → {m.ended_at ? fmtWhen(m.ended_at) : 'now'}
+              {' · '}{STARTED_BY[m.how] ?? 'Started'}{m.given_by ? ` by ${m.given_by}` : ''}
+            </span>
+            {m.reason && <div className="text-xs">Reason: {m.reason}</div>}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 /**
  * A person's access history (build step 10), newest first: sign-ins and
  * their devices, failed attempts, and account changes with who made them and
@@ -16,6 +46,7 @@ const fmtWhen = (s) => (s ? new Date(s).toLocaleString() : '—')
  */
 export default function AccessHistory({ load }) {
   const [pages, setPages] = useState([])
+  const [rolesHeld, setRolesHeld] = useState([])
   const [hasMore, setHasMore] = useState(false)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState(null)
@@ -23,7 +54,9 @@ export default function AccessHistory({ load }) {
   useEffect(() => {
     let active = true
     load(1)
-      .then((r) => { if (active) { setPages([r.events]); setHasMore(r.has_more) } })
+      .then((r) => {
+        if (active) { setPages([r.events]); setHasMore(r.has_more); setRolesHeld(r.roles_held ?? []) }
+      })
       .catch((ex) => { if (active) setError(describeError(ex, 'Could not load the history.')) })
       .finally(() => { if (active) setBusy(false) })
     return () => { active = false }
@@ -59,6 +92,7 @@ export default function AccessHistory({ load }) {
 
   return (
     <div>
+      {rolesHeld.length > 0 && <RolesHeld memberships={rolesHeld} />}
       <ol className="m-0 list-none space-y-2 p-0">
         {events.map((e) => {
           const warn = ACCESS_WARNINGS.has(e.event)

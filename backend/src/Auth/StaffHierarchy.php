@@ -20,11 +20,10 @@ use Cake\ORM\TableRegistry;
 final class StaffHierarchy
 {
     /**
-     * The kinds of role a person can be given. Custom roles (Phase 3b) are
-     * defined and reviewed first; giving them to people is Phase 3c, which
-     * adds `custom` here. Archived roles are never offered.
+     * The kinds of role a person can be given: the built-ins and, since Phase
+     * 3c-2, the Platform Owner's custom roles. Archived roles are never offered.
      */
-    public const ASSIGNABLE_KINDS = ['system'];
+    public const ASSIGNABLE_KINDS = ['system', 'custom'];
 
     /**
      * Whether the actor may manage someone holding `$targetRoleId`.
@@ -45,45 +44,92 @@ final class StaffHierarchy
     }
 
     /**
-     * The property roles the actor may give someone: every one for the
-     * Platform Owner, else those below their own.
+     * Whether the actor may give someone `$role` (Phase 3c-2, C-D1): a custom
+     * role only the Platform Owner, outside a support session; a built-in
+     * whoever manages its holders (the strict-subset rule). Assignment never
+     * exceeds the assigner's own permissions (PH-D4).
      *
-     * @return list<array{id: int, code: string, name: string}>
+     * @param array{id: int, kind: string} $role A property role.
      */
-    public static function assignable(Access $actor): array
+    public static function mayAssign(Access $actor, array $role): bool
     {
-        return array_values(array_filter(self::propertyRoles(), fn($r) => self::manages($actor, $r['id'])));
+        if ($role['kind'] === 'custom') {
+            return $actor->platform && $actor->supportSession === null;
+        }
+
+        return self::manages($actor, $role['id']);
     }
 
     /**
-     * The roles a person can be given at a property, oldest first.
+     * The property roles the actor may give someone: every one for the
+     * Platform Owner, else the built-ins below their own.
      *
-     * @return list<array{id: int, code: string, name: string}>
+     * @return list<array{id: int, code: string, name: string, kind: string, description: string|null}>
+     */
+    public static function assignable(Access $actor): array
+    {
+        return array_values(array_filter(self::propertyRoles(), fn($r) => self::mayAssign($actor, $r)));
+    }
+
+    /**
+     * The roles a person can be given at a property: built-ins first, then
+     * custom roles, each oldest first.
+     *
+     * @return list<array{id: int, code: string, name: string, kind: string, description: string|null}>
      */
     public static function propertyRoles(): array
     {
         $rows = TableRegistry::getTableLocator()->get('Roles')->find()
-            ->select(['id', 'code', 'name'])
+            ->select(['id', 'code', 'name', 'kind', 'description'])
             ->where(['scope' => 'property', 'kind IN' => self::ASSIGNABLE_KINDS, 'archived_at IS' => null])
             ->orderBy(['id' => 'ASC'])->disableHydration()->all()->toList();
+        $roles = array_map(fn($r) => [
+            'id' => (int)$r['id'],
+            'code' => $r['code'],
+            'name' => $r['name'],
+            'kind' => $r['kind'],
+            'description' => $r['description'],
+        ], $rows);
+        usort($roles, fn($a, $b) => [$a['kind'] !== 'system', $a['id']] <=> [$b['kind'] !== 'system', $b['id']]);
 
-        return array_map(fn($r) => ['id' => (int)$r['id'], 'code' => $r['code'], 'name' => $r['name']], $rows);
+        return $roles;
     }
 
     /**
-     * A property role by its code, or null.
+     * A property role a person can be given, by its id or (for one release,
+     * C2-D1) its code; null when there is none or it is archived.
      *
-     * @return array{id: int, code: string, name: string}|null
+     * @return array{id: int, code: string, name: string, kind: string, description: string|null}|null
      */
-    public static function propertyRole(string $code): ?array
+    public static function propertyRole(int|string $idOrCode): ?array
     {
         foreach (self::propertyRoles() as $role) {
-            if ($role['code'] === $code) {
+            if (is_int($idOrCode) ? $role['id'] === $idOrCode : $role['code'] === $idOrCode) {
                 return $role;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Display names for role codes, from the roles themselves (archived and
+     * custom ones included): code => name. A code no role has (the Platform
+     * Owner's `owner`) is left out; screens label it themselves.
+     *
+     * @param list<string|null> $codes Role codes, e.g. events' `actor_role`.
+     * @return array<string, string>
+     */
+    public static function namesOf(array $codes): array
+    {
+        $codes = array_values(array_unique(array_filter($codes, fn($c) => is_string($c) && $c !== '')));
+        if ($codes === []) {
+            return [];
+        }
+
+        return TableRegistry::getTableLocator()->get('Roles')->find()
+            ->select(['code', 'name'])->where(['code IN' => $codes])
+            ->disableHydration()->all()->combine('code', 'name')->toArray();
     }
 
     /**

@@ -19,6 +19,7 @@ namespace App;
 use App\Middleware\CorrelationIdMiddleware;
 use App\Middleware\CorsMiddleware;
 use App\Middleware\HostHeaderMiddleware;
+use App\Middleware\PermissionsVersionMiddleware;
 use Cake\Core\Configure;
 use Cake\Core\ContainerInterface;
 use Cake\Datasource\FactoryLocator;
@@ -76,6 +77,10 @@ class Application extends BaseApplication
             // One correlation id per request (X-Request-Id), set outside the
             // error handler so error responses carry it too.
             ->add(new CorrelationIdMiddleware())
+
+            // The signed-in person's permissions version (X-Permissions-Version,
+            // Phase 3c-2), outside the error handler so refusals carry it too.
+            ->add(new PermissionsVersionMiddleware())
 
             // Catch any exceptions in the lower layers,
             // and make an error page/response

@@ -83,8 +83,11 @@ class UsersTable extends Table
             ->requirePresence('password', 'create')
             ->notEmptyString('password');
 
+        // A legacy column (dropped in Phase 3d): a built-in role's code, or
+        // empty for a custom-role holder (C-D2), never a built-in they don't hold.
         $validator
             ->inList('role', self::ROLES)
+            ->allowEmptyString('role')
             ->requirePresence('role', 'create');
 
         return $validator;

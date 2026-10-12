@@ -127,6 +127,7 @@ class PlatformController extends AppController
         $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
             ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
 
+        $roleNames = StaffHierarchy::namesOf(array_map(fn($r) => $r->actor_role, $rows));
         $this->set('enforcement', [
             'phase' => Enforcement::phase(),
             'ceiling' => Enforcement::ceiling(),
@@ -140,6 +141,7 @@ class PlatformController extends AppController
                 'after' => $r->value_after,
                 'actor' => $r->actor_id !== null ? ($names[$r->actor_id] ?? null) : null,
                 'actor_role' => $r->actor_role,
+                'actor_role_name' => $roleNames[$r->actor_role] ?? null,
                 'source' => $r->source,
                 'reason' => $r->reason,
                 'changes' => $r->changes,

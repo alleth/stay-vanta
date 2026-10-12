@@ -6,7 +6,17 @@ export const ROLE_LABELS = {
   receptionist: 'Front Desk Staff',
 }
 
-export const roleLabel = (role) => ROLE_LABELS[role] ?? role
+// A role as the API gives it: a code (older events, the Platform Owner's
+// `owner`), or since Phase 3c-2 `{id, code, name}`. A name from the server
+// always wins, so custom roles show their own name, never a code.
+export const roleLabel = (role) => {
+  if (role && typeof role === 'object') return role.name ?? ROLE_LABELS[role.code] ?? role.code
+  return ROLE_LABELS[role] ?? role
+}
+
+// An actor's role on a history line: the name the API resolved (custom roles
+// included), else the built-in label.
+export const actorRoleLabel = (event) => event?.actor_role_name ?? roleLabel(event?.actor_role)
 
 // Room status display names; the stored values stay available / occupied / maintenance.
 export const ROOM_STATUS_LABELS = {

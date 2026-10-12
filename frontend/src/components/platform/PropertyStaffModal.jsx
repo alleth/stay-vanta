@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Modal, Table, Badge, Button, Alert, Form } from '../ui'
+import { Modal, Table, Badge, Button, Alert } from '../ui'
 import { SkeletonTableRows } from '../Skeleton'
 import ReasonModal from '../ReasonModal'
+import RolePicker from '../RolePicker'
 import { staffDirectory, updateStaff } from '../../api/staff'
 import { describeError } from '../../utils/apiError'
 import { roleLabel } from '../../utils/roles'
@@ -38,7 +39,7 @@ export default function PropertyStaffModal({ property, onHide }) {
 
   function openChange(person) {
     setChanging(person)
-    setRole(roles.find((r) => r.code !== person.role)?.code ?? person.role)
+    setRole(roles.find((r) => r.id !== person.role_id)?.id ?? person.role_id)
   }
 
   return (
@@ -83,22 +84,17 @@ export default function PropertyStaffModal({ property, onHide }) {
         <ReasonModal
           show
           title={`Change ${changing.name}’s role`}
-          description="Their session ends at once, so they sign in again with the new role. The change and your reason are recorded in their access history."
+          description="Their session ends at once, so they sign in again with the new role. Their current role is closed and the new one starts now; both stay in their history with your reason."
           confirmLabel="Change role"
-          ready={role !== changing.role}
+          ready={role !== changing.role_id}
           onHide={() => setChanging(null)}
           onConfirm={async (reason) => {
-            await updateStaff(changing.id, { role, reason })
+            await updateStaff(changing.id, { role_id: role, reason })
             setChanging(null)
             await load()
           }}
         >
-          <Form.Group className="mb-3">
-            <Form.Label>New role</Form.Label>
-            <Form.Select value={role} onChange={(e) => setRole(e.target.value)}>
-              {roles.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
-            </Form.Select>
-          </Form.Group>
+          <RolePicker roles={roles} value={role} onChange={setRole} label="New role" />
         </ReasonModal>
       )}
     </>

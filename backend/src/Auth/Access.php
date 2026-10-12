@@ -48,6 +48,30 @@ final class Access
     }
 
     /**
+     * A short fingerprint of what this access allows (Phase 3c-2, C-D3): it
+     * changes when the role's grants, the property, the subscription's
+     * narrowing or a support session change, and only then. Sent on every
+     * response as X-Permissions-Version so open screens refresh; never used
+     * for enforcement, which reads the grants on every request.
+     */
+    public function version(): string
+    {
+        $permissions = $this->permissions->toArray();
+        sort($permissions);
+        $windDown = $this->windDown;
+        sort($windDown);
+
+        return substr(hash('sha256', (string)json_encode([
+            $permissions,
+            $windDown,
+            $this->propertyId,
+            $this->membershipId,
+            $this->platform,
+            $this->supportSession?->get('id'),
+        ])), 0, 12);
+    }
+
+    /**
      * Whether the person has anywhere to work: a property or the platform.
      */
     public function hasAccess(): bool

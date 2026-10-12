@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Model\Table;
 
+use App\Auth\StaffHierarchy;
 use ArrayObject;
 use Cake\Datasource\EntityInterface;
 use Cake\Event\EventInterface;
@@ -161,6 +162,15 @@ class AccessEventsTable extends Table
      */
     public function snapshotOf(EntityInterface $subject): array
     {
-        return ['name' => $subject->get('name'), 'role' => $subject->get('role')];
+        // Their role from their membership (Phase 3c-2), by code and name, not
+        // users.role (empty for a custom-role holder). The Platform Owner holds
+        // none; their account says so.
+        if ($subject->get('is_platform')) {
+            return ['name' => $subject->get('name'), 'role' => 'owner', 'role_name' => null];
+        }
+        $id = $subject->get('id') !== null ? (int)$subject->get('id') : null;
+        $role = $id !== null ? (StaffHierarchy::rolesOf([$id])[$id] ?? null) : null;
+
+        return ['name' => $subject->get('name'), 'role' => $role['code'] ?? null, 'role_name' => $role['name'] ?? null];
     }
 }

@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext'
 import { P } from '../../auth/permissions'
 import { changeEnforcement, getEnforcement } from '../../api/platform'
 import { describeError } from '../../utils/apiError'
-import { roleLabel } from '../../utils/roles'
+import { actorRoleLabel } from '../../utils/roles'
 
 const PHASES = {
   report: 'Report only',
@@ -147,7 +147,7 @@ export default function EnforcementPanel({ onChanged }) {
                 <div className="text-sm text-muted">
                   {e.source === 'import' && 'Not recorded: who set it, when and why were never kept'}
                   {e.source === 'system' && 'Observed by the app at start-up (when it was seen, not when it was set)'}
-                  {e.source === 'web' && `${e.actor ?? 'Unknown user'}${e.actor_role ? ` (${roleLabel(e.actor_role)})` : ''}`}
+                  {e.source === 'web' && `${e.actor ?? 'Unknown user'}${e.actor_role ? ` (${actorRoleLabel(e)})` : ''}`}
                 </div>
                 {e.reason && <div className="text-sm">“{e.reason}”</div>}
                 <div className="text-xs text-muted">Reference: {String(e.request_id).slice(0, 8)}</div>

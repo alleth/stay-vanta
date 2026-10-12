@@ -3,7 +3,7 @@ import { Alert, Button, ListGroup } from './ui'
 import { Skeleton } from './Skeleton'
 import { roomHistory } from '../api/frontdesk'
 import { describeError } from '../utils/apiError'
-import { roleLabel, roomServiceLabel } from '../utils/roles'
+import { actorRoleLabel, roomServiceLabel } from '../utils/roles'
 
 const LABELS = {
   maintenance_started: 'Maintenance started',
@@ -52,7 +52,7 @@ export default function RoomServiceHistory({ roomId }) {
             <div className="text-sm text-muted">
               {e.recorded === false
                 ? 'Not recorded: who, why and since when were never kept'
-                : `${e.actor ?? 'Unknown user'}${e.actor_role ? ` (${roleLabel(e.actor_role)})` : ''}`}
+                : `${e.actor ?? 'Unknown user'}${e.actor_role ? ` (${actorRoleLabel(e)})` : ''}`}
             </div>
             {e.reason && <div className="text-sm">“{e.reason}”</div>}
             {e.recorded !== false && (

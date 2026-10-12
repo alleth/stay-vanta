@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\Permissions;
+use App\Auth\StaffHierarchy;
 
 /**
  * Role definitions (Permissions Phase 2, build step 10b): the presets and the
@@ -100,9 +101,12 @@ class RolesController extends AppController
         $actors = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
             ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
 
+        // Role names from the roles themselves (3c-2): custom roles included.
+        $roleNames = StaffHierarchy::namesOf(array_map(fn($r) => $r->actor_role, $rows));
         $events = array_map(fn($r) => [
             'actor' => $r->actor_id !== null ? ($actors[$r->actor_id] ?? null) : null,
             'actor_role' => $r->actor_role,
+            'actor_role_name' => $roleNames[$r->actor_role] ?? null,
             'id' => (int)$r->id,
             'event' => $r->event_type,
             'role' => ($roles[(int)$r->role_id] ?? null)?->get('code'),

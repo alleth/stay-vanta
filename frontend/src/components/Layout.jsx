@@ -64,7 +64,7 @@ export default function Layout() {
               <Dropdown.Item onClick={() => setShowSignIns(true)}>Your sign-ins</Dropdown.Item>
             </Dropdown>
             <span className="hidden whitespace-nowrap text-sm sm:inline">
-              {user?.name} <Badge bg="secondary" className="ml-1">{roleLabel(role)}</Badge>
+              {user?.name} <Badge bg="secondary" className="ml-1">{user?.role_name ?? roleLabel(role)}</Badge>
             </span>
             <Button size="sm" variant="outline-secondary" onClick={handleLogout}>
               Logout

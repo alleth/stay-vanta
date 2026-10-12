@@ -298,7 +298,7 @@ row, in the change's own transaction.
 
 | Event type | Requires reason | Reason grace | Recorded when |
 |---|---|---|---|
-| `account_created` | | | An account is made (`changes.after`: name, role, property, active; never the email) |
+| `account_created` | | | An account is made (`changes.after`: name, role, property, active; never the email; since 3c-2 the role is `{id, code, name}`) |
 | `account_renamed` | | | Its name changes |
 | `account_deactivated` | yes | | It's switched off; its session ends in the same request (`session_ended`) |
 | `account_reactivated` | yes | | It's switched back on; no old session comes back (F1) |
@@ -310,9 +310,9 @@ row, in the change's own transaction.
 | `sign_in_refused` | | | The right password, but no way in: an inactive account (answered as any failure), no active membership (`changes.because = no_membership`, step 10b), or a suspended subscription (`changes.because = subscription_suspended`, answered 403 with the reason, step 10b) |
 | `signed_out` | | | The person signs out |
 | `session_ended` | | | A deactivation or a password set ended the person's session (`changes.because`) |
-| `membership_granted` | | | A person gets a role at a property: a new account (`UsersController`, `create_user`) (`membership_id`, `role_id`; `changes.after`: property, role) |
+| `membership_granted` | | | A person gets a role at a property: a new account (`UsersController`, `create_user`) (`membership_id`, `role_id`; `changes.after`: property, role; since 3c-2 the role is `{id, code, name}`, a custom role only from the Platform Owner) |
 | `membership_imported` | | | Import (step 10b): a membership made from the account's `users.role` / `users.property_id`; **no actor** |
-| `membership_role_changed` | yes | | The Platform Owner changes a person's role at a property (`changes.role` before/after, `membership_id`, `role_id` = the new role); their session ends (`session_ended`) |
+| `membership_role_changed` | yes | | The Platform Owner changes a person's role at a property (`changes.role` before/after, `membership_id`, `role_id` = the new role); their session ends (`session_ended`). Since 3c-2 the membership ends and a new one starts at the same moment (`changes.membership` before/after ids; `membership_id` = the new one), and each role is `{id, code, name}`; earlier events carry codes and changed the membership in place |
 | `platform_access_granted` | | | The platform flag is set: `create_user` for an owner, or the import for today's Platform Owner (platform scope) |
 | `support_access_started` | yes | | The Platform Owner opens a support session at one property (A6): read-only, 60 minutes (`support_session_id`; `changes.after`: property, expires_at). Recorded **at the hotel** (`property_id` = the session's), so its Manager sees it |
 | `support_access_used` | | | One request made during a support session (`changes`: method, path), refused ones too; written before the request runs, or it doesn't run. Not in the feed |

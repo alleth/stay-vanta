@@ -6,9 +6,11 @@ namespace App\Controller\Api;
 use App\Auth\Access;
 use App\Auth\AccessResolver;
 use App\Auth\PermissionSet;
+use App\Auth\StaffHierarchy;
 use App\Event\EventContext;
 use App\Event\ReasonRequiredException;
 use App\Middleware\CorrelationIdMiddleware;
+use App\Middleware\PermissionsVersionMiddleware;
 use App\Model\Entity\User;
 use App\Model\Subscription;
 use App\Model\Table\AccessEventsTable;
@@ -96,6 +98,9 @@ class AppController extends Controller
         if ($this->currentUser === null) {
             throw new UnauthorizedException('Missing or invalid token.');
         }
+        // What the screens hold must match what this request was allowed
+        // (Phase 3c-2): every response, refusals included, carries it.
+        PermissionsVersionMiddleware::set($this->access()->version());
 
         // A support session is fully audited (A6, B7): every request made
         // during it is recorded before it runs. If the record can't be
@@ -305,7 +310,9 @@ class AppController extends Controller
             $reason = $this->request->getData('reason');
             $this->eventContext = new EventContext(
                 $this->currentUser?->id !== null ? (int)$this->currentUser->id : null,
-                $this->access()->roleCode ?? $this->currentUser?->role,
+                // The role they act in now, from their membership (Phase 3c-2:
+                // never users.role, which a custom-role holder doesn't have).
+                $this->access()->roleCode,
                 $this->effectivePropertyId(),
                 $this->correlationId(),
                 EventContext::SOURCE_WEB,
@@ -374,6 +381,7 @@ class AppController extends Controller
         $actorIds = array_values(array_unique(array_filter(array_map(fn($r) => $r->actor_id, $rows))));
         $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
             ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+        $roleNames = StaffHierarchy::namesOf(array_map(fn($r) => $r->actor_role, $rows));
 
         $events = array_map(fn($r) => [
             'id' => (int)$r->id,
@@ -381,6 +389,8 @@ class AppController extends Controller
             'event' => $r->event_type,
             'actor' => $r->actor_id !== null ? ($names[$r->actor_id] ?? null) : null,
             'actor_role' => $r->actor_role,
+            // The role's name from the roles themselves (3c-2, C2-D3): custom roles included.
+            'actor_role_name' => $roleNames[$r->actor_role] ?? null,
             'self' => $r->actor_id !== null && (int)$r->actor_id === $userId,
             'proven' => $r->actor_id !== null || $r->source !== 'web',
             'recorded' => $r->source !== 'import',
@@ -394,8 +404,65 @@ class AppController extends Controller
             'scope' => $r->scope,
         ], $rows);
 
-        $this->set(['events' => $events, 'page' => $page, 'has_more' => $hasMore]);
-        $this->viewBuilder()->setOption('serialize', ['events', 'page', 'has_more']);
+        $this->set([
+            'events' => $events,
+            'page' => $page,
+            'has_more' => $hasMore,
+            'roles_held' => $this->rolesHeld($userId),
+        ]);
+        $this->viewBuilder()->setOption('serialize', ['events', 'page', 'has_more', 'roles_held']);
+    }
+
+    /**
+     * A person's memberships as a timeline (Phase 3c-2, C-D7 / C2-D6): each
+     * role they held, from when to when, and who gave it (the event that
+     * started the membership; none for an imported one). Newest first.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function rolesHeld(int $userId): array
+    {
+        $memberships = $this->fetchTable('PropertyMemberships')->find()
+            ->contain(['Roles' => ['fields' => ['id', 'code', 'name']]])
+            ->where(['PropertyMemberships.user_id' => $userId])
+            ->orderBy(['PropertyMemberships.started_at' => 'DESC', 'PropertyMemberships.id' => 'DESC'])
+            ->all()->toList();
+        if ($memberships === []) {
+            return [];
+        }
+        $starts = $this->fetchTable('AccessEvents')->find()
+            ->select(['membership_id', 'actor_id', 'reason', 'event_type', 'source'])
+            ->where([
+                'membership_id IN' => array_map(fn($m) => (int)$m->id, $memberships),
+                'event_type IN' => [
+                    AccessEventsTable::MEMBERSHIP_GRANTED,
+                    AccessEventsTable::MEMBERSHIP_IMPORTED,
+                    AccessEventsTable::MEMBERSHIP_ROLE_CHANGED,
+                ],
+            ])
+            ->orderBy(['id' => 'ASC'])->disableHydration()->all()->toList();
+        $byMembership = [];
+        foreach ($starts as $s) {
+            $byMembership[(int)$s['membership_id']] ??= $s;
+        }
+        $actorIds = array_values(array_unique(array_filter(array_column($starts, 'actor_id'))));
+        $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
+
+        return array_map(function ($m) use ($byMembership, $names) {
+            $start = $byMembership[(int)$m->id] ?? null;
+
+            return [
+                'membership_id' => (int)$m->id,
+                'property_id' => (int)$m->property_id,
+                'role' => $m->role?->name,
+                'started_at' => $m->started_at,
+                'ended_at' => $m->ended_at,
+                'given_by' => isset($start['actor_id']) ? ($names[$start['actor_id']] ?? null) : null,
+                'how' => $start['event_type'] ?? null,
+                'reason' => $start['reason'] ?? null,
+            ];
+        }, $memberships);
     }
 
     /**

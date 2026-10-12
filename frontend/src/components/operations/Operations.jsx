@@ -615,7 +615,7 @@ function configText(e) {
 // Account administration (build step 10): "Account deactivated · Ana Cruz
 // (Front Desk Staff) · “Left the hotel”". Sign-ins never appear here.
 function accessText(e) {
-  const person = e.person ? ` · ${e.person}${e.person_role ? ` (${roleLabel(e.person_role)})` : ''}` : ''
+  const person = e.person ? ` · ${e.person}${e.person_role ? ` (${e.person_role_name ?? roleLabel(e.person_role)})` : ''}` : ''
   const detail = accessDetail(e)
   return `${accessLabel(e.event)}${person}${detail ? ` · ${detail}` : ''}${e.reason ? ` · “${e.reason}”` : ''}`
 }

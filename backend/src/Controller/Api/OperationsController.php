@@ -1043,6 +1043,8 @@ class OperationsController extends AppController
                 'event' => $e->event_type,
                 'person' => $names[$e->subject_user_id] ?? ($e->snapshot['name'] ?? null),
                 'person_role' => $e->snapshot['role'] ?? null,
+                // Its name as recorded (3c-2); older events carry only the code.
+                'person_role_name' => $e->snapshot['role_name'] ?? null,
                 'reason' => $e->reason,
                 // What changed: a role's before/after, an export's list, dates and rows.
                 'changes' => $e->changes,

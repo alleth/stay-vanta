@@ -11,6 +11,7 @@ import {
   staffDirectory, createStaff, updateStaff, resetStaffPassword, staffAccessHistory,
 } from '../api/staff'
 import ReasonModal from '../components/ReasonModal'
+import RolePicker from '../components/RolePicker'
 import AccessHistory from '../components/AccessHistory'
 import SupportSessions from '../components/SupportSessions'
 import { SkeletonTable } from '../components/Skeleton'
@@ -184,7 +185,7 @@ export default function Staff() {
 function AddStaffModal({ roles, propertyId, onClose, onSaved }) {
   // The roles you may give (Phase 3a): below your own; any for the Platform Owner.
   const [form, setForm] = useState({
-    name: '', email: '', password: '', role: roles[0]?.code ?? '',
+    name: '', email: '', password: '', role_id: roles[0]?.id ?? null,
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const { run, busy, err } = useSubmit(async () => {
@@ -198,12 +199,7 @@ function AddStaffModal({ roles, propertyId, onClose, onSaved }) {
         <Modal.Header closeButton><Modal.Title>Add staff</Modal.Title></Modal.Header>
         <Modal.Body>
           {err && <Alert variant="danger">{err}</Alert>}
-          <Form.Group className="mb-4">
-            <Form.Label>Role</Form.Label>
-            <Form.Select value={form.role} onChange={set('role')} disabled={roles.length === 1}>
-              {roles.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
-            </Form.Select>
-          </Form.Group>
+          <RolePicker roles={roles} value={form.role_id} onChange={(id) => setForm({ ...form, role_id: id })} />
           <Form.Group className="mb-4">
             <Form.Label>Name</Form.Label>
             <Form.Control value={form.name} onChange={set('name')} required autoFocus />

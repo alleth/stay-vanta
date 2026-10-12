@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { Alert } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { GROUPS, NAV, canOpen } from '../nav'
 
@@ -41,6 +42,9 @@ export default function Hub() {
     <div>
       <h1 className="sv-serif mb-1 text-[2rem] font-bold">Welcome back, {user?.name}.</h1>
       <p className="mb-8 text-muted">What would you like to check on today?</p>
+      {auth.accessNotice && (
+        <Alert variant="info" dismissible onClose={auth.clearAccessNotice}>{auth.accessNotice}</Alert>
+      )}
       {ungrouped.length > 0 && (
         <div className={`mb-8 ${TILE_GRID}`}>
           {ungrouped.map((n) => <Tile key={n.to} {...n} />)}

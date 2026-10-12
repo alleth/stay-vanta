@@ -13,7 +13,7 @@ import { describeError } from '../utils/apiError'
  * Roles (Permissions Phase 3b, the Platform Owner, E3b-D1): every role with
  * who holds it. Built-ins are locked and change only with a release; custom
  * roles are created blank or by copying any role, then edited in the editor.
- * Giving people a custom role arrives in Phase 3c.
+ * People are given a custom role from Subscribers → Staff (Phase 3c-2).
  */
 export default function PlatformRoles() {
   const { can } = useAuth()

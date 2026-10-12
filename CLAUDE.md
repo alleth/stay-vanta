@@ -292,10 +292,20 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   locked) or `custom` (the Platform Owner's, `/platform/roles`, `platform.role.manage`): created blank
   or copied, edited with a version check (409 when stale), archived only when unheld, each change a
   `role_events` row with the Platform Owner as actor. `App\Auth\RoleCatalog` computes the editor's
-  data (template, changes since creation, memberships, review list, impact preview). Custom roles
-  aren't assignable until 3c-2 (`StaffHierarchy::ASSIGNABLE_KINDS`). Since 3c-1 a new code is at
-  most 40 characters (`RoleDefinitions::CODE_MAX`), every ledger's `actor_role`, `roles.code` and
-  `users.role` hold 60, and `users.role` is nullable (empty for a custom-role holder, C-D2).
+  data (template, changes since creation, memberships, review list, impact preview). Since 3c-1 a
+  new code is at most 40 characters (`RoleDefinitions::CODE_MAX`), and every ledger's `actor_role`,
+  `roles.code` and `users.role` hold 60.
+  **Assignment (Phase 3c-2):** only the Platform Owner gives a custom role
+  (`StaffHierarchy::mayAssign()`; Managers give built-ins below their own), by `role_id`, at
+  account creation or as a role change, after `lockAssignableRole()` (an archive can't race it). A
+  role change **ends the membership and starts a new one** at the same moment (never edits
+  `role_id`), and events carry roles as `{id, code, name}`. `users.role` is compatibility-only: a
+  built-in's code, empty for a custom-role holder, read by nothing but `create_user` and the
+  import (`PermissionsTest` keeps it so) until 3d drops it. Every signed-in response carries
+  `X-Permissions-Version` (`Access::version()`, `PermissionsVersionMiddleware`); `AuthContext`
+  re-reads `/auth/me` when it changes or after a 403, and the Hub says when access was lost. A
+  role-definition edit signs nobody out; a role change, deactivation or password reset does.
+  History screens show role names from the API (`actor_role_name`, `actorRoleLabel()`).
   **Part 3 (built): subscription enforcement (A7).** `App\Model\Subscription::of($property)`: lapsed
   the day after `subscription_expires_at` (or the day the status was set inactive, from the property
   change log), then 7 days grace, 30 read-only, suspended (hotel days). `AccessResolver` narrows a

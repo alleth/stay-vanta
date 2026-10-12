@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\Permissions;
+use App\Auth\StaffHierarchy;
 use App\Model\Table\RoomEventsTable;
 use App\Model\Table\RoomsTable;
 use Cake\Http\Exception\BadRequestException;
@@ -248,6 +249,8 @@ class RoomsController extends AppController
         $names = $actorIds === [] ? [] : $this->fetchTable('Users')->find()
             ->select(['id', 'name'])->where(['id IN' => $actorIds])->all()->combine('id', 'name')->toArray();
 
+        // Role names from the roles themselves (3c-2): custom roles included.
+        $roleNames = StaffHierarchy::namesOf(array_map(fn($r) => $r->actor_role, $rows));
         $events = array_map(fn($r) => [
             'id' => (int)$r->id,
             'at' => $r->occurred_at,
@@ -256,6 +259,7 @@ class RoomsController extends AppController
             'after' => $r->service_after,
             'actor' => $r->actor_id !== null ? ($names[$r->actor_id] ?? null) : null,
             'actor_role' => $r->actor_role,
+            'actor_role_name' => $roleNames[$r->actor_role] ?? null,
             'recorded' => $r->source !== 'import',
             'reason' => $r->reason,
             'request_id' => $r->correlation_id,

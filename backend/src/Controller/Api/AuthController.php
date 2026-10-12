@@ -213,7 +213,10 @@ class AuthController extends AppController
      */
     private function contextFor(User $user): EventContext
     {
-        return new EventContext((int)$user->id, $user->role, $this->propertyOf($user), $this->correlationId());
+        // The role they hold now, from their membership (Phase 3c-2), not users.role.
+        $role = (new AccessResolver())->resolve($user)->roleCode;
+
+        return new EventContext((int)$user->id, $role, $this->propertyOf($user), $this->correlationId());
     }
 
     /**
@@ -317,11 +320,15 @@ class AuthController extends AppController
             'name' => $user->name,
             'email' => $user->email,
             // Their role and property come from the membership (step 10b).
-            'role' => $access->roleCode ?? $user->role,
-            // Its display name from the role itself (Phase 3a), for any role.
+            'role' => $access->roleCode,
+            // Its display name from the role itself (Phase 3a), for any role,
+            // custom ones included (3c-2).
             'role_name' => $access->roleCode !== null
-                ? (StaffHierarchy::propertyRole($access->roleCode)['name'] ?? null)
+                ? (StaffHierarchy::namesOf([$access->roleCode])[$access->roleCode] ?? null)
                 : null,
+            // What these permissions add up to (Phase 3c-2): every response
+            // carries the current one as X-Permissions-Version.
+            'permissions_version' => $access->version(),
             'property_id' => $access->propertyId,
             'platform' => $access->platform,
             // What the screens may offer. Convenience only: every action

@@ -100,7 +100,10 @@ class StaffHierarchyApiTest extends TestCase
         $this->assertTrue($staff[$deskId]['manageable']);
         $this->assertFalse($staff[$peerId]['manageable'], 'the same permissions: a peer');
         $this->assertSame('Front Desk Staff', $staff[$deskId]['role_name']);
-        $this->assertSame([['code' => 'receptionist', 'name' => 'Front Desk Staff']], $this->responseJson()['assignable_roles']);
+        $this->assertSame(
+            [['receptionist', 'Front Desk Staff', 'system']],
+            array_map(fn($r) => [$r['code'], $r['name'], $r['kind']], $this->responseJson()['assignable_roles']),
+        );
 
         // Before Phase 3a a Manager could switch a fellow Manager off through the API.
         $this->callAs($this->adminToken, 'PATCH', "/api/users/$peerId", ['is_active' => false, 'reason' => 'x']);

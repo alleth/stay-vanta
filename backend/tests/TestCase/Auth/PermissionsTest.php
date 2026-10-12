@@ -94,6 +94,30 @@ class PermissionsTest extends TestCase
     }
 
     /**
+     * users.role is compatibility-only (Phase 3c-2, C2-D4): a person's role is
+     * their membership's. Only the console's account creation and the one-time
+     * membership import read the column; Phase 3d drops it.
+     */
+    public function testNothingReadsTheLegacyRoleColumn(): void
+    {
+        $allowed = ['Command/CreateUserCommand.php', 'Event/MembershipImport.php'];
+        $pattern = '/\$(?:user|target|subject|this->currentUser)\??->role\b(?!\s*=[^=>])|[\'"]Users\.role[\'"]'
+            . '|\$(?:user|subject)->get\([\'"]role[\'"]\)/';
+        $found = [];
+        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(APP));
+        foreach ($files as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            $relative = str_replace(DS, '/', substr($file->getPathname(), strlen(APP)));
+            if (!in_array($relative, $allowed, true) && preg_match($pattern, (string)file_get_contents($file->getPathname()))) {
+                $found[] = $relative;
+            }
+        }
+        $this->assertSame([], $found, "Read the person's role from their membership (StaffHierarchy::rolesOf, access()).");
+    }
+
+    /**
      * frontend/src/auth/permissions.js mirrors this class: the same names. A
      * typo there would silently hide a screen. The role map it once mirrored
      * (ROLE_FALLBACK) was removed in G8: screens read only user.permissions.

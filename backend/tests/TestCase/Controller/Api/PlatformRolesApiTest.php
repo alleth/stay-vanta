@@ -18,7 +18,8 @@ use Cake\TestSuite\TestCase;
  * keeps its template), edited with a version check, reviewed when the
  * catalog grows, archived only when unheld; built-ins stay locked; every
  * change is a role_events row with the Platform Owner as actor, a reason and
- * the request id; nobody can be given a custom role until 3c.
+ * the request id. Giving custom roles to people (3c-2) is
+ * CustomRoleAssignmentApiTest.
  */
 class PlatformRolesApiTest extends TestCase
 {
@@ -126,13 +127,6 @@ class PlatformRolesApiTest extends TestCase
         $this->assertSame($this->userIdFor($this->ownerToken), (int)$events[0]->actor_id);
         $this->assertSame(['web', 'Ops lead'], [$events[0]->source, $events[0]->reason]);
         $this->assertSame(0, $events[0]->snapshot['active_memberships']);
-
-        // Not assignable until 3c.
-        $this->callAs($this->ownerToken, 'GET', '/api/users?property_id=' . $this->propertyId);
-        $this->assertNotContains('Operations Manager', array_column($this->responseJson()['assignable_roles'], 'name'));
-        $deskId = $this->userIdFor($this->deskToken);
-        $this->callAs($this->ownerToken, 'PATCH', "/api/users/$deskId", ['role' => $role['code'], 'reason' => 'x']);
-        $this->assertResponseCode(400);
     }
 
     /**

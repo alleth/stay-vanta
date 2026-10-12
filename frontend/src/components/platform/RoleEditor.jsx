@@ -142,7 +142,7 @@ export default function RoleEditor({ roleId, onChanged }) {
           </div>
         )}
         {role.kind === 'custom' && role.memberships.total === 0 && (
-          <div className="text-xs text-muted">Custom roles can be given to people from the next release (Phase 3c).</div>
+          <div className="text-xs text-muted">Give it to someone from Subscribers → Staff → Change role, or when adding staff.</div>
         )}
       </div>
 
