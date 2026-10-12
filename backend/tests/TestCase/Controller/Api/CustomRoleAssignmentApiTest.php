@@ -139,7 +139,7 @@ class CustomRoleAssignmentApiTest extends TestCase
             ->where(['subject_user_id' => $deskId, 'event_type' => AccessEventsTable::MEMBERSHIP_ROLE_CHANGED])->firstOrFail();
         $this->assertSame('Covers the night audit', $event->reason);
         $this->assertSame((int)$new->id, (int)$event->membership_id);
-        $this->assertSame(['before' => (int)$old->id, 'after' => (int)$new->id], $event->changes['membership']);
+        $this->assertEquals(['before' => (int)$old->id, 'after' => (int)$new->id], $event->changes['membership']);
         $this->assertEquals(['id' => $this->deskRoleId, 'code' => 'receptionist', 'name' => 'Front Desk Staff'], $event->changes['role']['before']);
         $this->assertEquals(
             ['id' => $this->auditor['id'], 'code' => $this->auditor['code'], 'name' => 'Night Auditor'],
@@ -170,7 +170,8 @@ class CustomRoleAssignmentApiTest extends TestCase
         $this->assertSame('receptionist', $this->getTableLocator()->get('Users')->get($deskId)->role);
 
         // The timeline, newest first, with who and why.
-        $this->callAs($this->ownerToken, 'GET', "/api/users/$deskId/access-history");
+        // The Manager reads access history (the Platform Owner holds no staff.access_history.view).
+        $this->callAs($this->adminToken, 'GET', "/api/users/$deskId/access-history");
         $held = $this->responseJson()['roles_held'];
         $this->assertSame(['Front Desk Staff', 'Night Auditor', 'Front Desk Staff'], array_column($held, 'role'));
         $this->assertSame('Audit moved', $held[0]['reason']);
@@ -245,7 +246,8 @@ class CustomRoleAssignmentApiTest extends TestCase
         $this->assertSame($this->auditor['code'], $signIn->actor_role);
 
         // History screens get the role's name, not its code.
-        $this->callAs($this->ownerToken, 'GET', "/api/users/$id/access-history");
+        // The Manager reads access history (the Platform Owner holds no staff.access_history.view).
+        $this->callAs($this->adminToken, 'GET', "/api/users/$id/access-history");
         $this->assertSame('Night Auditor', $this->responseJson()['events'][0]['actor_role_name']);
     }
 

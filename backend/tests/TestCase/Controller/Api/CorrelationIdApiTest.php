@@ -87,6 +87,8 @@ class CorrelationIdApiTest extends TestCase
         ]]);
         $this->get('/api/auth/me');
 
-        $this->assertSame('X-Request-Id', $this->_response->getHeaderLine('Access-Control-Expose-Headers'));
+        // And the permissions version (Phase 3c-2), which keeps screens in step.
+        $this->assertSame('X-Request-Id, X-Permissions-Version', $this->_response->getHeaderLine('Access-Control-Expose-Headers'));
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{12}$/', $this->_response->getHeaderLine('X-Permissions-Version'));
     }
 }

@@ -20,6 +20,7 @@ use App\Application;
 use App\Middleware\CorrelationIdMiddleware;
 use App\Middleware\CorsMiddleware;
 use App\Middleware\HostHeaderMiddleware;
+use App\Middleware\PermissionsVersionMiddleware;
 use Cake\Core\Configure;
 use Cake\Error\Middleware\ErrorHandlerMiddleware;
 use Cake\Http\MiddlewareQueue;
@@ -87,13 +88,16 @@ class ApplicationTest extends TestCase
         // carry X-Request-Id too and errors are logged under the request's id.
         $middleware->seek(1);
         $this->assertInstanceOf(CorrelationIdMiddleware::class, $middleware->current());
+        // So does the permissions version (Phase 3c-2): refusals carry it.
         $middleware->seek(2);
-        $this->assertInstanceOf(ErrorHandlerMiddleware::class, $middleware->current());
+        $this->assertInstanceOf(PermissionsVersionMiddleware::class, $middleware->current());
         $middleware->seek(3);
-        $this->assertInstanceOf(HostHeaderMiddleware::class, $middleware->current());
+        $this->assertInstanceOf(ErrorHandlerMiddleware::class, $middleware->current());
         $middleware->seek(4);
-        $this->assertInstanceOf(AssetMiddleware::class, $middleware->current());
+        $this->assertInstanceOf(HostHeaderMiddleware::class, $middleware->current());
         $middleware->seek(5);
+        $this->assertInstanceOf(AssetMiddleware::class, $middleware->current());
+        $middleware->seek(6);
         $this->assertInstanceOf(RoutingMiddleware::class, $middleware->current());
     }
 }

@@ -122,7 +122,7 @@ class UsersController extends AppController
         // Read-only keeps account security (B2), not new accounts.
         $this->refuseWhenReadOnly();
 
-        $role = $this->requestedRole();
+        $role = $this->requestedRole(true);
         $propertyId = $this->resolveTargetProperty($role);
 
         $users = $this->fetchTable('Users');
@@ -411,12 +411,19 @@ class UsersController extends AppController
      *
      * @return array{id: int, code: string, name: string, kind: string, description: string|null}
      */
-    private function requestedRole(): array
+    private function requestedRole(bool $creating = false): array
     {
         $id = $this->request->getData('role_id');
         $role = $id !== null && $id !== ''
             ? StaffHierarchy::propertyRole((int)$id)
             : StaffHierarchy::propertyRole((string)$this->request->getData('role'));
+        if ($role === null && $creating) {
+            // An account for a role nobody can hold here (`owner`, say) is
+            // refused like one above your own, as it always was.
+            throw new ForbiddenException($this->access()->platform
+                ? 'Choose a role a person can hold at a property.'
+                : 'You can only create accounts for roles with fewer permissions than your own.');
+        }
         if ($role === null) {
             throw new BadRequestException('Choose a role a person can hold at a property.');
         }
