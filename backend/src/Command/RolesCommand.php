@@ -51,6 +51,8 @@ class RolesCommand extends Command
                 $io->out("roles: $recorded change(s) to the Platform Owner's grants recorded");
             }
         }
+        // What a role change made by this release would record as its commit.
+        $io->out('roles: release commit ' . (RoleDefinitions::commit() ?? 'not reported by the platform'));
         $check = $definitions->check();
         foreach ($check['roles'] as $code => $count) {
             $io->out(sprintf('roles: %-13s %d grant(s)', $code, $count));
