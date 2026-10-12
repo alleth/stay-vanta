@@ -4,9 +4,9 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\Permissions;
+use App\Auth\StaffHierarchy;
 use App\Model\Entity\User;
 use App\Model\Table\AccessEventsTable;
-use App\Model\Table\RolesTable;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
@@ -15,12 +15,13 @@ use LogicException;
 /**
  * Staff management.
  *
- * Role rules:
- * - owner  : may create/manage `admin` and `receptionist` users for any property.
- * - admin  : may create/manage `receptionist` users for their OWN property only.
- * - others : no access.
- *
- * Owners are never created or edited through this controller.
+ * Who may manage whom (Permissions Phase 3a, PH-D3): App\Auth\StaffHierarchy,
+ * by permissions, never role codes. You manage someone only if their role's
+ * permissions are a strict subset of your own role's (a Manager manages Front
+ * Desk Staff, never another Manager), at your own property; the Platform Owner
+ * manages every property's staff. Your own account: rename, change your
+ * password, see your history. Platform Owners are never created or edited
+ * through this controller.
  *
  * Every change is recorded in access_events (build step 10) under a lock on
  * the user row, in the same transaction: created, renamed, deactivated and
@@ -29,10 +30,9 @@ use LogicException;
  * and setting a password end the person's session at once (A8), so
  * reactivating an account never brings an old session back (F1).
  *
- * Access is staff.account.view / staff.account.manage (beforeFilter). Who may
- * manage whom stays a role rule, deliberately not a permission (see "Rules
- * that stay outside permissions" in docs/PERMISSIONS.md); these are the only
- * userHasRole() calls left.
+ * Access is staff.account.view / staff.account.manage (beforeFilter); who may
+ * manage whom is the hierarchy above (docs/PERMISSIONS.md, "Rules that stay
+ * outside permissions").
  */
 class UsersController extends AppController
 {
@@ -57,19 +57,46 @@ class UsersController extends AppController
 
     /**
      * GET /api/users  — staff list, property-scoped.
+     *
+     * → { users: [{…, role, role_name, manageable}], assignable_roles: [{code, name}] }
+     * Each person's role is their membership's (Phase 3a); `manageable` says
+     * whether you may change, reset or see the history of that account
+     * (StaffHierarchy), and `assignable_roles` which roles you may give a new
+     * account. Screens offer exactly these; the server checks them again.
      */
     public function index(): void
     {
-        $users = $this->fetchTable('Users');
-        $query = $this->scopeToProperty(
-            $users->find()
-                ->where(['Users.role IN' => ['admin', 'receptionist']])
-                ->contain(['Properties'])
-                ->orderBy(['Users.role' => 'ASC', 'Users.name' => 'ASC']),
-        );
+        $users = $this->fetchTable('Users')->find()
+            ->where(['Users.is_platform' => false])
+            ->contain(['Properties'])
+            ->orderBy(['Users.name' => 'ASC']);
+        $list = $this->scopeToProperty($users)->all()->toList();
+        $roles = StaffHierarchy::rolesOf(array_map(fn($u) => (int)$u->id, $list), $this->boundPropertyId());
+        $staff = [];
+        foreach ($list as $user) {
+            $role = $roles[(int)$user->id] ?? null;
+            if ($role === null) {
+                // An ended membership: no role here, not on the staff list.
+                continue;
+            }
+            $user->set('role', $role['code']);
+            $user->set('role_name', $role['name']);
+            $user->set('manageable', StaffHierarchy::manages($this->access(), $role['id']));
+            $staff[] = $user;
+        }
+        // Higher roles first (more permissions), then by name.
+        $weight = [];
+        foreach (StaffHierarchy::propertyRoles() as $r) {
+            $weight[$r['code']] = count(StaffHierarchy::grants($r['id']));
+        }
+        usort($staff, fn($a, $b) => [$weight[$b->role] ?? 0, $a->name] <=> [$weight[$a->role] ?? 0, $b->name]);
 
-        $this->set('users', $query->all());
-        $this->viewBuilder()->setOption('serialize', ['users']);
+        $this->set('users', $staff);
+        $this->set('assignable_roles', array_map(
+            fn($r) => ['code' => $r['code'], 'name' => $r['name']],
+            StaffHierarchy::assignable($this->access()),
+        ));
+        $this->viewBuilder()->setOption('serialize', ['users', 'assignable_roles']);
     }
 
     /**
@@ -124,7 +151,10 @@ class UsersController extends AppController
     {
         $this->request->allowMethod(['patch', 'put', 'post']);
         $users = $this->fetchTable('Users');
-        $this->findManageable($id);
+        $target = $this->findManageable($id);
+        if ((int)$target->id !== (int)$this->currentUser->id) {
+            $this->requireManages($target, 'You can only change accounts whose role is below your own.');
+        }
         $name = $this->request->getData('name');
         $active = $this->request->getData('is_active');
         $role = $this->request->getData('role');
@@ -227,13 +257,10 @@ class UsersController extends AppController
         $users = $this->fetchTable('Users');
         $user = $this->findManageable($id);
 
-        if (
-            $this->userHasRole('admin')
-            && $user->id !== (int)$this->currentUser->id
-            && $user->role !== 'receptionist'
-        ) {
-            throw new ForbiddenException(
-                'Managers can only change their own password or reset Front Desk Staff passwords.',
+        if ($user->id !== (int)$this->currentUser->id) {
+            $this->requireManages(
+                $user,
+                'You can only change your own password or reset passwords of staff whose role is below your own.',
             );
         }
 
@@ -277,7 +304,11 @@ class UsersController extends AppController
     public function accessHistory(int $id): void
     {
         $this->request->allowMethod('get');
-        $this->respondWithAccessHistory((int)$this->findManageable($id)->id);
+        $user = $this->findManageable($id);
+        if ((int)$user->id !== (int)$this->currentUser->id) {
+            $this->requireManages($user, 'You can only see the history of staff whose role is below your own.');
+        }
+        $this->respondWithAccessHistory((int)$user->id);
     }
 
     /**
@@ -316,8 +347,10 @@ class UsersController extends AppController
      */
     private function roleChangeFor(User $user, string $role): array
     {
-        if (!array_key_exists($role, RolesTable::PRESETS)) {
-            throw new BadRequestException('Choose Manager or Front Desk Staff.');
+        // Any role a person can hold at a property (Phase 3a), not only the presets.
+        $target = StaffHierarchy::propertyRole($role);
+        if ($target === null) {
+            throw new BadRequestException('Choose a role a person can hold at a property.');
         }
         $membership = $this->fetchTable('PropertyMemberships')->find('active')
             ->where(['PropertyMemberships.user_id' => $user->id])
@@ -327,10 +360,8 @@ class UsersController extends AppController
         if ($membership === null) {
             throw new BadRequestException('This person has no active membership whose role could change.');
         }
-        /** @var \App\Model\Table\RolesTable $roles */
-        $roles = $this->fetchTable('Roles');
 
-        return [$membership, (int)$roles->idFor($role), (string)$user->role];
+        return [$membership, $target['id'], (string)$user->role];
     }
 
     /**
@@ -377,22 +408,21 @@ class UsersController extends AppController
     }
 
     /**
-     * Determine and authorise the property a new user belongs to.
+     * Determine and authorise the property a new user belongs to: a role you
+     * may give (StaffHierarchy: below your own; the Platform Owner, any
+     * property role), at your own property, or the chosen one for the
+     * Platform Owner.
      */
     private function resolveTargetProperty(string $role): int
     {
-        if ($this->userHasRole('admin')) {
-            // Admins can only create receptionists, in their own property.
-            if ($role !== 'receptionist') {
-                throw new ForbiddenException('Managers can only create Front Desk Staff accounts.');
-            }
-
-            return (int)$this->boundPropertyId();
+        $target = StaffHierarchy::propertyRole($role);
+        if ($target === null || !StaffHierarchy::manages($this->access(), $target['id'])) {
+            throw new ForbiddenException($this->access()->platform
+                ? 'Choose a role a person can hold at a property.'
+                : 'You can only create accounts for roles with fewer permissions than your own.');
         }
-
-        // Owner.
-        if (!in_array($role, ['admin', 'receptionist'], true)) {
-            throw new ForbiddenException('The Platform Owner can create Manager or Front Desk Staff accounts.');
+        if (!$this->access()->platform) {
+            return (int)$this->boundPropertyId();
         }
         $propertyId = $this->effectivePropertyId();
         if ($propertyId === null) {
@@ -403,20 +433,33 @@ class UsersController extends AppController
     }
 
     /**
-     * Load a staff user the current actor is allowed to manage, or 404.
+     * Load a staff account at your property (the Platform Owner: any), or
+     * 404. Whether you may act on it is requireManages().
      */
     private function findManageable(int $id): User
     {
         $users = $this->fetchTable('Users');
-        $query = $users->find()
-            ->where(['Users.id' => $id, 'Users.role IN' => ['admin', 'receptionist']]);
+        $query = $users->find()->where(['Users.id' => $id, 'Users.is_platform' => false]);
 
-        // Admins are confined to their own property.
+        // Property staff are confined to their own property.
         if ($this->boundPropertyId() !== null) {
             $query->where(['Users.property_id' => $this->boundPropertyId()]);
         }
 
         return $query->firstOrFail();
+    }
+
+    /**
+     * Refuse acting on someone else's account unless you manage their role
+     * (StaffHierarchy): never a peer, never someone above you. Your own
+     * account is the caller's to allow.
+     */
+    private function requireManages(User $user, string $message): void
+    {
+        $role = StaffHierarchy::rolesOf([(int)$user->id])[(int)$user->id] ?? null;
+        if (!StaffHierarchy::manages($this->access(), $role['id'] ?? null)) {
+            throw new ForbiddenException($message);
+        }
     }
 
     private function validationFailed(array $errors): void

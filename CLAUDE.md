@@ -244,15 +244,18 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   truth; `PermissionsTest` keeps code and document identical). **Every API action calls
   `$this->authorize(Permissions::X)`** first (after `allowMethod()`); data-dependent checks use
   `$this->can(Permissions::X)`. Deny by default: a role the map doesn't know holds nothing.
-  `userHasRole()` survives only for the staff hierarchy in `UsersController` (a test forbids it
-  elsewhere). Login and `/auth/me` return `user.permissions`.
+  No decision reads a role code (Phase 3a): who may manage whom is `App\Auth\StaffHierarchy`
+  (you manage someone only if their role's permissions are a strict subset of yours; the Platform
+  Owner manages all), and `userHasRole()` is gone (a test keeps it out). Login and `/auth/me` return
+  `user.permissions` and `role_name`.
   **Frontend:** `useAuth()` gives `can(P.X)` (names in `src/auth/permissions.js`, mirrored from
   the PHP class; `PermissionsTest` fails on drift or an undefined `P.X`) and `scope`
   (`'platform'` | `'property'`). **Screens check permission and scope, never permission alone**:
   each `nav.js` item has `scope` + `permission`, and `canOpen(item, auth)` drives the Hub,
   `ProtectedRoute module="/path"` and `/dashboard`. Scope keeps the Platform Owner on platform
   screens even though they hold some hotel permissions today. Pages use `can()` for what they
-  offer; the only role checks left are the staff hierarchy in `Staff.jsx` and display labels.
+  offer; staff screens take `manageable` and `assignable_roles` from `GET /users`, and role names
+  from the server (`role_name`), so they never compare role codes.
   Screens read only `user.permissions` (G8 removed the `ROLE_FALLBACK` role map). Every check on
   the frontend must also exist on the backend.
 - **Adding an endpoint or permission:** add the catalog row and endpoint-map row to
@@ -266,8 +269,8 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   platform) from the active membership or the flag; `AppController::access()` holds it, and
   `boundPropertyId()` / `effectivePropertyId()` / `permissions()` read it. New accounts get a
   membership in the same transaction (`membership_granted`); the import (`MembershipImport`)
-  made the rest. `users.role` / `users.property_id` are still written (the staff hierarchy and
-  Phase 3 read them) but never read for access: G8 removed the membership and "owner with no
+  made the rest. `users.role` / `users.property_id` are still written (dropped in Phase 3d) but
+  never read for access or for who manages whom: G8 removed the membership and "owner with no
   property" fallbacks. No active membership and no flag = no access, and sign-in is refused. Test users get their membership from `ApiScenarioTrait::makeUser()`.
   **Part 2 (built):** the platform flag grants only `platform.*`, `settings.property.view` and
   `staff.account.*` (the 24 † grants are gone, F3 closed). Hotel data only through a **support
@@ -360,7 +363,8 @@ hotel's data:
 - Fixture-free unit tests (entities in memory): `ReservationsTableTest` (`quote()` pricing, incl.
   extras), `FoodOrdersTableTest` (discount/cooking-charge arithmetic), `Auth/LoginThrottleTest`,
   `Model/BusinessTimeTest` (hotel-day boundaries vs UTC), `Auth/PermissionsTest` (role map ==
-  `docs/PERMISSIONS.md`; no `userHasRole()` outside the staff hierarchy).
+  `docs/PERMISSIONS.md`; no `userHasRole()` anywhere), `StaffHierarchyApiTest` (who manages whom
+  by permissions, including a role the code doesn't know).
 - HTTP suites in `tests/TestCase/Controller/Api/`: **`PermissionMatrixApiTest`** (the access
   matrix: every API route × every role against the catalog, every route must have a probe, a user
   with no permissions is refused everywhere), `AccessControlApiTest` (sign-in failures,

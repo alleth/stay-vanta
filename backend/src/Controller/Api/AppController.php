@@ -581,17 +581,6 @@ class AppController extends Controller
     }
 
     /**
-     * True when the current user holds any of the given roles.
-     *
-     * Not for access checks: use authorize()/can(). Kept only for the rules
-     * that stay role-based (who may manage whom, in UsersController).
-     */
-    protected function userHasRole(string ...$roles): bool
-    {
-        return in_array($this->currentUser?->role, $roles, true);
-    }
-
-    /**
      * Pull the bearer token from the Authorization header and load the user.
      */
     protected function resolveUserFromToken(): ?User

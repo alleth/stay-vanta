@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\Permissions;
+use App\Auth\StaffHierarchy;
 use App\Model\BusinessTime;
 use App\Model\Entity\Reservation;
 use App\Model\Finance\Collections;
@@ -534,12 +535,30 @@ class OperationsController extends AppController
      */
     private function staffSummary(int $propertyId, string $dayStart, string $dayEnd): array
     {
-        $users = $this->fetchTable('Users')->find()
-            ->select(['id', 'name', 'role'])
-            ->where(['property_id' => $propertyId, 'is_active' => true, 'role IN' => ['admin', 'receptionist']])
-            ->orderBy(['role' => 'ASC', 'name' => 'ASC'])
+        // Who works here and in what role, from their memberships (Phase 3a):
+        // higher roles (more permissions) first, then by name.
+        $candidates = $this->fetchTable('Users')->find()
+            ->select(['id', 'name'])
+            ->where(['property_id' => $propertyId, 'is_active' => true, 'is_platform' => false])
             ->disableHydration()
-            ->all();
+            ->all()->toList();
+        $roles = StaffHierarchy::rolesOf(array_map(fn($u) => (int)$u['id'], $candidates), $propertyId);
+        $grants = [];
+        $users = [];
+        foreach ($candidates as $u) {
+            $role = $roles[(int)$u['id']] ?? null;
+            if ($role === null) {
+                continue;
+            }
+            $grants[$role['id']] ??= StaffHierarchy::grants($role['id']);
+            $users[] = $u + [
+                'role' => $role['code'],
+                'role_name' => $role['name'],
+                'weight' => count($grants[$role['id']]),
+                'manages_staff' => in_array(Permissions::STAFF_ACCOUNT_MANAGE, $grants[$role['id']], true),
+            ];
+        }
+        usort($users, fn($a, $b) => [$b['weight'], $a['name']] <=> [$a['weight'], $b['name']]);
 
         $requests = [];
         $rows = $this->fetchTable('ActivityIndex')->find()
@@ -563,13 +582,16 @@ class OperationsController extends AppController
                 'id' => (int)$u['id'],
                 'name' => $u['name'],
                 'role' => $u['role'],
+                'role_name' => $u['role_name'],
+                'manages_staff' => $u['manages_staff'],
                 'actions_today' => $actions[(int)$u['id']] ?? 0,
             ];
         }
 
         return [
             'active' => count($list),
-            'receptionists' => count(array_filter($list, fn($u) => $u['role'] === 'receptionist')),
+            // Front-line staff: those whose role doesn't manage staff.
+            'receptionists' => count(array_filter($list, fn($u) => !$u['manages_staff'])),
             'active_today' => count(array_filter($list, fn($u) => $u['actions_today'] > 0)),
             'members' => $list,
         ];

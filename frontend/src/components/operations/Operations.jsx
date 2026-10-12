@@ -810,7 +810,7 @@ export function StaffMonitor({ staff, activity, className = '' }) {
                   {m.name.trim().charAt(0).toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                <Badge bg={m.role === 'admin' ? 'primary' : 'secondary'}>{roleLabel(m.role)}</Badge>
+                <Badge bg={m.manages_staff ? 'primary' : 'secondary'}>{m.role_name ?? roleLabel(m.role)}</Badge>
                 <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted"
                   title="Stock movements and food orders recorded today">
                   {plural(m.actions_today, 'action')}

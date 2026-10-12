@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Auth\Permissions;
+use App\Auth\StaffHierarchy;
 use App\Model\BusinessTime;
 use App\Model\Subscription;
 use App\Platform\Enforcement;
@@ -41,9 +42,15 @@ class PlatformController extends AppController
             }
         }
 
-        $admins = $this->fetchTable('Users')
-            ->find()
-            ->where(['role' => 'admin', 'is_active' => true])
+        // Managers: active people whose role at a property manages staff
+        // (Phase 3a: by permission, not by the role code).
+        $managing = array_column(array_filter(
+            StaffHierarchy::propertyRoles(),
+            fn($r) => in_array(Permissions::STAFF_ACCOUNT_MANAGE, StaffHierarchy::grants($r['id']), true),
+        ), 'id');
+        $admins = $managing === [] ? 0 : $this->fetchTable('PropertyMemberships')->find('active')
+            ->innerJoinWith('Users', fn($q) => $q->where(['Users.is_active' => true]))
+            ->where(['PropertyMemberships.role_id IN' => $managing])
             ->count();
 
         // Project the recurring monthly fee onto each period.

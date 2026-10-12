@@ -6,6 +6,12 @@ const withProp = (params, propertyId) =>
 export const listStaff = (propertyId) =>
   client.get('/users', { params: withProp({}, propertyId) }).then((r) => r.data.users)
 
+// The staff list with what you may do (Phase 3a): each person carries
+// `role_name` and `manageable`; `assignable_roles` are the roles you may give
+// → { users, assignable_roles: [{ code, name }] }. The server checks again.
+export const staffDirectory = (propertyId) =>
+  client.get('/users', { params: withProp({}, propertyId) }).then((r) => r.data)
+
 export const createStaff = (data, propertyId) =>
   client.post('/users', withProp(data, propertyId)).then((r) => r.data.user)
 

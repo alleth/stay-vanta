@@ -2,25 +2,29 @@ import { useCallback, useEffect, useState } from 'react'
 import { Modal, Table, Badge, Button, Alert, Form } from '../ui'
 import { SkeletonTableRows } from '../Skeleton'
 import ReasonModal from '../ReasonModal'
-import { listStaff, updateStaff } from '../../api/staff'
+import { staffDirectory, updateStaff } from '../../api/staff'
 import { describeError } from '../../utils/apiError'
 import { roleLabel } from '../../utils/roles'
 
 /**
  * A property's people, for the Platform Owner (step 10b): only they change a
- * role (Manager ↔ Front Desk Staff), always with a reason, and the change ends
- * that person's session so they sign in with their new permissions.
+ * role, always with a reason, and the change ends that person's session so
+ * they sign in with their new permissions. The roles offered come from the
+ * server (Phase 3a), not a fixed list.
  */
 export default function PropertyStaffModal({ property, onHide }) {
   const [people, setPeople] = useState(null)
   const [error, setError] = useState(null)
   const [changing, setChanging] = useState(null)
   const [role, setRole] = useState('')
+  const [roles, setRoles] = useState([])
 
   const load = useCallback(async () => {
     setError(null)
     try {
-      setPeople(await listStaff(property.id))
+      const directory = await staffDirectory(property.id)
+      setPeople(directory.users)
+      setRoles(directory.assignable_roles ?? [])
     } catch (ex) {
       setError(describeError(ex, 'Could not load this property’s staff.'))
     }
@@ -34,7 +38,7 @@ export default function PropertyStaffModal({ property, onHide }) {
 
   function openChange(person) {
     setChanging(person)
-    setRole(person.role === 'admin' ? 'receptionist' : 'admin')
+    setRole(roles.find((r) => r.code !== person.role)?.code ?? person.role)
   }
 
   return (
@@ -58,7 +62,7 @@ export default function PropertyStaffModal({ property, onHide }) {
                     <div className="font-medium">{p.name}</div>
                     <div className="text-xs text-muted">{p.email}</div>
                   </td>
-                  <td>{roleLabel(p.role)}</td>
+                  <td>{p.role_name ?? roleLabel(p.role)}</td>
                   <td>{p.is_active ? <Badge bg="success">Active</Badge> : <Badge bg="secondary">Inactive</Badge>}</td>
                   <td className="text-right">
                     <Button size="sm" variant="outline-secondary" onClick={() => openChange(p)}>
@@ -92,8 +96,7 @@ export default function PropertyStaffModal({ property, onHide }) {
           <Form.Group className="mb-3">
             <Form.Label>New role</Form.Label>
             <Form.Select value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="admin">{roleLabel('admin')}</option>
-              <option value="receptionist">{roleLabel('receptionist')}</option>
+              {roles.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
             </Form.Select>
           </Form.Group>
         </ReasonModal>

@@ -7,6 +7,7 @@ use App\Auth\Access;
 use App\Auth\AccessResolver;
 use App\Auth\LoginThrottle;
 use App\Auth\Permissions;
+use App\Auth\StaffHierarchy;
 use App\Event\EventContext;
 use App\Model\Entity\User;
 use App\Model\Table\AccessEventsTable;
@@ -317,6 +318,10 @@ class AuthController extends AppController
             'email' => $user->email,
             // Their role and property come from the membership (step 10b).
             'role' => $access->roleCode ?? $user->role,
+            // Its display name from the role itself (Phase 3a), for any role.
+            'role_name' => $access->roleCode !== null
+                ? (StaffHierarchy::propertyRole($access->roleCode)['name'] ?? null)
+                : null,
             'property_id' => $access->propertyId,
             'platform' => $access->platform,
             // What the screens may offer. Convenience only: every action

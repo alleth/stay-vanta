@@ -71,12 +71,13 @@ class PermissionsTest extends TestCase
     }
 
     /**
-     * Access goes through authorize()/can(). userHasRole() survives only for
-     * the staff hierarchy (who may manage whom), which stays a role rule.
+     * Access goes through authorize()/can(), and who may manage whom through
+     * StaffHierarchy (Phase 3a): no decision reads a role code. userHasRole()
+     * was removed; this keeps it from coming back.
      */
-    public function testRoleChecksAreOnlyUsedForTheStaffHierarchy(): void
+    public function testNoDecisionReadsARoleCode(): void
     {
-        $allowed = ['Controller/Api/AppController.php', 'Controller/Api/UsersController.php'];
+        $allowed = [];
         $found = [];
         $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(APP));
         foreach ($files as $file) {

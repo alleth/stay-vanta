@@ -197,10 +197,13 @@ The Platform Owner and support sessions are not affected.
 
 ## Rules that stay outside permissions
 
-- **Who may manage whom.** A Manager creates and resets only Front Desk Staff in their own
-  property; the Platform Owner creates Managers and Front Desk Staff; nobody deactivates
-  themselves. Kept as written in Phase 1. Phase 3 replaces it with "you may assign only a role
-  whose permissions you already hold".
+- **Who may manage whom** (Phase 3a, PH-D3: `App\Auth\StaffHierarchy`). You manage someone, and may
+  give a new account their role, only if that role's permissions are a **strict subset** of your
+  own role's: a Manager manages Front Desk Staff at their own property and never another Manager
+  (the same permissions), whatever the roles are called. The Platform Owner manages every
+  property's staff and alone changes roles (PH-D4). Your own account: rename, change your password,
+  see your history; nobody deactivates themselves. Before Phase 3a a Manager could rename,
+  deactivate or reactivate a fellow Manager through the API; that is now refused (403).
 - **Record state.** A settled reservation is locked; a booking with a downpayment can't be edited.
   Nobody gets past these.
 - **Separation of duties** (future: expenses, purchase orders, timesheets) compares the actor

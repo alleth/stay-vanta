@@ -154,6 +154,11 @@ Reading it:
 ## Staff
 - `GET|POST /api/users` · `PATCH|PUT /api/users/{id}` (rename / activate — **can't deactivate
   your own account**) · `POST /api/users/{id}/reset-password` (also nulls `api_token`).
+  `GET` → `{users: [{…, role, role_name, manageable}], assignable_roles: [{code, name}]}` (Phase 3a):
+  `role` / `role_name` from the person's membership; `manageable` = you may change, reset or see
+  the history of that account (`StaffHierarchy`: their role's permissions a strict subset of yours;
+  the Platform Owner: everyone); `assignable_roles` = the roles you may give a new account. Acting
+  on an account you don't manage (other than your own) → 403.
 - **Step 10:** every change is an access event under a lock on the user row. Deactivating and
   reactivating need `reason` (400 without; nothing saved); deactivating also ends the person's
   session (`session_ended`), so reactivating never revives it. A request that changes nothing

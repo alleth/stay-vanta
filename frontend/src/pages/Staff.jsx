@@ -8,7 +8,7 @@ import { useProperty } from '../context/PropertyContext'
 import { useSubmit } from '../hooks/useSubmit'
 import { P } from '../auth/permissions'
 import {
-  listStaff, createStaff, updateStaff, resetStaffPassword, staffAccessHistory,
+  staffDirectory, createStaff, updateStaff, resetStaffPassword, staffAccessHistory,
 } from '../api/staff'
 import ReasonModal from '../components/ReasonModal'
 import AccessHistory from '../components/AccessHistory'
@@ -19,17 +19,18 @@ import { roleLabel } from '../utils/roles'
 const ROLE_VARIANT = { admin: 'primary', receptionist: 'info' }
 
 export default function Staff() {
-  const { role, user, can } = useAuth()
+  const { user, can, scope } = useAuth()
   // A staff member's sign-ins and account history (step 10, Manager).
   const canSeeHistory = can(P.STAFF_ACCESS_HISTORY_VIEW)
   // Read-only access (a support session, step 10b) sees the list, not the actions.
   const canManage = can(P.STAFF_ACCOUNT_MANAGE)
   const { propertyId } = useProperty()
-  // Owners reset anyone; admins change their own password and reset their
-  // receptionists, but not a peer admin's.
-  const canSetPassword = (u) => canManage
-    && (role === 'owner' || u.id === user?.id || (role === 'admin' && u.role === 'receptionist'))
+  // Who you may act on comes from the server (Phase 3a, by permissions): a
+  // role below your own, or your own account. Never a peer or someone above.
+  const isSelf = (u) => u.id === user?.id
+  const canSetPassword = (u) => canManage && (u.manageable || isSelf(u))
   const [staff, setStaff] = useState([])
+  const [assignable, setAssignable] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [modal, setModal] = useState(null) // 'add' | { type: 'reset', user, self } | { type: 'history', user }
@@ -39,7 +40,9 @@ export default function Staff() {
   const refresh = useCallback(async () => {
     if (!propertyId) return
     try {
-      setStaff(await listStaff(propertyId))
+      const directory = await staffDirectory(propertyId)
+      setStaff(directory.users)
+      setAssignable(directory.assignable_roles ?? [])
       setError(null)
     } catch {
       setError('Could not load staff.')
@@ -64,12 +67,12 @@ export default function Staff() {
         <div>
           <h1 className="mb-0 text-2xl font-bold">Staff</h1>
           <small className="text-muted">
-            {role === 'owner'
-              ? 'Add Managers and Front Desk Staff for the selected property.'
-              : 'Add Front Desk Staff for your property.'}
+            {scope === 'platform'
+              ? 'Add staff for the selected property.'
+              : `Add ${assignable.map((r) => r.name).join(' or ') || 'staff'} for your property.`}
           </small>
         </div>
-        {canManage && <Button onClick={() => setModal('add')}>Add staff</Button>}
+        {canManage && assignable.length > 0 && <Button onClick={() => setModal('add')}>Add staff</Button>}
       </div>
 
       {error && <Alert variant="danger">{error}</Alert>}
@@ -95,14 +98,14 @@ export default function Staff() {
                     <tr key={u.id} className={u.is_active ? '' : 'text-muted'}>
                       <td className="font-semibold">{u.name}</td>
                       <td>{u.email}</td>
-                      <td><Badge bg={ROLE_VARIANT[u.role] ?? 'secondary'}>{roleLabel(u.role)}</Badge></td>
+                      <td><Badge bg={ROLE_VARIANT[u.role] ?? 'secondary'}>{u.role_name ?? roleLabel(u.role)}</Badge></td>
                       <td>
                         {u.is_active
                           ? <Badge bg="success">active</Badge>
                           : <Badge bg="secondary">inactive</Badge>}
                       </td>
                       <td className="whitespace-nowrap text-right">
-                        {canSeeHistory && (
+                        {canSeeHistory && (u.manageable || isSelf(u)) && (
                           <Button size="sm" variant="outline-secondary" className="mr-2"
                             onClick={() => setModal({ type: 'history', user: u })}>
                             History
@@ -114,7 +117,7 @@ export default function Staff() {
                             {u.id === user?.id ? 'Change password' : 'Reset password'}
                           </Button>
                         )}
-                        {canManage && u.id !== user?.id && (
+                        {canManage && u.manageable && !isSelf(u) && (
                           <Button size="sm" variant={u.is_active ? 'outline-danger' : 'outline-success'}
                             onClick={() => setSwitching(u)}>
                             {u.is_active ? 'Deactivate' : 'Reactivate'}
@@ -137,7 +140,7 @@ export default function Staff() {
 
       {modal === 'add' && (
         <AddStaffModal
-          role={role}
+          roles={assignable}
           propertyId={propertyId}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); refresh() }}
@@ -178,11 +181,10 @@ export default function Staff() {
   )
 }
 
-function AddStaffModal({ role, propertyId, onClose, onSaved }) {
-  // The Platform Owner chooses the role; Managers can only add Front Desk Staff.
-  const allowedRoles = role === 'owner' ? ['admin', 'receptionist'] : ['receptionist']
+function AddStaffModal({ roles, propertyId, onClose, onSaved }) {
+  // The roles you may give (Phase 3a): below your own; any for the Platform Owner.
   const [form, setForm] = useState({
-    name: '', email: '', password: '', role: allowedRoles[0],
+    name: '', email: '', password: '', role: roles[0]?.code ?? '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const { run, busy, err } = useSubmit(async () => {
@@ -198,8 +200,8 @@ function AddStaffModal({ role, propertyId, onClose, onSaved }) {
           {err && <Alert variant="danger">{err}</Alert>}
           <Form.Group className="mb-4">
             <Form.Label>Role</Form.Label>
-            <Form.Select value={form.role} onChange={set('role')} disabled={allowedRoles.length === 1}>
-              {allowedRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+            <Form.Select value={form.role} onChange={set('role')} disabled={roles.length === 1}>
+              {roles.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
             </Form.Select>
           </Form.Group>
           <Form.Group className="mb-4">
