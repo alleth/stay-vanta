@@ -326,7 +326,11 @@ final class RoleDefinitions
             // Custom roles (Phase 3b) have no code to match: their history must
             // replay to the grants they hold.
             $custom = 0;
-            foreach ($this->roles()->find()->where(['kind' => 'custom'])->all() as $role) {
+            // A fresh database runs G7's import before Phase 3b adds `kind`.
+            $customRoles = $this->connection->getSchemaCollection()->describe('roles')->hasColumn('kind')
+                ? $this->roles()->find()->where(['kind' => 'custom'])->all()
+                : [];
+            foreach ($customRoles as $role) {
                 $data = $this->held((int)$role->id);
                 $replayed = $this->replay((int)$role->id);
                 sort($data);
