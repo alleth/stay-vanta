@@ -232,6 +232,11 @@ class AccessEventsApiTest extends TestCase
     {
         $deskId = $this->userIdFor($this->deskToken);
         $this->getTableLocator()->get('Users')->updateAll(['created' => '2026-02-01 03:00:00'], ['id' => $deskId]);
+        // Accounts from before step 10: the retired column said where they
+        // worked (the app stopped writing it in Phase 3d-2).
+        $this->connection->update('users', ['property_id' => $this->propertyId], [
+            'id IN' => [$this->userIdFor($this->adminToken), $deskId],
+        ]);
         $backfill = new AccessBackfill($this->connection);
 
         $added = $backfill->run($this->propertyId);

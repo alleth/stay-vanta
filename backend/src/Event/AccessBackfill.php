@@ -73,10 +73,15 @@ final class AccessBackfill
         foreach (array_chunk($query->all()->toList(), self::BATCH) as $batch) {
             $this->connection->transactional(function () use ($batch, $events, $known, &$result, &$skipped): void {
                 foreach ($batch as $user) {
-                    $property = $user->get('property_id') !== null ? (int)$user->get('property_id') : null;
+                    $platform = (bool)$user->get('is_platform') || $user->get('role') === 'owner';
+                    // The access ledger's rule since Phase 3d-1: a person's
+                    // events are at their membership's property; the retired
+                    // column only for an account that never had one.
+                    $column = $user->get('property_id') !== null ? (int)$user->get('property_id') : null;
+                    $property = $platform ? null : (AccessEventsTable::propertyOfPerson((int)$user->get('id')) ?? $column);
                     // An account made since 3d-2 has no users.property_id and
                     // already has its account_created: never guess its scope.
-                    $unknownScope = $property === null && $user->get('role') !== 'owner';
+                    $unknownScope = $property === null && !$platform;
                     $unknownProperty = $property !== null && !isset($known[$property]);
                     if ($unknownProperty || $user->get('created') === null || $unknownScope) {
                         $skipped[] = (int)$user->get('id');
@@ -93,6 +98,7 @@ final class AccessBackfill
                     );
                     $events->record($context, AccessEventsTable::ACCOUNT_CREATED, $user, [
                         'snapshot' => ['active_at_import' => (bool)$user->get('is_active')],
+                        'propertyId' => $property,
                     ]);
                     $result['account_created']++;
                 }

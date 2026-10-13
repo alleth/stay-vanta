@@ -71,12 +71,11 @@ class ReservationDiscountsApiTest extends TestCase
 
         [$token, $digest] = UsersTable::issueToken();
         $this->token = $token;
+        // No users.role / users.property_id (Phase 3d-2): the membership below.
         $users->saveOrFail($users->newEntity([
-            'property_id' => $this->propertyId,
             'name' => 'Discounts API Receptionist',
             'email' => 'discounts-api@example.test',
             'password' => 'secret123',
-            'role' => 'receptionist',
             'is_active' => true,
         ]));
         $user = $users->find()->where(['email' => 'discounts-api@example.test'])->firstOrFail();
@@ -127,8 +126,15 @@ class ReservationDiscountsApiTest extends TestCase
             $this->getTableLocator()->get('ReservationDiscounts')->deleteAll(['reservation_id IN' => $ids]);
         }
         $reservations->deleteAll(['property_id' => $this->propertyId]);
-        foreach (['Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'PropertyMemberships', 'Users'] as $name) {
+        // The test's accounts, by their memberships (users.property_id is no
+        // longer written, Phase 3d-2), found before the memberships go.
+        $userIds = $this->getTableLocator()->get('PropertyMemberships')->find()
+            ->where(['property_id' => $this->propertyId])->all()->extract('user_id')->toList();
+        foreach (['Invoices', 'Guests', 'RoomRates', 'Rooms', 'BookingSources', 'PropertyMemberships'] as $name) {
             $this->getTableLocator()->get($name)->deleteAll(['property_id' => $this->propertyId]);
+        }
+        if ($userIds) {
+            $this->getTableLocator()->get('Users')->deleteAll(['id IN' => $userIds]);
         }
         // Ledger rows refuse ORM deletes: clear them through the connection.
         $connection = $this->getTableLocator()->get('Properties')->getConnection();
