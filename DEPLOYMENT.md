@@ -189,9 +189,14 @@ Set up once per environment (staging first), in the Railway dashboard:
 
 1. **New → GitHub Repo** → this repo; name the service `retention`.
 2. **Settings → Source:** Root Directory `backend`; branch `main` on staging, `production` on
-   production (the same branch as that environment's `stay-vanta` API).
-3. **Settings → Deploy → Cron Schedule:** `0 19 * * *` (03:00 Manila, UTC+8). Leave the start command
-   empty: the image's entrypoint decides.
+   production (the same branch as that environment's `stay-vanta` API). Turn on **Wait for CI**
+   (R2): a commit whose CI failed never reaches the job, as for the API.
+3. **Settings → Config-as-code → Railway Config File:** `/backend/railway.retention.json` (the path
+   is from the repository root, not the root directory). It builds the same image as the API and
+   sets the schedule, `0 19 * * *` (cron times are UTC: 03:00 Manila), and `restartPolicyType:
+   NEVER` (R1): a failed run stays one failed run with one log, and isn't retried into extra
+   `retention_runs` rows; investigate it, then Run now. Leave the start command empty: the
+   image's entrypoint decides. `DeploymentConfigTest` keeps this file in step with `railway.json`.
 4. **Variables:** `STAYVANTA_JOB=retention` (the entrypoint then runs only the routine and exits: no
    migrations, no web server), plus the API's database and app variables as **references**, never
    literals: `DATABASE_URL=${{MySQL.MYSQL_PUBLIC_URL}}`, `SECURITY_SALT=${{stay-vanta.SECURITY_SALT}}`,
@@ -199,7 +204,10 @@ Set up once per environment (staging first), in the Railway dashboard:
 5. Run it once (**Deploy → Run now**) and check its log: one line per policy and the check, which
    must say 0 past the cutoff. Until October 2027 nothing is due, so it clears 0 rows.
 
-The job needs no CI gate of its own beyond the API's: it runs code already deployed on that branch.
+Order (R3): staging first, then production, then verify each environment's first scheduled run.
+A run is verified when it exits 0, both policies report `0 row(s) cleared` and both checks `0 past
+the cutoff`, the two newest `retention_runs` rows are real runs (`dry_run = 0`) sharing one run id,
+and the log has no migration, Apache, warning or fallback lines (the job never starts the API).
 
 ## 7. Subscription enforcement (G6)
 
