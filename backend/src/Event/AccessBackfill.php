@@ -78,7 +78,9 @@ final class AccessBackfill
                     // events are at their membership's property; the retired
                     // column only for an account that never had one.
                     $column = $user->get('property_id') !== null ? (int)$user->get('property_id') : null;
-                    $property = $platform ? null : (AccessEventsTable::propertyOfPerson((int)$user->get('id')) ?? $column);
+                    $property = $platform
+                        ? null
+                        : (AccessEventsTable::propertyOfPerson((int)$user->get('id')) ?? $column);
                     // An account made since 3d-2 has no users.property_id and
                     // already has its account_created: never guess its scope.
                     $unknownScope = $property === null && !$platform;
