@@ -78,9 +78,7 @@ class UsersController extends AppController
                 // An ended membership: no role here, not on the staff list.
                 continue;
             }
-            $user->set('role', $role['code']);
-            $user->set('role_id', $role['id']);
-            $user->set('role_name', $role['name']);
+            $this->presentRole($user, $role);
             $user->set('manageable', StaffHierarchy::manages($this->access(), $role['id']));
             $staff[] = $user;
         }
@@ -130,9 +128,8 @@ class UsersController extends AppController
             'name' => $this->request->getData('name'),
             'email' => $this->request->getData('email'),
             'password' => $this->request->getData('password'),
-            // Legacy column (C-D2): a built-in's code, else empty.
-            'role' => $role['kind'] === 'system' ? $role['code'] : null,
-            'property_id' => $propertyId,
+            // users.role / users.property_id are no longer written (Phase 3d-2):
+            // the membership below is where the role and property live.
             'is_active' => true,
         ]);
 
@@ -159,7 +156,7 @@ class UsersController extends AppController
         }
 
         $this->response = $this->response->withStatus(201);
-        $this->set('user', $user);
+        $this->set('user', $this->presented($user));
         $this->viewBuilder()->setOption('serialize', ['user']);
     }
 
@@ -214,11 +211,8 @@ class UsersController extends AppController
             }
             // Compared with the role the person holds (their membership's),
             // never users.role, which a custom-role holder doesn't have (3c-2).
+            // The membership is the change (Phase 3d-2): users.role isn't written.
             $roleChange = $role !== null ? $this->roleChangeFor($user, $role['id']) : null;
-            if ($roleChange !== null) {
-                // Legacy column (C-D2): a built-in's code, else empty.
-                $data['role'] = $roleChange['after']['kind'] === 'system' ? $roleChange['after']['code'] : null;
-            }
             if ($events === [] && $roleChange === null) {
                 throw new BadRequestException('Nothing to change.');
             }
@@ -280,8 +274,35 @@ class UsersController extends AppController
             return;
         }
 
-        $this->set('user', $user);
+        $this->set('user', $this->presented($user));
         $this->viewBuilder()->setOption('serialize', ['user']);
+    }
+
+    /**
+     * An account as the API shows it (3D2-D2): `role`, `role_id`, `role_name`
+     * and `property_id` from its active membership, so the response is what it
+     * was while users.role / users.property_id were written. Output only; the
+     * entity isn't saved again.
+     */
+    private function presented(User $user): User
+    {
+        $role = StaffHierarchy::rolesOf([(int)$user->id])[(int)$user->id] ?? null;
+        if ($role !== null) {
+            $this->presentRole($user, $role);
+        }
+
+        return $user;
+    }
+
+    /**
+     * @param array{id: int, code: string, name: string, property_id: int} $role The membership's role.
+     */
+    private function presentRole(User $user, array $role): void
+    {
+        $user->set('role', $role['code']);
+        $user->set('role_id', $role['id']);
+        $user->set('role_name', $role['name']);
+        $user->set('property_id', $role['property_id']);
     }
 
     /**
@@ -491,8 +512,8 @@ class UsersController extends AppController
     /**
      * Give a new account its role at its property (step 10b): the membership
      * its access is read from, recorded as `membership_granted` in the
-     * caller's transaction. `users.role` / `users.property_id` are still
-     * written (a built-in's code; empty for a custom role, C-D2) until 3d.
+     * caller's transaction. The membership is the only record of the role
+     * and property (users.role / users.property_id: not written since 3d-2).
      *
      * @param array{id: int, code: string, name: string} $role The locked role.
      */

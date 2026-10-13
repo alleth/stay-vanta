@@ -269,14 +269,19 @@ Guest search and matching go in POST bodies, and the Apache log drops query stri
   platform) from the active membership or the flag; `AppController::access()` holds it, and
   `boundPropertyId()` / `effectivePropertyId()` / `permissions()` read it. New accounts get a
   membership in the same transaction (`membership_granted`); the import (`MembershipImport`)
-  made the rest. `users.role` / `users.property_id` are still written (Phase 3d: 3d-2 stops
-  writing, 3d-3 archives them to `legacy_user_columns` and drops them) but, since 3d-1, read by
-  nothing at request time: access events take the person's property from their membership
+  made the rest. `users.role` / `users.property_id` are retiring (Phase 3d): since 3d-2 nothing
+  writes them (not assignable on `User`, no validation rule; existing values are kept for the
+  archive), and 3d-3 copies them into the append-only `legacy_user_columns` (created empty in
+  3d-2) and drops them once `App\Auth\LegacyUserColumns::fingerprint()` of the copy equals the
+  columns'. API output (`GET /users`, account responses) takes `role` / `property_id` from the
+  membership. Since 3d-1 they are read by nothing at request time: access events take the person's property from their membership
   (`AccessEventsTable::propertyOfPerson()`), staff lists, `findManageable()` and the Operations
   Staff card select people with an active membership at the property, and there is no
   Users↔Properties association. `PermissionsTest` allows only the one-time imports
-  (`MembershipImport`, `AccessBackfill`) to read them; `bin/cake roles --observe` logs how far they
-  still agree with the memberships. G8 removed the membership and "owner with no property"
+  (`MembershipImport`, `AccessBackfill`, column-aware: a logged no-op once the columns are gone)
+  and `LegacyUserColumns` to read them, in PHP or in SQL strings; `bin/cake roles --observe` logs
+  how far they still agree with the memberships and their fingerprint (the 3d-3 baseline). Test
+  accounts are cleaned by `makeUser()`'s list and their memberships, never by the column. G8 removed the membership and "owner with no property"
   fallbacks. No active membership and no flag = no access, and sign-in is refused. Test users get their membership from `ApiScenarioTrait::makeUser()`.
   **Part 2 (built):** the platform flag grants only `platform.*`, `settings.property.view` and
   `staff.account.*` (the 24 † grants are gone, F3 closed). Hotel data only through a **support

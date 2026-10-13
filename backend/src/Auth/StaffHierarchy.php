@@ -138,7 +138,7 @@ final class StaffHierarchy
      *
      * @param list<int> $userIds The people.
      * @param int|null $propertyId Only memberships at this property.
-     * @return array<int, array{id: int, code: string, name: string}>
+     * @return array<int, array{id: int, code: string, name: string, property_id: int}>
      */
     public static function rolesOf(array $userIds, ?int $propertyId = null): array
     {
@@ -148,6 +148,7 @@ final class StaffHierarchy
         $query = TableRegistry::getTableLocator()->get('PropertyMemberships')->find('active')
             ->select([
                 'user_id' => 'PropertyMemberships.user_id',
+                'property_id' => 'PropertyMemberships.property_id',
                 'id' => 'Roles.id', 'code' => 'Roles.code', 'name' => 'Roles.name',
             ])
             ->innerJoinWith('Roles')
@@ -159,7 +160,12 @@ final class StaffHierarchy
         }
         $roles = [];
         foreach ($query->all() as $row) {
-            $roles[(int)$row['user_id']] ??= ['id' => (int)$row['id'], 'code' => $row['code'], 'name' => $row['name']];
+            $roles[(int)$row['user_id']] ??= [
+                'id' => (int)$row['id'],
+                'code' => $row['code'],
+                'name' => $row['name'],
+                'property_id' => (int)$row['property_id'],
+            ];
         }
 
         return $roles;

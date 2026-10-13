@@ -14,6 +14,10 @@ use Cake\Validation\Validator;
  */
 class UsersTable extends Table
 {
+    /**
+     * The built-in role codes: the Platform Owner and the two presets. Codes,
+     * not a column: users.role is no longer written (Phase 3d-2).
+     */
     public const ROLES = ['owner', 'admin', 'receptionist'];
 
     /** Days a freshly issued API token stays valid. */
@@ -83,12 +87,8 @@ class UsersTable extends Table
             ->requirePresence('password', 'create')
             ->notEmptyString('password');
 
-        // A legacy column (dropped in Phase 3d): a built-in role's code, or
-        // empty for a custom-role holder (C-D2), never a built-in they don't hold.
-        $validator
-            ->inList('role', self::ROLES)
-            ->allowEmptyString('role')
-            ->requirePresence('role', 'create');
+        // users.role / users.property_id are no longer written (Phase 3d-2):
+        // a person's role and property are their membership's.
 
         return $validator;
     }

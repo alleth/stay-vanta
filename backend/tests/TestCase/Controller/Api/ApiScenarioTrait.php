@@ -30,6 +30,13 @@ trait ApiScenarioTrait
     private array $scenarioOwnerIds = [];
 
     /**
+     * @var list<int> Every user makeUser() created, removed in cleanupScenario()
+     *   (Phase 3d-2: users.property_id is no longer written, so accounts are
+     *   found by this list and by their memberships, never by that column).
+     */
+    private array $scenarioUserIds = [];
+
+    /**
      * @var string|false|null The enforcement phase row before usePhase(): false = untouched, null = absent.
      */
     private string|false|null $phaseBefore = false;
@@ -71,7 +78,7 @@ trait ApiScenarioTrait
     private const PROPERTY_SCOPED_TABLES = [
         'FoodOrders', 'Invoices', 'Reservations', 'Guests', 'FoodMenuItems',
         'InventoryItems', 'InventoryCategories', 'ReceiptSeries', 'ExtraCharges', 'PromoRates',
-        'BookingSources', 'RoomRates', 'Rooms', 'PropertyMemberships', 'SupportSessions', 'Users',
+        'BookingSources', 'RoomRates', 'Rooms', 'PropertyMemberships', 'SupportSessions',
     ];
 
     /**
@@ -103,14 +110,15 @@ trait ApiScenarioTrait
     {
         $users = $this->getTableLocator()->get('Users');
         [$token, $digest] = UsersTable::issueToken();
+        // No users.role / users.property_id (Phase 3d-2): the membership or
+        // the platform flag below is where the role and property live.
         $user = $users->saveOrFail($users->newEntity([
-            'property_id' => $propertyId,
             'name' => ucfirst($role) . ' ' . $email,
             'email' => $email,
             'password' => 'secret123',
-            'role' => $role,
             'is_active' => true,
         ]));
+        $this->scenarioUserIds[] = (int)$user->id;
         // Set after creation: these fields aren't mass-assignable.
         $user->set('api_token', $digest);
         $user->set('token_expires', new DateTime('+30 days'));
@@ -211,6 +219,16 @@ trait ApiScenarioTrait
     protected function cleanupScenario(): void
     {
         $locator = $this->getTableLocator();
+        // The accounts to remove (Phase 3d-2): every one makeUser() made, and
+        // anyone with a membership at these properties (accounts the API or
+        // create_user made), found before the memberships go.
+        $userIds = $this->scenarioUserIds;
+        if ($this->scenarioPropertyIds) {
+            $userIds = array_merge($userIds, $locator->get('PropertyMemberships')->find()
+                ->select(['user_id'])->where(['property_id IN' => $this->scenarioPropertyIds])
+                ->disableHydration()->all()->extract('user_id')->map(fn($id) => (int)$id)->toList());
+        }
+        $userIds = array_values(array_unique($userIds));
         foreach ($this->scenarioPropertyIds as $propertyId) {
             // Soft-deleted ones too (step 8): their discounts and extras still exist.
             $reservationIds = $locator->get('Reservations')->find('all', withDeleted: true)
@@ -234,15 +252,17 @@ trait ApiScenarioTrait
             }
             $locator->get('Properties')->deleteAll(['id' => $propertyId]);
         }
-        if ($this->scenarioOwnerIds) {
+        $userIds = array_values(array_unique(array_merge($userIds, $this->scenarioOwnerIds)));
+        if ($userIds) {
             // Platform events (step 10) have no property: cleared by person.
             $locator->get('Users')->getConnection()
-                ->delete('access_events', ['subject_user_id IN' => $this->scenarioOwnerIds]);
-            $locator->get('PropertyMemberships')->deleteAll(['user_id IN' => $this->scenarioOwnerIds]);
-            $locator->get('Users')->deleteAll(['id IN' => $this->scenarioOwnerIds]);
+                ->delete('access_events', ['subject_user_id IN' => $userIds]);
+            $locator->get('PropertyMemberships')->deleteAll(['user_id IN' => $userIds]);
+            $locator->get('Users')->deleteAll(['id IN' => $userIds]);
         }
         $this->scenarioPropertyIds = [];
         $this->scenarioOwnerIds = [];
+        $this->scenarioUserIds = [];
         if ($this->phaseBefore !== false) {
             $connection = $locator->get('Properties')->getConnection();
             if ($this->phaseBefore === null) {

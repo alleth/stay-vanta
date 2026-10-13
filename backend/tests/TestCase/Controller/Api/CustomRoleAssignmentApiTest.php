@@ -167,7 +167,7 @@ class CustomRoleAssignmentApiTest extends TestCase
         $this->assertResponseOk();
         $this->assertCount(3, $this->memberships($deskId));
         $this->assertSame(1, $this->getTableLocator()->get('PropertyMemberships')->find('active')->where(['user_id' => $deskId])->count());
-        $this->assertSame('receptionist', $this->getTableLocator()->get('Users')->get($deskId)->role);
+        $this->assertNull($this->getTableLocator()->get('Users')->get($deskId)->role, 'never written since 3d-2');
 
         // The timeline, newest first, with who and why.
         // The Manager reads access history (the Platform Owner holds no staff.access_history.view).

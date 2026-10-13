@@ -5,6 +5,7 @@ namespace App\Test\TestCase\Auth;
 
 use App\Auth\Permissions;
 use App\Auth\PermissionSet;
+use App\Model\Entity\User;
 use App\Model\Table\UsersTable;
 use App\Test\TestSuite\PermissionCatalog;
 use Cake\TestSuite\TestCase;
@@ -101,7 +102,7 @@ class PermissionsTest extends TestCase
      */
     public function testNothingReadsTheLegacyUserColumns(): void
     {
-        $allowed = ['Event/MembershipImport.php', 'Event/AccessBackfill.php'];
+        $allowed = ['Event/MembershipImport.php', 'Event/AccessBackfill.php', 'Auth/LegacyUserColumns.php'];
         // A user entity is $user / $target / currentUser; `$subject` is a
         // user only for its role (other ledgers' subjects own a property_id).
         $pattern = '/\$(?:user|target|this->currentUser)\??->(?:role|property_id)\b(?!\s*=[^=>])'
@@ -119,6 +120,49 @@ class PermissionsTest extends TestCase
             }
         }
         $this->assertSame([], $found, "Read the person's role from their membership (StaffHierarchy::rolesOf, access()).");
+    }
+
+    /**
+     * The same guard for SQL written by hand (Phase 3d-2, 3D2-D6): a string
+     * literal naming u.role, u.property_id, users.role or users.property_id.
+     * Comments are skipped (they may explain the retirement); only the
+     * imports and the retirement watch itself may.
+     */
+    public function testNoSqlNamesTheLegacyUserColumns(): void
+    {
+        $allowed = ['Event/MembershipImport.php', 'Event/AccessBackfill.php', 'Auth/LegacyUserColumns.php'];
+        $found = [];
+        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(APP));
+        foreach ($files as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            $relative = str_replace(DS, '/', substr($file->getPathname(), strlen(APP)));
+            if (in_array($relative, $allowed, true)) {
+                continue;
+            }
+            foreach (token_get_all((string)file_get_contents($file->getPathname())) as $token) {
+                $isString = is_array($token) && in_array($token[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true);
+                if ($isString && preg_match('/\b(?:u|users)\.(?:role|property_id)\b/i', $token[1])) {
+                    $found[] = "$relative: {$token[1]}";
+                }
+            }
+        }
+        $this->assertSame([], $found, 'users.role / users.property_id are retired (Phase 3d).');
+    }
+
+    /**
+     * And nothing can write them (Phase 3d-2): not assignable on the entity,
+     * no validation rule that would expect them.
+     */
+    public function testNothingCanWriteTheLegacyUserColumns(): void
+    {
+        $user = new User();
+        $this->assertFalse($user->isAccessible('role'));
+        $this->assertFalse($user->isAccessible('property_id'));
+        $validator = $this->getTableLocator()->get('Users')->getValidator();
+        $this->assertFalse($validator->hasField('role'));
+        $this->assertFalse($validator->hasField('property_id'));
     }
 
     /**

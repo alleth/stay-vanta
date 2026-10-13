@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Event;
 
+use App\Auth\LegacyUserColumns;
 use App\Model\Table\AccessEventsTable;
 use Cake\Database\Connection;
 use Cake\Log\Log;
@@ -41,7 +42,7 @@ final class AccessBackfill
     public function run(?int $propertyId = null): array
     {
         $result = ['account_created' => 0, 'skipped' => 0];
-        if (!$this->hasLedger()) {
+        if (!$this->hasLedger() || !$this->hasLegacyColumns('access backfill')) {
             return $result;
         }
         $locator = TableRegistry::getTableLocator();
@@ -73,7 +74,11 @@ final class AccessBackfill
             $this->connection->transactional(function () use ($batch, $events, $known, &$result, &$skipped): void {
                 foreach ($batch as $user) {
                     $property = $user->get('property_id') !== null ? (int)$user->get('property_id') : null;
-                    if (($property !== null && !isset($known[$property])) || $user->get('created') === null) {
+                    // An account made since 3d-2 has no users.property_id and
+                    // already has its account_created: never guess its scope.
+                    $unknownScope = $property === null && $user->get('role') !== 'owner';
+                    $unknownProperty = $property !== null && !isset($known[$property]);
+                    if ($unknownProperty || $user->get('created') === null || $unknownScope) {
                         $skipped[] = (int)$user->get('id');
                         continue;
                     }
@@ -121,12 +126,17 @@ final class AccessBackfill
      */
     public function check(?int $propertyId = null): array
     {
-        if (!$this->hasLedger()) {
+        if (!$this->hasLedger() || !$this->hasLegacyColumns('access backfill check')) {
             return [];
         }
         $where = $propertyId !== null ? 'WHERE p.id = ' . (int)$propertyId : '';
         $unrecorded = "NOT EXISTS (SELECT 1 FROM access_events e WHERE e.subject_user_id = u.id
             AND e.event_type = 'account_created')";
+        // The platform's accounts by the platform flag once it exists (step
+        // 10b): since 3d-2 a new staff account has no users.property_id either.
+        $platformAccount = $this->connection->getSchemaCollection()->describe('users')->hasColumn('is_platform')
+            ? 'u.is_platform = 1'
+            : 'u.property_id IS NULL';
         $rows = $this->connection->execute(
             "SELECT p.id,
                 (SELECT COUNT(*) FROM users u WHERE u.property_id = p.id) AS accounts,
@@ -138,8 +148,8 @@ final class AccessBackfill
         if ($propertyId === null) {
             $platform = $this->connection->execute(
                 "SELECT 0 AS id,
-                    (SELECT COUNT(*) FROM users u WHERE u.property_id IS NULL) AS accounts,
-                    (SELECT COUNT(*) FROM users u WHERE u.property_id IS NULL AND $unrecorded) AS unrecorded,
+                    (SELECT COUNT(*) FROM users u WHERE $platformAccount) AS accounts,
+                    (SELECT COUNT(*) FROM users u WHERE $platformAccount AND $unrecorded) AS unrecorded,
                     (SELECT COUNT(*) FROM access_events e WHERE e.property_id IS NULL
                         AND e.event_type = 'account_created' AND e.source = 'import') AS imported",
             )->fetchAll('assoc');
@@ -172,5 +182,20 @@ final class AccessBackfill
     private function hasLedger(): bool
     {
         return in_array('access_events', $this->connection->getSchemaCollection()->listTables(), true);
+    }
+
+    /**
+     * Whether users.role / users.property_id still exist (Phase 3d, 3D2-D3):
+     * once 3d-3 drops them this one-time import has nothing to read, so it
+     * logs that and reports complete instead of failing.
+     */
+    private function hasLegacyColumns(string $what): bool
+    {
+        if ((new LegacyUserColumns($this->connection))->exist()) {
+            return true;
+        }
+        Log::info("$what: the legacy user columns are retired; nothing to import");
+
+        return false;
     }
 }

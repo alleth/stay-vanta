@@ -19,8 +19,8 @@ use LogicException;
  *
  * Where the account's access comes from (Phase 3d-1, 3D-D5): the platform flag
  * for `--role owner`, else a membership with that built-in role at
- * `--property-id`. Nothing reads users.role / users.property_id back; they
- * are still written until 3d-2.
+ * `--property-id`. users.role / users.property_id are neither read nor
+ * written (Phase 3d-2).
  */
 class CreateUserCommand extends Command
 {
@@ -63,9 +63,8 @@ class CreateUserCommand extends Command
             'name' => $args->getOption('name'),
             'email' => $args->getOption('email'),
             'password' => $args->getOption('password'),
-            // Legacy columns, written until 3d-2 and read by nothing.
-            'role' => $role,
-            'property_id' => $propertyId,
+            // No users.role / users.property_id (Phase 3d-2): the platform flag
+            // or the membership below says where the account works.
             'is_active' => true,
         ]);
 

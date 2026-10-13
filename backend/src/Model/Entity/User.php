@@ -22,9 +22,8 @@ use Cake\ORM\Entity;
  */
 class User extends Entity
 {
+    // users.role / users.property_id are retired (Phase 3d-2): never assignable.
     protected array $_accessible = [
-        'property_id' => true,
-        'role' => true,
         'name' => true,
         'email' => true,
         'password' => true,

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Event;
 
+use App\Auth\LegacyUserColumns;
 use App\Auth\RoleDefinitions;
 use App\Model\Table\AccessEventsTable;
 use App\Model\Table\RolesTable;
@@ -79,7 +80,7 @@ final class MembershipImport
     public function run(?int $propertyId = null): array
     {
         $result = ['memberships' => 0, 'platform' => 0, 'skipped' => 0];
-        if (!$this->hasTables()) {
+        if (!$this->hasTables() || !$this->hasLegacyColumns('membership import')) {
             return $result;
         }
         // The presets must exist to grant memberships; this never changes what
@@ -242,7 +243,7 @@ final class MembershipImport
      */
     public function check(?int $propertyId = null): array
     {
-        if (!$this->hasTables()) {
+        if (!$this->hasTables() || !$this->hasLegacyColumns('membership import check')) {
             return [];
         }
         $where = $propertyId !== null ? 'WHERE p.id = ' . (int)$propertyId : '';
@@ -315,6 +316,22 @@ final class MembershipImport
             null,
             $now,
         );
+    }
+
+    /**
+     * Whether users.role / users.property_id still exist (Phase 3d, 3D2-D3):
+     * once 3d-3 drops them this one-time import has nothing to read, so it
+     * logs that and reports complete instead of failing. seedRoles() never
+     * reads them and keeps working.
+     */
+    private function hasLegacyColumns(string $what): bool
+    {
+        if ((new LegacyUserColumns($this->connection))->exist()) {
+            return true;
+        }
+        Log::info("$what: the legacy user columns are retired; nothing to import");
+
+        return false;
     }
 
     /**

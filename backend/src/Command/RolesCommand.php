@@ -62,13 +62,23 @@ class RolesCommand extends Command
         $legacy = $check['legacy'] ?? null;
         if ($legacy !== null) {
             // Phase 3d: the retiring users.role / users.property_id, compared with the memberships.
+            $f = $legacy['fingerprint'];
             $io->out(sprintf(
                 'roles: legacy user columns: %d role, %d property, %d platform disagreement(s);'
-                . ' %d staff without an active membership',
+                . ' %d staff without an active membership; %d with empty columns',
                 $legacy['role'],
                 $legacy['property'],
                 $legacy['platform'],
                 $legacy['without_membership'],
+                $legacy['empty'],
+            ));
+            // The baseline 3d-3's archive must reproduce exactly (3D2-D5).
+            $io->out(sprintf(
+                'roles: legacy fingerprint: %d accounts, %d with a role, %d with a property, checksum %s',
+                $f['accounts'],
+                $f['with_role'],
+                $f['with_property'],
+                $f['checksum'],
             ));
         }
         $io->out($check['complete']

@@ -78,14 +78,20 @@ class MembershipsApiTest extends TestCase
     {
         $users = $this->getTableLocator()->get('Users');
         $user = $users->saveOrFail($users->newEntity([
-            'property_id' => $propertyId,
             'name' => 'Legacy ' . $role,
             'email' => 'member-legacy-' . uniqid() . '@example.test',
             'password' => 'secret123',
-            'role' => $role,
             'is_active' => true,
         ]));
-        $users->updateAll(['created' => new DateTime($created)], ['id' => $user->id]);
+        // An account from before memberships: only the retired columns say
+        // where it worked (written through the connection; the app no longer
+        // writes them, Phase 3d-2).
+        $users->getConnection()->update(
+            'users',
+            ['role' => $role, 'property_id' => $propertyId, 'created' => new DateTime($created)],
+            ['id' => $user->id],
+            ['created' => 'datetime'],
+        );
         $this->looseUserIds[] = (int)$user->id;
 
         return (int)$user->id;
@@ -254,7 +260,7 @@ class MembershipsApiTest extends TestCase
         $membership = $this->getTableLocator()->get('PropertyMemberships')->find('active')
             ->contain(['Roles'])->where(['user_id' => $deskId])->firstOrFail();
         $this->assertSame('admin', $membership->role->code);
-        $this->assertSame('admin', $this->getTableLocator()->get('Users')->get($deskId)->role, 'still written');
+        $this->assertNull($this->getTableLocator()->get('Users')->get($deskId)->role, 'users.role is no longer written (3d-2)');
 
         [$event] = $this->eventsOf($deskId, 'membership_role_changed');
         $this->assertSame($this->userIdFor($ownerToken), (int)$event->actor_id);
