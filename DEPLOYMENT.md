@@ -223,8 +223,11 @@ actually stopped the duplicate seen on 2026-10-18 (two deployments, each running
    **references**, never literals: `DATABASE_URL=${{MySQL.MYSQL_PUBLIC_URL}}`,
    `SECURITY_SALT=${{stay-vanta.SECURITY_SALT}}`, `DEBUG=false`,
    `APP_FULL_BASE_URL=${{stay-vanta.APP_FULL_BASE_URL}}`.
-5. **Every deployment of this service starts the job** (seen on 2026-10-18 without a schedule): the
-   first one performs the hotel day's run, later ones that day are no-ops.
+5. **Once the schedule is applied, a deployment doesn't start the job** (verified 2026-10-18: the
+   deployment that applied it built the image and left its instance `CREATED`, with an empty log);
+   the job runs at 19:00 UTC or on Run now. Without a schedule, every deployment starts it (seen the
+   same day): set the schedule before anything else deploys, and the once-per-day guard covers the
+   rest.
 
 ### What a run logs
 
