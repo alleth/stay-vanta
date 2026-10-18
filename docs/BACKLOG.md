@@ -154,13 +154,17 @@ once per hotel day) stay regardless.
   is no longer stamped or returned (G8b; L-D2: the column and its values stay). The catch-all routes that answered 401 for a non-existent API
   path were removed in G8a: an unknown path now answers 404.
 
-- [ ] **Staging database sleeps when idle (observed 2026-10-04, not a blocker).** Railway stops the
-  staging MySQL container about 10 minutes after its last activity ("Received SHUTDOWN from user
-  <via user signal>") and wakes it on the next request, which takes about 45 s; requests in that
-  window get 500 "MySQL server has gone away". It cost one false alarm during the 7c-1 check (every
-  money endpoint 500, rerun clean once MySQL was ready). Either turn off sleeping for the staging
-  MySQL service, or before a staging comparison wake it and wait for "ready for connections" in its
-  log. Production has shown no sleeping.
+- [x] **Staging database slept when idle (observed 2026-10-04; sleeping disabled 2026-10-18).**
+  Railway stopped the staging MySQL container about 10 minutes after its last activity ("Received
+  SHUTDOWN from user <via user signal>") and woke it on the next request, which took about 45 s;
+  requests in that window got 500 "MySQL server has gone away". It cost one false alarm during the
+  7c-1 check, and it is why the retention job's `db_wait` exists: the first staging deploy of the
+  `retention` service (2026-10-18) failed its first connections and restarted while MySQL woke.
+  **Now:** sleeping is disabled in staging, for the API (2026-10-18 07:36 UTC) and for MySQL (08:19
+  UTC). `db_wait` stays: it also covers a database restart, slow readiness at start-up and a brief
+  loss of connectivity (90 s budget, `DEPLOYMENT.md` §6). If sleeping is turned back on, the old
+  advice holds for staging comparisons: wake MySQL and wait for "ready for connections" first.
+  Production has shown no sleeping.
 
 - [ ] **Staff accounts can name a property that doesn't exist.** `POST /api/users` as the Platform
   Owner accepts any `property_id` (found 2026-10-03: a timed-out property creation left
