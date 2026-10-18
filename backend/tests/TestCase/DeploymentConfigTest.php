@@ -6,10 +6,14 @@ namespace App\Test\TestCase;
 use Cake\TestSuite\TestCase;
 
 /**
- * The Railway config files (DEPLOYMENT.md §5–§6). The `retention` cron
- * service has its own file (approved 2026-10-13 as R1): the same image as the
- * API, the daily schedule, and no automatic retries, so a failed run shows
- * as one failed run with one log and records no extra retention_runs rows.
+ * The Railway deployment files (DEPLOYMENT.md §5–§6). Railway reads
+ * `railway.json` for both services: the API and the `retention` cron
+ * service share it, because Railway ignores a custom config file on a
+ * service created after Config as Code was deprecated (found 2026-10-18;
+ * `railway.retention.json` was deleted). The retention schedule lives in
+ * the dashboard, and the job protects itself: it waits for the database
+ * and runs once per hotel day. Config as Code stops being read on
+ * 2026-12-01 (docs/BACKLOG.md).
  */
 class DeploymentConfigTest extends TestCase
 {
@@ -26,31 +30,42 @@ class DeploymentConfigTest extends TestCase
         return $config;
     }
 
-    public function testTheRetentionServiceNeverRetriesAndRunsDaily(): void
-    {
-        $config = $this->config('railway.retention.json');
-        $this->assertSame('NEVER', $config['deploy']['restartPolicyType']);
-        $this->assertSame('0 19 * * *', $config['deploy']['cronSchedule'], '19:00 UTC = 03:00 Manila');
-        $this->assertArrayNotHasKey('startCommand', $config['deploy'], 'the entrypoint decides (STAYVANTA_JOB)');
-        $this->assertArrayNotHasKey('healthcheckPath', $config['deploy'], 'the job has no web server');
-    }
-
-    public function testTheRetentionServiceBuildsTheSameImageAsTheApi(): void
-    {
-        $this->assertSame(
-            $this->config('railway.json')['build'],
-            $this->config('railway.retention.json')['build'],
-        );
-    }
-
-    public function testTheJobBranchRunsOnlyTheRoutine(): void
+    private function jobBranch(): string
     {
         $entrypoint = (string)file_get_contents(ROOT . DS . 'docker' . DS . 'entrypoint.sh');
-        $job = strpos($entrypoint, '"${STAYVANTA_JOB:-}" = "retention"');
+        $start = strpos($entrypoint, 'if [ "${STAYVANTA_JOB:-}" = "retention" ]; then');
+        $this->assertNotFalse($start, 'the job branch exists');
+        $end = strpos($entrypoint, "\nfi\n", $start);
+        $this->assertNotFalse($end);
         $migrate = strpos($entrypoint, 'migrations migrate');
-        $this->assertNotFalse($job);
         $this->assertNotFalse($migrate);
-        $this->assertLessThan($migrate, $job, 'the job exits before any migration or web server');
-        $this->assertStringContainsString('exec php bin/cake.php retention', $entrypoint);
+        $this->assertLessThan($migrate, $end, 'the job exits before any migration or web server');
+
+        return substr($entrypoint, $start, $end - $start);
+    }
+
+    public function testTheSharedConfigCarriesNothingServiceSpecific(): void
+    {
+        // Both services read this file, and code values override the
+        // dashboard: a schedule here would give the API a cron schedule and
+        // override the retention service's.
+        $deploy = $this->config('railway.json')['deploy'];
+        $this->assertArrayNotHasKey('cronSchedule', $deploy);
+        $this->assertArrayNotHasKey('startCommand', $deploy, 'the entrypoint decides (STAYVANTA_JOB)');
+        $this->assertArrayNotHasKey('healthcheckPath', $deploy, 'the job has no web server');
+        $this->assertFileDoesNotExist(ROOT . DS . 'railway.retention.json', 'Railway ignores it for the retention service');
+    }
+
+    public function testTheJobBranchWaitsForTheDatabaseThenRunsOnlyTheRoutine(): void
+    {
+        $job = $this->jobBranch();
+        $wait = strpos($job, 'php bin/cake.php db_wait --timeout 90 --interval 3 || exit 1');
+        $run = strpos($job, 'exec php bin/cake.php retention');
+        $this->assertNotFalse($wait, 'the job waits 90 s for the database and stops when it never answers');
+        $this->assertNotFalse($run);
+        $this->assertLessThan($run, $wait, 'the wait comes first');
+        $this->assertSame(1, substr_count($job, 'bin/cake.php retention'), 'the routine runs once');
+        $this->assertStringNotContainsString('|| true', $job, 'never run the routine without a database');
+        $this->assertStringNotContainsString('--dry-run', $job);
     }
 }

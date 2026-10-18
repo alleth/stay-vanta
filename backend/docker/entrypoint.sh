@@ -3,8 +3,12 @@ set -e
 
 # A job container (a Railway cron service with STAYVANTA_JOB set) runs that
 # one job and exits: no migrations (the API service runs those) and no web
-# server. `retention` is the daily retention routine (G5, P5).
+# server. `retention` is the daily retention routine (G5, P5). It first waits
+# for the database (staging's can be asleep; 90 s, then one failed run that
+# records nothing); the routine itself runs once per hotel day, so a deploy,
+# Run now or a restart after the day's run is a logged no-op.
 if [ "${STAYVANTA_JOB:-}" = "retention" ]; then
+  php bin/cake.php db_wait --timeout 90 --interval 3 || exit 1
   exec php bin/cake.php retention
 fi
 

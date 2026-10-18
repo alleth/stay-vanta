@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Model\BusinessTime;
 use App\Privacy\RetentionRoutine;
 use Cake\Command\Command;
 use Cake\Console\Arguments;
@@ -10,6 +11,7 @@ use Cake\Console\ConsoleIo;
 use Cake\Console\ConsoleOptionParser;
 use Cake\Datasource\ConnectionManager;
 use Cake\I18n\DateTime;
+use Cake\Log\Log;
 
 /**
  * `bin/cake retention [--dry-run [--as-of YYYY-MM-DD]] [--property N]`
@@ -21,6 +23,12 @@ use Cake\I18n\DateTime;
  * `--dry-run` and logs what would be cleared. Every run is recorded in
  * retention_runs. Exits non-zero when the check finds values past their
  * cutoff (after a real run there should be none).
+ *
+ * A full real run (no `--dry-run`, no `--property`) happens at most once per
+ * hotel day (approved 2026-10-18): it takes a named lock, and skips with one
+ * line, recording nothing, when another run holds it or a run already covered
+ * the day (RetentionRoutine::coveredOn()). A missed or interrupted day is
+ * completed by the next day's run; there is no force option.
  */
 class RetentionCommand extends Command
 {
@@ -57,7 +65,47 @@ class RetentionCommand extends Command
             return static::CODE_ERROR;
         }
         $routine = new RetentionRoutine($connection, $asOf !== null ? new DateTime((string)$asOf) : null);
+        if ($dryRun || $propertyId !== null) {
+            return $this->runAndCheck($routine, $dryRun, $propertyId, $io);
+        }
 
+        // A full real run happens once per hotel day, whatever started it (the
+        // schedule, a deploy, Run now, a restart): lock, check, then run.
+        if (!$routine->lock()) {
+            $this->skip('another run is in progress; skipping', $io);
+
+            return static::CODE_SUCCESS;
+        }
+        try {
+            $day = BusinessTime::todayString();
+            $covered = $routine->coveredOn($day);
+            if ($covered !== null) {
+                $this->skip("hotel day $day already covered by run $covered; skipping", $io);
+
+                return static::CODE_SUCCESS;
+            }
+
+            return $this->runAndCheck($routine, false, null, $io);
+        } finally {
+            $routine->unlock();
+        }
+    }
+
+    /**
+     * A duplicate start: one line, nothing recorded (a run that didn't happen
+     * leaves no retention_runs row).
+     */
+    private function skip(string $why, ConsoleIo $io): void
+    {
+        Log::info('retention: ' . $why);
+        $io->out('retention: ' . $why);
+    }
+
+    /**
+     * Run the routine, print each policy and the check.
+     */
+    private function runAndCheck(RetentionRoutine $routine, bool $dryRun, ?int $propertyId, ConsoleIo $io): int
+    {
         foreach ($routine->run($dryRun, $propertyId) as $policy => $r) {
             $io->out(sprintf(
                 '%-24s %d row(s) %s (cutoff %s)',

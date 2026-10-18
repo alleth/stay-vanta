@@ -185,29 +185,72 @@ It runs once a day as its own Railway **cron service** in each environment; ever
 logs a dry run (`retention --dry-run`) of what would be cleared now. Each run, dry or real, is a
 `retention_runs` row.
 
-Set up once per environment (staging first), in the Railway dashboard:
+### Intended retention-service settings
+
+This is the source of truth for how the `retention` service is meant to be configured. It replaces
+`backend/railway.retention.json` (approved 2026-10-13 as R1, deleted 2026-10-18 because Railway
+ignores a custom config file on a service created after Config as Code was deprecated: it accepted
+the path, recorded it, and silently deployed with `railway.json`). Whatever carries these settings
+next (dashboard today, a replacement for Config as Code later: `docs/BACKLOG.md`) must keep them:
+
+| Setting | Intended | Why |
+|---|---|---|
+| Schedule | `0 19 * * *` (cron times are UTC: 03:00 Manila) | once a day, outside hotel hours |
+| Image | the API's (`backend/Dockerfile`, Root Directory `backend`) | one build, one codebase |
+| Start command | none | the entrypoint decides: `STAYVANTA_JOB=retention` waits for the database, runs the routine and exits; no migrations, no web server |
+| Restarts | never retry a failed run | one failed run is one failed run with one log; investigate, then let the next day's run complete it |
+| Source | branch `main` on staging, `production` on production, **Wait for CI** on | a commit whose CI failed never reaches the job |
+
+**What holds today:** the schedule is set in the dashboard. The restart policy comes from the
+shared `backend/railway.json` (`ON_FAILURE`, 10 retries), which Railway still reads for both
+services and which overrides a dashboard setting, so "never retry" isn't enforced by Railway until
+`railway.json` goes (by 2026-12-01). The job makes retries harmless instead: `db_wait` turns a
+sleeping database into a wait rather than a failed start, and a failed start records nothing; and a
+full real run happens **once per hotel day** (a named lock, then a check of `retention_runs`), so a
+restart, a deploy or a Run now after the day's run is a logged no-op. That second guard is what
+actually stopped the duplicate seen on 2026-10-18 (two deployments, each running the job once).
+
+### Set up (once per environment, staging first)
 
 1. **New → GitHub Repo** → this repo; name the service `retention`.
 2. **Settings → Source:** Root Directory `backend`; branch `main` on staging, `production` on
    production (the same branch as that environment's `stay-vanta` API). Turn on **Wait for CI**
    (R2): a commit whose CI failed never reaches the job, as for the API.
-3. **Settings → Config-as-code → Railway Config File:** `/backend/railway.retention.json` (the path
-   is from the repository root, not the root directory). It builds the same image as the API and
-   sets the schedule, `0 19 * * *` (cron times are UTC: 03:00 Manila), and `restartPolicyType:
-   NEVER` (R1): a failed run stays one failed run with one log, and isn't retried into extra
-   `retention_runs` rows; investigate it, then Run now. Leave the start command empty: the
-   image's entrypoint decides. `DeploymentConfigTest` keeps this file in step with `railway.json`.
-4. **Variables:** `STAYVANTA_JOB=retention` (the entrypoint then runs only the routine and exits: no
-   migrations, no web server), plus the API's database and app variables as **references**, never
-   literals: `DATABASE_URL=${{MySQL.MYSQL_PUBLIC_URL}}`, `SECURITY_SALT=${{stay-vanta.SECURITY_SALT}}`,
-   `DEBUG=false`, `APP_FULL_BASE_URL=${{stay-vanta.APP_FULL_BASE_URL}}`.
-5. Run it once (**Deploy → Run now**) and check its log: one line per policy and the check, which
-   must say 0 past the cutoff. Until October 2027 nothing is due, so it clears 0 rows.
+3. **Settings → Config-as-code:** leave the Railway Config File **empty** (Railway ignores it on this
+   service). **Settings → Deploy → Cron Schedule:** `0 19 * * *`. Leave the start command empty.
+   Settings are staged until applied, and applying deploys the service.
+4. **Variables:** `STAYVANTA_JOB=retention`, plus the API's database and app variables as
+   **references**, never literals: `DATABASE_URL=${{MySQL.MYSQL_PUBLIC_URL}}`,
+   `SECURITY_SALT=${{stay-vanta.SECURITY_SALT}}`, `DEBUG=false`,
+   `APP_FULL_BASE_URL=${{stay-vanta.APP_FULL_BASE_URL}}`.
+5. **Every deployment of this service starts the job** (seen on 2026-10-18 without a schedule): the
+   first one performs the hotel day's run, later ones that day are no-ops.
 
-Order (R3): staging first, then production, then verify each environment's first scheduled run.
-A run is verified when it exits 0, both policies report `0 row(s) cleared` and both checks `0 past
-the cutoff`, the two newest `retention_runs` rows are real runs (`dry_run = 0`) sharing one run id,
-and the log has no migration, Apache, warning or fallback lines (the job never starts the API).
+### What a run logs
+
+- `db_wait: ready after 0.2s (1 attempt(s))`; while a sleeping database wakes, first
+  `db_wait: not ready (attempt n): <reason>` lines (info, no stack trace). After 90 s without an
+  answer: `db_wait: gave up …`, exit 1, and nothing recorded.
+- A run: one line per policy (`0 row(s) cleared` until October 2027, when the first values fall
+  due) and one check line per policy (`0 past the cutoff`).
+- A duplicate start: `retention: hotel day YYYY-MM-DD already covered by run retention-…; skipping`
+  or `retention: another run is in progress; skipping`, exit 0, nothing recorded. **Run now on a
+  day already covered is therefore a no-op by design**; there is no force option (a missed or
+  interrupted day is completed by the next day's run).
+
+### Verification
+
+Order (R3): staging first, then production; in each, verify the schedule, then the first scheduled
+run, then a same-day Run now.
+
+- **Schedule applied:** the service shows `cronSchedule = 0 19 * * *` and a next run at 19:00 UTC;
+  the applied change is in the environment's history; the deployment's resolved file config has
+  `configFile: null` and no `deploy.cronSchedule` (so `railway.json` isn't overriding it).
+- **Scheduled run** (starts at 19:00 UTC with no deploy): exits 0; `db_wait` lines are info only;
+  both policies report `0 row(s) cleared` and both checks `0 past the cutoff`; exactly one new pair
+  of real rows (`dry_run = 0`, `property_id` NULL) sharing one run id, and only one real run for that
+  Manila day; no migration, Apache, warning, error or fallback lines.
+- **Same-day Run now:** logs the "already covered" line, exits 0, and adds no `retention_runs` row.
 
 ## 7. Subscription enforcement (G6)
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Test\TestCase\Controller\Api;
 
 use App\Event\EventContext;
+use App\Model\BusinessTime;
 use App\Model\Table\AccessEventsTable;
 use App\Model\Table\GuestEventsTable;
 use App\Privacy\RetentionRoutine;
@@ -36,6 +37,7 @@ class RetentionApiTest extends TestCase
     private string $adminToken;
     private string $deskToken;
     private Connection $connection;
+    private int $runsBefore;
 
     protected function setUp(): void
     {
@@ -47,11 +49,42 @@ class RetentionApiTest extends TestCase
         /** @var \Cake\Database\Connection $connection */
         $connection = $this->getTableLocator()->get('AccessEvents')->getConnection();
         $this->connection = $connection;
+        $this->runsBefore = (int)$connection->execute('SELECT COALESCE(MAX(id), 0) AS id FROM retention_runs')->fetch('assoc')['id'];
+    }
+
+    /**
+     * One retention_runs row, written directly (a run's record at a chosen time).
+     */
+    private function insertRun(string $policy, string $occurredAtUtc, string $run, bool $dryRun = false, ?int $propertyId = null): void
+    {
+        $this->connection->insert('retention_runs', [
+            'policy' => $policy,
+            'table_name' => RetentionRoutine::POLICIES[$policy][0],
+            'cutoff' => $occurredAtUtc,
+            'rows_cleared' => 0,
+            'dry_run' => $dryRun ? 1 : 0,
+            'property_id' => $propertyId,
+            'correlation_id' => $run,
+            'occurred_at' => $occurredAtUtc,
+            'created' => $occurredAtUtc,
+        ]);
+    }
+
+    /**
+     * Full real runs' rows recorded during this test.
+     */
+    private function fullRealRows(): int
+    {
+        return (int)$this->connection->execute(
+            'SELECT COUNT(*) AS n FROM retention_runs WHERE property_id IS NULL AND dry_run = 0 AND id > ?',
+            [$this->runsBefore],
+        )->fetch('assoc')['n'];
     }
 
     protected function tearDown(): void
     {
         $this->connection->delete('retention_runs', ['property_id' => $this->propertyId]);
+        $this->connection->delete('retention_runs', ['property_id IS' => null, 'id >' => $this->runsBefore]);
         $this->cleanupScenario();
         parent::tearDown();
     }
@@ -199,6 +232,75 @@ class RetentionApiTest extends TestCase
             ->where(['property_id' => $this->propertyId])->orderBy(['id' => 'DESC'])->firstOrFail();
         $this->assertTrue((bool)$run->dry_run);
         $this->assertLessThan($run->cutoff->getTimestamp(), $run->occurred_at->getTimestamp(), 'dated when it really ran, not 2099');
+    }
+
+    public function testADayIsCoveredOnlyByOneRealFullRunOfEveryPolicyInsideTheHotelDay(): void
+    {
+        $routine = new RetentionRoutine($this->connection);
+        $policies = [RetentionRoutine::ACCESS_DEVICE_DETAILS, RetentionRoutine::GUEST_CONTACT_VALUES];
+        $tag = uniqid();
+        // Manila's 2031-03-02 runs from 2031-03-01 16:00 to 2031-03-02 16:00 UTC.
+        foreach ($policies as $policy) {
+            $this->insertRun($policy, '2031-03-01 18:00:00', "dry-$tag", true);
+            $this->insertRun($policy, '2031-03-01 18:00:00', "property-$tag", false, $this->propertyId);
+        }
+        $this->insertRun(RetentionRoutine::ACCESS_DEVICE_DETAILS, '2031-03-01 18:00:00', "half-$tag");
+        $this->assertNull($routine->coveredOn('2031-03-02'), 'dry, single-property and half-finished runs never cover a day');
+
+        foreach ($policies as $policy) {
+            $this->insertRun($policy, '2031-03-01 15:59:00', "before-midnight-$tag");
+        }
+        $this->assertNull($routine->coveredOn('2031-03-02'), '23:59 in Manila is the day before');
+        $this->assertSame("before-midnight-$tag", $routine->coveredOn('2031-03-01'));
+
+        foreach ($policies as $policy) {
+            $this->insertRun($policy, '2031-03-01 16:01:00', "after-midnight-$tag");
+        }
+        foreach ($policies as $policy) {
+            $this->insertRun($policy, '2031-03-02 10:00:00', "later-$tag");
+        }
+        $this->assertSame("after-midnight-$tag", $routine->coveredOn('2031-03-02'), '00:01 in Manila; the earliest covering run');
+    }
+
+    public function testAFullRunHappensOncePerHotelDayAndARepeatIsALoggedNoOp(): void
+    {
+        $routine = new RetentionRoutine($this->connection);
+        $today = BusinessTime::todayString();
+        $this->assertNull($routine->coveredOn($today), 'precondition: no full real run today in the test database');
+
+        $this->exec('retention');
+        $this->assertExitSuccess();
+        $this->assertOutputContains('row(s) cleared');
+        $run = $routine->coveredOn($today);
+        $this->assertNotNull($run, 'the first run of the day covers it');
+        $recorded = $this->fullRealRows();
+        $this->assertSame(2, $recorded, 'one row per policy');
+
+        $this->exec('retention');
+        $this->assertExitSuccess();
+        $this->assertOutputContains("retention: hotel day $today already covered by run $run; skipping");
+        $this->assertOutputNotContains('row(s) cleared');
+        $this->assertSame($recorded, $this->fullRealRows(), 'a skipped run records nothing');
+    }
+
+    public function testAFullRunWhileAnotherHoldsTheLockIsALoggedNoOp(): void
+    {
+        // A second session, as a second job container started at the same time.
+        $other = new Connection($this->connection->config());
+        $other->execute('SELECT GET_LOCK(?, 0)', [RetentionRoutine::LOCK]);
+        try {
+            $this->exec('retention');
+            $this->assertExitSuccess();
+            $this->assertOutputContains('retention: another run is in progress; skipping');
+            $this->assertSame(0, $this->fullRealRows(), 'nothing recorded');
+
+            $this->exec('retention --dry-run --property ' . $this->propertyId);
+            $this->assertExitSuccess();
+            $this->assertOutputContains('would be cleared', 'a dry run is never guarded');
+        } finally {
+            $other->execute('SELECT RELEASE_LOCK(?)', [RetentionRoutine::LOCK]);
+            $other->getDriver()->disconnect();
+        }
     }
 
     public function testOrdinaryUpdatesOfAnEventStayRefused(): void

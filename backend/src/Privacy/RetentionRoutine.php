@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Privacy;
 
+use App\Model\BusinessTime;
 use App\Model\Table\GuestEventsTable;
 use Cake\Database\Connection;
 use Cake\I18n\DateTime;
@@ -54,6 +55,9 @@ final class RetentionRoutine
     ];
 
     private const BATCH = 500;
+
+    /** The MySQL named lock a full real run holds (`GET_LOCK`). */
+    public const LOCK = 'stayvanta_retention';
 
     /**
      * @param \Cake\Database\Connection $connection The application database.
@@ -318,6 +322,64 @@ final class RetentionRoutine
             'correlation_id' => $correlation,
             'occurred_at' => $now,
         ], ['accessibleFields' => ['*' => true]]));
+    }
+
+    /**
+     * The run that already covered the hotel day `$ymd`, if any (the
+     * once-per-day guard, approved 2026-10-18): one run id with a real
+     * (`dry_run = 0`), full (`property_id IS NULL`) row for every policy whose
+     * table exists, inside the day's bounds. Dry runs, single-property runs
+     * and a run that stopped after its first policy don't cover it.
+     *
+     * @param string $ymd The hotel day (BusinessTime).
+     * @return string|null The covering run's id (the earliest, if several).
+     */
+    public function coveredOn(string $ymd): ?string
+    {
+        $policies = [];
+        foreach (self::POLICIES as $policy => [$table]) {
+            if ($this->hasTable($table)) {
+                $policies[] = $policy;
+            }
+        }
+        if ($policies === []) {
+            return null;
+        }
+        $rows = $this->connection->execute(
+            'SELECT correlation_id, policy FROM retention_runs'
+            . ' WHERE dry_run = 0 AND property_id IS NULL AND occurred_at >= ? AND occurred_at < ?'
+            . ' ORDER BY id',
+            [BusinessTime::startOf($ymd), BusinessTime::endOf($ymd)],
+        )->fetchAll('assoc');
+        $seen = [];
+        foreach ($rows as $row) {
+            $seen[$row['correlation_id']][$row['policy']] = true;
+            if (array_diff($policies, array_keys($seen[$row['correlation_id']])) === []) {
+                return (string)$row['correlation_id'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Take the server-wide retention lock without waiting (two job containers
+     * started together must not both run). Held by this connection's session
+     * until unlock(), or until the process dies.
+     */
+    public function lock(): bool
+    {
+        $row = $this->connection->execute('SELECT GET_LOCK(?, 0) AS got', [self::LOCK])->fetch('assoc');
+
+        return (int)($row['got'] ?? 0) === 1;
+    }
+
+    /**
+     * Release the lock taken by lock().
+     */
+    public function unlock(): void
+    {
+        $this->connection->execute('SELECT RELEASE_LOCK(?)', [self::LOCK]);
     }
 
     /**

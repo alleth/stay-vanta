@@ -119,6 +119,35 @@ Carry these into steps 6–10:
   that's when it was recorded, not the stay's dates.
 - The deployment gate (resolved, under observation) is described above ("CI gate on deployment").
 
+## Move both Railway services off Config as Code before 2026-12-01
+
+**Ready when:** now; decide by about 2026-11-15 to leave room for staging, then production.
+
+**Why:** Railway deprecated Config as Code: `railway.json` / `railway.toml` stop being read on
+2026-12-01, and a service created after the deprecation can't use a custom config file at all
+(found 2026-10-18: the `retention` service accepted `/backend/railway.retention.json`, recorded it,
+and silently deployed with `railway.json`; the file was deleted). A platform-maintenance task,
+separate from the retention rollout.
+
+**What `backend/railway.json` provides today, to both services (API and `retention`):** builder
+`DOCKERFILE`, `dockerfilePath`, restart policy `ON_FAILURE` with 10 retries. After the cutoff Railway
+still builds the Dockerfile (it does whenever it finds one); the restart policy falls back to each
+service's dashboard setting.
+
+**Options:**
+- (a) Dashboard settings per service and environment: API `ON_FAILURE` × 10; `retention` never
+  retries (honoured once the file is gone). The intended retention settings are in
+  `DEPLOYMENT.md` §6, "Intended retention-service settings".
+- (b) Infrastructure as Code (`.railway/railway.ts`, applied with `railway config plan` /
+  `railway config apply`, not on push). Its reference doesn't document cron schedules or restart
+  policies: verify before choosing it. Railway refuses plans for services still managed by
+  `railway.json`.
+
+**Either way:** remove `railway.json` and clear any config-file path; rewrite `DeploymentConfigTest`
+around the new source of truth (today it checks that `railway.json` carries nothing
+service-specific); staging first, then production; the retention job's own guards (database wait,
+once per hotel day) stay regardless.
+
 ## Smaller items
 
 - [x] **Step 8 follow-ups (in production 2026-10-04, `d9cda62`).** `reservations.receptionist_id`
