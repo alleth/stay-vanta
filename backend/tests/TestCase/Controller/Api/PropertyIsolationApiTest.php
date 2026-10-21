@@ -292,6 +292,61 @@ class PropertyIsolationApiTest extends TestCase
         $this->assertSame(0, $leaked, 'an order at our property must not point at their guest, room or stay');
     }
 
+    /**
+     * SF-2026-005: a menu item's linked stock item came from the request with
+     * no property check, so our Manager could link their stock to our menu.
+     */
+    public function testAMenuItemCannotLinkAnotherPropertysStock(): void
+    {
+        $this->callAs($this->adminToken, 'POST', '/api/food-menu-items', [
+            'name' => 'Linked Water', 'price' => 20, 'type' => 'food', 'inventory_item_id' => $this->b['item'],
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertNothingOfTheirs('POST /api/food-menu-items');
+
+        $ownId = $this->insertRow('FoodMenuItems', [
+            'property_id' => $this->ours, 'name' => 'Our Water', 'price' => 20, 'type' => 'food', 'is_available' => true,
+        ]);
+        $this->callAs($this->adminToken, 'PATCH', "/api/food-menu-items/$ownId", [
+            'name' => 'Our Water', 'price' => 20, 'inventory_item_id' => $this->b['item'],
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertNothingOfTheirs("PATCH /api/food-menu-items/$ownId");
+
+        $linked = $this->getTableLocator()->get('FoodMenuItems')->find()
+            ->where(['property_id' => $this->ours, 'inventory_item_id' => $this->b['item']])
+            ->count();
+        $this->assertSame(0, $linked, 'no menu item of ours may point at their stock');
+    }
+
+    /**
+     * SF-2026-005: a link saved before the fix must neither show their stock
+     * on our menu nor let our sales move it.
+     */
+    public function testALinkToAnotherPropertysStockNeitherShowsNorMovesIt(): void
+    {
+        $menuId = $this->insertRow('FoodMenuItems', [
+            'property_id' => $this->ours, 'name' => 'Old Link', 'price' => 20, 'type' => 'food',
+            'is_available' => true, 'inventory_item_id' => $this->b['item'],
+        ]);
+
+        $this->callAs($this->adminToken, 'GET', '/api/food-menu-items');
+        $this->assertResponseOk();
+        $this->assertNothingOfTheirs('GET /api/food-menu-items');
+
+        $this->callAs($this->receptionistToken, 'POST', '/api/food-orders', [
+            'items' => [['food_menu_item_id' => $menuId, 'quantity' => 2]],
+            'payment_status' => 'paid',
+            'payment_method' => 'cash',
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertSame(10.0, (float)$this->row('InventoryItems', $this->b['item'])->quantity, 'their stock is untouched');
+        $this->assertSame(0, $this->getTableLocator()->get('StockMovements')->find()
+            ->where(['inventory_item_id' => $this->b['item']])->count(), 'and their ledger has no movement of ours');
+        $this->assertSame(0, $this->getTableLocator()->get('FoodOrders')->find()
+            ->where(['property_id' => $this->ours])->count(), 'the refused sale left no order');
+    }
+
     // ------------------------------------------------- the platform owner
 
     /**
