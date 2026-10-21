@@ -28,11 +28,16 @@ items were checked; this one field wasn't. With another hotel's item id:
 
 The POS screen only offers the hotel's own stock, so it took a crafted request.
 
-**Fix.** `FoodMenuItemsController::linkedStockItem()` refuses a link that isn't the property's own
-live stock (400 "The selected stock item was not found."). `StockMovementsTable::record()` refuses
-any movement of an item from a property other than the request's (defence in depth: it covers sales,
-cancellations, recipes, options and manual movements). The menu response's stock link joins only the
-property's own item, so a link saved before the fix shows nothing. Tests:
+**Fix.**
+- *Primary fix (menu item linked stock validation):* `FoodMenuItemsController::linkedStockItem()`
+  refuses a link that isn't the property's own live stock (400 "The selected stock item was not
+  found."), on create and edit. The menu response's stock link joins only the property's own item,
+  so a link saved before the fix shows nothing.
+- *Defence in depth (`StockMovementsTable::record()` property enforcement):* any movement of an item
+  from a property other than the request's is refused, whatever led to it: sales, cancellations,
+  recipes, options and manual movements.
+
+Tests:
 `PropertyIsolationApiTest::testAMenuItemCannotLinkAnotherPropertysStock`,
 `testALinkToAnotherPropertysStockNeitherShowsNorMovesIt`.
 
