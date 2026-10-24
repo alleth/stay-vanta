@@ -126,6 +126,11 @@ class StockMovementsTable extends Table
                     ->where(['InventoryItems.id' => $item->id])
                     ->epilog('FOR UPDATE')
                     ->firstOrFail();
+                // SF-2026-005: stock moves only at the property it belongs to,
+                // whatever link (a menu item, a recipe) led the caller to it.
+                if ($context->propertyId !== null && (int)$locked->property_id !== $context->propertyId) {
+                    throw new RuntimeException('That stock item is not at this property.');
+                }
 
                 $delta = $direction === 'out' ? -$quantity : $quantity;
                 $newQty = (float)$locked->quantity + $delta;

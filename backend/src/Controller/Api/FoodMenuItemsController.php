@@ -75,8 +75,7 @@ class FoodMenuItemsController extends AppController
             throw new BadRequestException('property_id is required.');
         }
 
-        $inventoryItemId = $this->request->getData('inventory_item_id');
-        $inventoryItemId = $inventoryItemId !== null && $inventoryItemId !== '' ? (int)$inventoryItemId : null;
+        $inventoryItemId = $this->linkedStockItem($propertyId);
         $type = $this->request->getData('type');
         $ingredients = $this->normalizeIngredients((array)$this->request->getData('ingredients'), $propertyId);
         $optionGroups = $this->normalizeOptionGroups((array)$this->request->getData('option_groups'), $propertyId);
@@ -119,8 +118,7 @@ class FoodMenuItemsController extends AppController
             $menu->find()->where(['FoodMenuItems.id' => $id, 'FoodMenuItems.deleted_at IS' => null]),
         )->firstOrFail();
 
-        $inventoryItemId = $this->request->getData('inventory_item_id');
-        $inventoryItemId = $inventoryItemId !== null && $inventoryItemId !== '' ? (int)$inventoryItemId : null;
+        $inventoryItemId = $this->linkedStockItem((int)$item->property_id);
         $type = $this->request->getData('type');
         $rawIngredients = (array)$this->request->getData('ingredients');
         $ingredients = $this->normalizeIngredients($rawIngredients, (int)$item->property_id);
@@ -236,6 +234,32 @@ class FoodMenuItemsController extends AppController
         }
 
         return ['recipe' => $recipe, 'options' => $options, 'option_prices' => $prices];
+    }
+
+    /**
+     * The request's `inventory_item_id` (the menu item's single stock link),
+     * or null for none.
+     *
+     * @throws \Cake\Http\Exception\BadRequestException When it isn't this property's stock.
+     */
+    private function linkedStockItem(int $propertyId): ?int
+    {
+        $raw = $this->request->getData('inventory_item_id');
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        // SF-2026-005: the link must be this property's own stock, like the
+        // recipe's ingredients and the options' stock below.
+        $exists = $this->fetchTable('InventoryItems')->exists([
+            'InventoryItems.id' => (int)$raw,
+            'InventoryItems.property_id' => $propertyId,
+            'InventoryItems.deleted_at IS' => null,
+        ]);
+        if (!$exists) {
+            throw new BadRequestException('The selected stock item was not found.');
+        }
+
+        return (int)$raw;
     }
 
     /**
@@ -458,7 +482,15 @@ class FoodMenuItemsController extends AppController
     private function menuItemContain(): array
     {
         return [
-            'InventoryItems' => ['InventoryCategories'],
+            // SF-2026-005: a link saved before the check shows nothing of
+            // another property's stock (the join matches only our own).
+            'InventoryItems' => [
+                'queryBuilder' => fn($q) => $q->where(fn($exp) => $exp->equalFields(
+                    'InventoryItems.property_id',
+                    'FoodMenuItems.property_id',
+                )),
+                'InventoryCategories',
+            ],
             'FoodMenuItemIngredients' => ['InventoryItems' => ['InventoryCategories']],
             'FoodMenuItemOptionGroups' => ['FoodMenuItemOptions' => ['InventoryItems' => ['InventoryCategories']]],
         ];
@@ -488,6 +520,11 @@ class FoodMenuItemsController extends AppController
         $this->viewBuilder()->setOption('serialize', ['ok']);
     }
 
+    /**
+     * Answer 422 with the entity's validation errors.
+     *
+     * @param array<string, mixed> $errors
+     */
     private function validationFailed(array $errors): void
     {
         $this->response = $this->response->withStatus(422);

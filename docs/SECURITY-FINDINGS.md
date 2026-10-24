@@ -6,6 +6,58 @@ one fixed before release, so the pattern stays visible.
 
 ---
 
+## SF-2026-005 · A menu item could be linked to another hotel's stock
+
+| | |
+| --- | --- |
+| **Status** | Open: fix prepared, not deployed (2026-10-21) |
+| **Severity** | Medium: cross-property read (another hotel's stock item name, quantity and category) and cross-property write (each sale moved the other hotel's stock); needs a crafted API request by a Manager |
+| **Found** | 2026-10-21, by the SF-2026-001–004 regression verification (stage B.1, the inventory of ids that arrive in request bodies) |
+| **Fixed** | Not yet |
+| **Exploited** | No: the production read-only audit (below) found no cross-property link and no cross-property stock movement, ever |
+
+**What was wrong.** `POST /api/food-menu-items` and `PATCH /api/food-menu-items/{id}` saved the
+menu item's single stock link (`inventory_item_id`) from the request without checking that the
+stock item belonged to the menu item's property. The recipe's ingredients and the options' stock
+items were checked; this one field wasn't. With another hotel's item id:
+- the menu response included that hotel's stock item (name, quantity, category);
+- every sale of the menu item moved *that hotel's* stock (`FoodOrdersTable::place()` loaded the
+  item by id alone, and `StockMovementsTable::record()` never compared the item's property with the
+  request's), writing a `stock_movements` row and an Activity line at that hotel naming our staff;
+- our orders were refused whenever that hotel's item ran short; cancelling returned stock to it.
+
+The POS screen only offers the hotel's own stock, so it took a crafted request.
+
+**Fix.**
+- *Primary fix (menu item linked stock validation):* `FoodMenuItemsController::linkedStockItem()`
+  refuses a link that isn't the property's own live stock (400 "The selected stock item was not
+  found."), on create and edit. The menu response's stock link joins only the property's own item,
+  so a link saved before the fix shows nothing.
+- *Defence in depth (`StockMovementsTable::record()` property enforcement):* any movement of an item
+  from a property other than the request's is refused, whatever led to it: sales, cancellations,
+  recipes, options and manual movements.
+
+Tests:
+`PropertyIsolationApiTest::testAMenuItemCannotLinkAnotherPropertysStock`,
+`testALinkToAnotherPropertysStockNeitherShowsNorMovesIt`.
+
+**Historical analysis (production, read-only).** Run on 2026-10-21 13:14 UTC inside a MySQL
+`READ ONLY` transaction (`transaction_read_only = 1`, enforced by the server; MySQL 9.7.2), rolled
+back; printed ids and counts only.
+- 2 properties; 96 menu items (88 with a stock link), 15 recipe rows, 5 options with stock,
+  12 POS stock movements; 96 menu-item change-log rows since 2026-10-04 23:57 UTC.
+- 0 menu items (deleted ones included) linked to another property's stock, and 0 linked to a missing
+  item; 0 recipe rows and 0 options with another property's stock; 0 sale option snapshots with it.
+- 0 POS stock movements at a property other than their order's; 0 stock movements at a property
+  other than their item's; 0 POS movements by someone with no membership at that property.
+- 0 menu-item change-log rows naming another property's stock, before or after.
+
+**Conclusion:** never exercised. Stock movements are append-only and cover all history, so no sale
+ever moved another hotel's stock. The change log starts on 2026-10-04, so a link set and removed
+before then with no sale in between would leave no trace; nothing suggests one.
+
+---
+
 ## SF-2026-004 · A Manager could switch off or rename a fellow Manager
 
 | | |
