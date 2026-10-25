@@ -50,7 +50,7 @@ class RoomRatesController extends AppController
         $rates = $this->fetchTable('RoomRates');
         $rate = $rates->newEntity([
             'property_id' => $propertyId,
-            'room_id' => $this->request->getData('room_id'),
+            'room_id' => $this->ownReference('Rooms', 'room_id', $propertyId, 'The selected room was not found.'),
             'description' => $this->request->getData('description'),
             'base_rate' => $this->request->getData('base_rate'),
         ]);
@@ -80,11 +80,12 @@ class RoomRatesController extends AppController
         $rates = $this->fetchTable('RoomRates');
         $rate = $this->scopeToProperty($rates->find()->where(['RoomRates.id' => $id]))->firstOrFail();
 
-        // room_id may be intentionally set to null ("all rooms"); read it raw.
+        // room_id may be intentionally set to null ("all rooms").
+        $roomId = $this->ownReference('Rooms', 'room_id', (int)$rate->property_id, 'The selected room was not found.');
         $rates->patchEntity($rate, [
             'description' => $this->request->getData('description'),
             'base_rate' => $this->request->getData('base_rate'),
-            'room_id' => $this->request->getData('room_id') ?: null,
+            'room_id' => $roomId,
         ], ['accessibleFields' => ['property_id' => false]]);
 
         if (!$rates->save($rate, $this->auditOptions(true))) {

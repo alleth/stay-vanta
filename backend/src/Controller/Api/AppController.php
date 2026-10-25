@@ -182,6 +182,31 @@ class AppController extends Controller
     }
 
     /**
+     * The request's `$field`, an id of a `$table` row, or null for none.
+     * SF-2026-006: an id from the request must be a row of this property, or
+     * the property's records would point at, and show, another hotel's.
+     *
+     * @throws \Cake\Http\Exception\BadRequestException When it isn't this property's row.
+     */
+    protected function ownReference(string $table, string $field, int $propertyId, string $message): ?int
+    {
+        $raw = $this->request->getData($field);
+        if ($raw === null || $raw === '' || $raw === 0 || $raw === '0') {
+            return null;
+        }
+        $repo = $this->fetchTable($table);
+        $exists = $repo->exists([
+            $repo->getAlias() . '.id' => (int)$raw,
+            $repo->getAlias() . '.property_id' => $propertyId,
+        ]);
+        if (!$exists) {
+            throw new BadRequestException($message);
+        }
+
+        return (int)$raw;
+    }
+
+    /**
      * Count the distinct values of a column for a query.
      *
      * NOTE: do NOT use `$query->distinct(['col'])->count()` for this — in

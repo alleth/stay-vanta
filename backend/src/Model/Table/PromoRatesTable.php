@@ -38,7 +38,10 @@ class PromoRatesTable extends Table
         $this->addBehavior('Timestamp');
 
         $this->belongsTo('Properties');
-        $this->belongsTo('Rooms');
+        // SF-2026-006: only a room of the promo rate's own property ever joins.
+        $this->belongsTo('Rooms', [
+            'conditions' => ['Rooms.property_id = PromoRates.property_id'],
+        ]);
     }
 
     public function validationDefault(Validator $validator): Validator

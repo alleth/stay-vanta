@@ -156,7 +156,12 @@ class InventoryItemsController extends AppController
 
         $item = $items->newEntity([
             'property_id' => $propertyId,
-            'inventory_category_id' => $this->request->getData('inventory_category_id'),
+            'inventory_category_id' => $this->ownReference(
+                'InventoryCategories',
+                'inventory_category_id',
+                $propertyId,
+                'The selected category was not found.',
+            ),
             'parent_id' => $parentId,
             'name' => $this->request->getData('name'),
             'tracking_type' => $trackingType,
@@ -246,7 +251,12 @@ class InventoryItemsController extends AppController
             'name' => $this->request->getData('name'),
             'unit' => $this->request->getData('unit'),
             'reorder_level' => $this->request->getData('reorder_level'),
-            'inventory_category_id' => $this->request->getData('inventory_category_id'),
+            'inventory_category_id' => $this->ownReference(
+                'InventoryCategories',
+                'inventory_category_id',
+                (int)$item->property_id,
+                'The selected category was not found.',
+            ),
             'parent_id' => $parentId,
             'tracking_type' => $tracking,
         ]);

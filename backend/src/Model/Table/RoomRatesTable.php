@@ -34,7 +34,10 @@ class RoomRatesTable extends Table
         $this->addBehavior('Timestamp');
 
         $this->belongsTo('Properties');
-        $this->belongsTo('Rooms');
+        // SF-2026-006: only a room of the rate's own property ever joins.
+        $this->belongsTo('Rooms', [
+            'conditions' => ['Rooms.property_id = RoomRates.property_id'],
+        ]);
     }
 
     public function validationDefault(Validator $validator): Validator
