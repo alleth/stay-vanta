@@ -6,6 +6,68 @@ one fixed before release, so the pattern stays visible.
 
 ---
 
+## SF-2026-006 · Rates, categories and items could point at another hotel's rooms or categories
+
+| | |
+| --- | --- |
+| **Status** | Open: fix prepared, not deployed (2026-10-25) |
+| **Severity** | Low-Medium (pending the audit's review): mostly cross-property read (another hotel's room details and category names); one cross-property write (deleting a category changed, and recorded, another hotel's sub-category filed under it); every path needs a crafted API request by a Manager |
+| **Found** | 2026-10-21, by the SF-2026-001–004 regression verification (stage B.1, the inventory of ids that arrive in request bodies), alongside SF-2026-005 |
+| **Fixed** | Not yet |
+| **Exploited** | To be decided on review: the production read-only audit (below) found no cross-property link and no cross-property change |
+
+**What was wrong.** Four ids were saved from the request without checking that the row they name
+belongs to the same property:
+- a room rate's and a promo rate's `room_id` (`POST`/`PATCH /api/room-rates`, `/api/promo-rates`);
+- an inventory category's `parent_id` (`POST /api/inventory-categories`);
+- an inventory item's `inventory_category_id` (`POST`/`PATCH /api/inventory-items`).
+
+With another hotel's id, the lists that load the linked row (`GET /api/room-rates`,
+`/api/promo-rates`, `/api/inventory-categories`, `/api/inventory-items`, and the menu's stock
+categories) showed that hotel's room (number, type) or category name. Prices were never affected:
+`resolveBaseRate()` and `PromoRatesTable::multiplierFor()` already read only the property's own
+rates. One path also wrote: `DELETE /api/inventory-categories/{id}` detached every sub-category by
+`parent_id` alone, so if another hotel had filed a category under ours, our delete changed theirs and
+recorded that change at their property under our Manager's name; their items in our category also
+blocked our delete (and so revealed that they existed).
+
+The item's `parent_id` was already checked. The Settings and Inventory screens only offer the
+property's own rooms and categories, so it took a crafted request.
+
+**Fix.**
+- *Validation:* `AppController::ownReference()` refuses an id that isn't a row of the property (400
+  "The selected room / parent category / category was not found."), before anything is saved, on
+  create and edit.
+- *Display:* the four `belongsTo` associations (`RoomRates`/`PromoRates` → `Rooms`,
+  `InventoryItems` → `InventoryCategories`, `InventoryCategories` → `ParentCategories`) join only a
+  row of the same property, so a link saved before the fix shows nothing of the other hotel's. (A
+  rate left pointing at another hotel's room would read "All rooms" on Settings while pricing ignores
+  it; the audit found none.)
+- *Delete:* counts and detaches only the property's own items and sub-categories.
+
+Tests: `PropertyIsolationApiTest::testARateCannotTargetAnotherPropertysRoom`,
+`testInventoryCannotFileUnderAnotherPropertysCategory`,
+`testOldLinksToAnotherPropertysRoomsOrCategoriesShowNothingOfTheirs`,
+`testDeletingOurCategoryNeverTouchesAnotherPropertysCategories`.
+
+**Historical analysis (production, read-only).** Run on 2026-10-25 02:42 UTC inside a MySQL
+`READ ONLY` transaction (`transaction_read_only = 1`, enforced by the server; MySQL 9.7.2), rolled
+back; printed ids and counts only.
+- 2 properties, 19 rooms; 17 room rates (all room-specific), 5 promo rates (none room-specific);
+  35 categories (none with a parent), 120 inventory items (all with a category); deleted rows
+  included.
+- 0 room rates and 0 promo rates on another property's room; 0 categories under another property's
+  parent; 0 items in another property's category; 0 references to a missing row.
+- 177 change-log rows for these four kinds since 2026-10-04 23:56 UTC: 0 values, before or after,
+  naming another property's room or category.
+- 0 changes to these rows by someone with no membership at the row's property (the delete-detach
+  write would have left one).
+
+**Conclusion:** no cross-property link exists today and none appears in the change log. The change
+log starts on 2026-10-04, so a link set and removed before then would leave no trace.
+
+---
+
 ## SF-2026-005 · A menu item could be linked to another hotel's stock
 
 | | |
