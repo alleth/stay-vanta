@@ -11,10 +11,10 @@ one fixed before release, so the pattern stays visible.
 | | |
 | --- | --- |
 | **Status** | Open: fix prepared, not deployed (2026-10-25) |
-| **Severity** | Low-Medium (pending the audit's review): mostly cross-property read (another hotel's room details and category names); one cross-property write (deleting a category changed, and recorded, another hotel's sub-category filed under it); every path needs a crafted API request by a Manager |
+| **Severity** | Low-Medium (confirmed 2026-10-25 after the audit): mostly cross-property read (another hotel's room details and category names); one cross-property write (deleting a category changed, and recorded, another hotel's sub-category filed under it); every path needs a crafted API request by a Manager |
 | **Found** | 2026-10-21, by the SF-2026-001–004 regression verification (stage B.1, the inventory of ids that arrive in request bodies), alongside SF-2026-005 |
 | **Fixed** | Not yet |
-| **Exploited** | To be decided on review: the production read-only audit (below) found no cross-property link and no cross-property change |
+| **Exploited** | No: the production read-only audit (below) found no cross-property link, no category-delete trace and no change-log evidence (the change log starts on 2026-10-04) |
 
 **What was wrong.** Four ids were saved from the request without checking that the row they name
 belongs to the same property:
@@ -63,7 +63,8 @@ back; printed ids and counts only.
 - 0 changes to these rows by someone with no membership at the row's property (the delete-detach
   write would have left one).
 
-**Conclusion:** no cross-property link exists today and none appears in the change log. The change
+**Conclusion:** never exercised. No cross-property link exists today and none appears in the change
+log; no production category has a parent, so the delete path could not have fired. The change
 log starts on 2026-10-04, so a link set and removed before then would leave no trace.
 
 ---
