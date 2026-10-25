@@ -38,6 +38,7 @@ class PropertyIsolationApiTest extends TestCase
     private const B_ROOM = 'THEIRS-101';
     private const B_GUEST = 'Bea Theirs-Only';
     private const B_ITEM = 'Theirs-Only Stock';
+    private const B_CATEGORY = 'Theirs-Only Category';
 
     protected function setUp(): void
     {
@@ -68,11 +69,11 @@ class PropertyIsolationApiTest extends TestCase
             'check_in' => BusinessTime::today()->addDays(5)->format('Y-m-d'),
             'check_out' => BusinessTime::today()->addDays(7)->format('Y-m-d'),
         ]);
-        $category = $this->insertRow('InventoryCategories', [
-            'property_id' => $p, 'name' => 'Theirs', 'kind' => 'food_stock',
+        $this->b['category'] = $this->insertRow('InventoryCategories', [
+            'property_id' => $p, 'name' => self::B_CATEGORY, 'kind' => 'food_stock',
         ]);
         $this->b['item'] = $this->insertRow('InventoryItems', [
-            'property_id' => $p, 'inventory_category_id' => $category, 'name' => self::B_ITEM,
+            'property_id' => $p, 'inventory_category_id' => $this->b['category'], 'name' => self::B_ITEM,
             'tracking_type' => 'consumable', 'unit' => 'pcs', 'quantity' => 10, 'reorder_level' => 0,
         ]);
         $this->b['invoice'] = $this->insertRow('Invoices', [
@@ -345,6 +346,136 @@ class PropertyIsolationApiTest extends TestCase
             ->where(['inventory_item_id' => $this->b['item']])->count(), 'and their ledger has no movement of ours');
         $this->assertSame(0, $this->getTableLocator()->get('FoodOrders')->find()
             ->where(['property_id' => $this->ours])->count(), 'the refused sale left no order');
+    }
+
+    /**
+     * SF-2026-006: a room rate's or promo rate's room came from the request
+     * with no property check, so our Manager could point a rate at their room.
+     */
+    public function testARateCannotTargetAnotherPropertysRoom(): void
+    {
+        $theirRoom = $this->b['room'];
+
+        $this->callAs($this->adminToken, 'POST', '/api/room-rates', ['base_rate' => 1500, 'room_id' => $theirRoom]);
+        $this->assertResponseCode(400);
+        $this->assertNothingOfTheirs('POST /api/room-rates');
+
+        $ownRate = $this->insertRow('RoomRates', ['property_id' => $this->ours, 'base_rate' => 1500]);
+        $this->callAs($this->adminToken, 'PATCH', "/api/room-rates/$ownRate", ['base_rate' => 1500, 'room_id' => $theirRoom]);
+        $this->assertResponseCode(400);
+        $this->assertNothingOfTheirs("PATCH /api/room-rates/$ownRate");
+
+        $this->callAs($this->adminToken, 'POST', '/api/promo-rates', [
+            'source_name' => 'Agoda', 'multiplier' => 1.2, 'room_id' => $theirRoom,
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertNothingOfTheirs('POST /api/promo-rates');
+
+        $ownPromo = $this->insertRow('PromoRates', ['property_id' => $this->ours, 'source' => 'agoda', 'multiplier' => 1.2]);
+        $this->callAs($this->adminToken, 'PATCH', "/api/promo-rates/$ownPromo", [
+            'source_name' => 'Agoda', 'multiplier' => 1.2, 'room_id' => $theirRoom,
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertNothingOfTheirs("PATCH /api/promo-rates/$ownPromo");
+
+        foreach (['RoomRates', 'PromoRates'] as $table) {
+            $pointing = $this->getTableLocator()->get($table)->find()
+                ->where(['property_id' => $this->ours, 'room_id' => $theirRoom])
+                ->count();
+            $this->assertSame(0, $pointing, "no $table row of ours may point at their room");
+        }
+    }
+
+    /**
+     * SF-2026-006: a category's parent and an item's category came from the
+     * request with no property check.
+     */
+    public function testInventoryCannotFileUnderAnotherPropertysCategory(): void
+    {
+        $theirCategory = $this->b['category'];
+
+        $this->callAs($this->adminToken, 'POST', '/api/inventory-categories', [
+            'name' => 'Our Drinks', 'kind' => 'food_stock', 'parent_id' => $theirCategory,
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertStringNotContainsString(self::B_CATEGORY, (string)$this->_response->getBody());
+
+        $this->callAs($this->adminToken, 'POST', '/api/inventory-items', [
+            'name' => 'Our Soap', 'unit' => 'pcs', 'inventory_category_id' => $theirCategory,
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertStringNotContainsString(self::B_CATEGORY, (string)$this->_response->getBody());
+
+        $ownCategory = $this->insertRow('InventoryCategories', ['property_id' => $this->ours, 'name' => 'Ours', 'kind' => 'other']);
+        $ownItem = $this->insertRow('InventoryItems', [
+            'property_id' => $this->ours, 'inventory_category_id' => $ownCategory, 'name' => 'Our Towel',
+            'tracking_type' => 'consumable', 'unit' => 'pcs', 'quantity' => 0, 'reorder_level' => 0,
+        ]);
+        $this->callAs($this->adminToken, 'PATCH', "/api/inventory-items/$ownItem", [
+            'name' => 'Our Towel', 'unit' => 'pcs', 'inventory_category_id' => $theirCategory,
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertSame($ownCategory, (int)$this->row('InventoryItems', $ownItem)->inventory_category_id, 'the item keeps our category');
+
+        $this->assertSame(0, $this->getTableLocator()->get('InventoryCategories')->find()
+            ->where(['property_id' => $this->ours, 'parent_id' => $theirCategory])->count(), 'no category of ours under theirs');
+        $this->assertSame(0, $this->getTableLocator()->get('InventoryItems')->find()
+            ->where(['property_id' => $this->ours, 'inventory_category_id' => $theirCategory])->count(), 'no item of ours in their category');
+    }
+
+    /**
+     * SF-2026-006: links saved before the check show nothing of theirs: not
+     * their room on our rates, not their category's name on our inventory.
+     */
+    public function testOldLinksToAnotherPropertysRoomsOrCategoriesShowNothingOfTheirs(): void
+    {
+        $this->insertRow('RoomRates', ['property_id' => $this->ours, 'base_rate' => 1500, 'room_id' => $this->b['room']]);
+        $this->insertRow('PromoRates', [
+            'property_id' => $this->ours, 'source' => 'agoda', 'multiplier' => 1.2, 'room_id' => $this->b['room'],
+        ]);
+        $this->insertRow('InventoryCategories', [
+            'property_id' => $this->ours, 'name' => 'Old Child', 'kind' => 'other', 'parent_id' => $this->b['category'],
+        ]);
+        $this->insertRow('InventoryItems', [
+            'property_id' => $this->ours, 'inventory_category_id' => $this->b['category'], 'name' => 'Old Soap',
+            'tracking_type' => 'consumable', 'unit' => 'pcs', 'quantity' => 0, 'reorder_level' => 0,
+        ]);
+
+        foreach (['/api/room-rates', '/api/promo-rates', '/api/inventory-categories', '/api/inventory-items'] as $url) {
+            $this->callAs($this->adminToken, 'GET', $url);
+            $this->assertResponseOk();
+            $this->assertNothingOfTheirs("GET $url");
+            $this->assertStringNotContainsString(self::B_CATEGORY, (string)$this->_response->getBody(), "GET $url leaked their category");
+        }
+    }
+
+    /**
+     * SF-2026-006: deleting our category detached every sub-category by
+     * parent_id alone, so a category of theirs filed under ours was changed
+     * (and recorded) by our Manager, and their items in it blocked our delete.
+     */
+    public function testDeletingOurCategoryNeverTouchesAnotherPropertysCategories(): void
+    {
+        $ownCategory = $this->insertRow('InventoryCategories', ['property_id' => $this->ours, 'name' => 'Ours', 'kind' => 'other']);
+        $theirChild = $this->insertRow('InventoryCategories', [
+            'property_id' => $this->theirs, 'name' => 'Their Child', 'kind' => 'other', 'parent_id' => $ownCategory,
+        ]);
+        $theirItem = $this->insertRow('InventoryItems', [
+            'property_id' => $this->theirs, 'inventory_category_id' => $ownCategory, 'name' => 'Their Soap',
+            'tracking_type' => 'consumable', 'unit' => 'pcs', 'quantity' => 0, 'reorder_level' => 0,
+        ]);
+        $changes = fn() => $this->getTableLocator()->get('ConfigChanges')->find()
+            ->where(['property_id' => $this->theirs, 'entity_type' => 'inventory_category', 'entity_id' => $theirChild])
+            ->count();
+        $before = $changes();
+
+        $this->callAs($this->adminToken, 'DELETE', "/api/inventory-categories/$ownCategory", ['reason' => 'No longer used']);
+        $this->assertResponseOk();
+
+        $this->assertNotNull($this->row('InventoryCategories', $ownCategory)->deleted_at, 'ours is deleted');
+        $this->assertSame($ownCategory, (int)$this->row('InventoryCategories', $theirChild)->parent_id, 'their category is untouched');
+        $this->assertSame($before, $changes(), 'and nothing of ours is recorded against it');
+        $this->assertSame($ownCategory, (int)$this->row('InventoryItems', $theirItem)->inventory_category_id);
     }
 
     // ------------------------------------------------- the platform owner
