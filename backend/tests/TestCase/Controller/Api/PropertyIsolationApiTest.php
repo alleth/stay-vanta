@@ -472,7 +472,10 @@ class PropertyIsolationApiTest extends TestCase
         $this->callAs($this->adminToken, 'DELETE', "/api/inventory-categories/$ownCategory", ['reason' => 'No longer used']);
         $this->assertResponseOk();
 
-        $this->assertNotNull($this->row('InventoryCategories', $ownCategory)->deleted_at, 'ours is deleted');
+        // A deleted category is hidden from finds unless asked for (step 9).
+        $ours = $this->getTableLocator()->get('InventoryCategories')
+            ->find('all', withDeleted: true)->where(['id' => $ownCategory])->firstOrFail();
+        $this->assertNotNull($ours->deleted_at, 'ours is deleted');
         $this->assertSame($ownCategory, (int)$this->row('InventoryCategories', $theirChild)->parent_id, 'their category is untouched');
         $this->assertSame($before, $changes(), 'and nothing of ours is recorded against it');
         $this->assertSame($ownCategory, (int)$this->row('InventoryItems', $theirItem)->inventory_category_id);
