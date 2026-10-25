@@ -45,7 +45,10 @@ class InventoryItemsTable extends Table
         $this->addBehavior('Timestamp');
 
         $this->belongsTo('Properties');
-        $this->belongsTo('InventoryCategories');
+        // SF-2026-006: only a category of the item's own property ever joins.
+        $this->belongsTo('InventoryCategories', [
+            'conditions' => ['InventoryCategories.property_id = InventoryItems.property_id'],
+        ]);
         $this->belongsTo('LastReceptionist', [
             'className' => 'Users',
             'foreignKey' => 'last_receptionist_id',
