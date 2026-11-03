@@ -5,6 +5,7 @@ namespace App\Test\TestCase\Error;
 
 use App\Error\AppErrorLogger;
 use Cake\Datasource\Exception\RecordNotFoundException;
+use Cake\Error\PhpError;
 use Cake\Http\Exception\BadRequestException;
 use Cake\Http\Exception\ForbiddenException;
 use Cake\Http\Exception\InternalErrorException;
@@ -89,6 +90,58 @@ class AppErrorLoggerTest extends TestCase
         foreach (['?', 'q=', 'Bea', 'example.test'] as $value) {
             $this->assertStringNotContainsString($value, $lines[0]);
         }
+    }
+
+    /**
+     * A request whose URL and referring page carry guest values, as an old
+     * client or a crafted request could send.
+     */
+    private function requestWithValuesInItsUrls(): ServerRequest
+    {
+        return new ServerRequest([
+            'url' => '/api/guests?q=Bea+Theirs&email=bea%40example.test',
+            'environment' => [
+                'REQUEST_METHOD' => 'GET',
+                'HTTP_REFERER' => 'https://stay-vanta.pages.dev/front-desk?guest=Bea+Theirs#bea@example.test',
+            ],
+        ]);
+    }
+
+    private function assertOnlyPathsLogged(string $line): void
+    {
+        $this->assertStringContainsString("\nRequest URL: /api/guests\n", $line);
+        $this->assertStringContainsString("\nReferer URL: https://stay-vanta.pages.dev/front-desk", $line);
+        foreach (['q=', 'email=', 'guest=', 'Bea', 'example.test'] as $value) {
+            $this->assertStringNotContainsString($value, $line);
+        }
+    }
+
+    /**
+     * SF-2026-008: a real failure keeps its request context, but the request
+     * and referring URLs are logged as paths, never with their query strings.
+     */
+    public function testAFailureLogsTheRequestAndRefererWithoutTheirQueryStrings(): void
+    {
+        (new AppErrorLogger())->logException(new RuntimeException('Deadlock found'), $this->requestWithValuesInItsUrls(), true);
+
+        $lines = $this->lines();
+        $this->assertCount(1, $lines);
+        $this->assertStringStartsWith('error: ', $lines[0]);
+        $this->assertOnlyPathsLogged($lines[0]);
+    }
+
+    /**
+     * SF-2026-008: a PHP warning during a request logs the same context.
+     */
+    public function testAPhpErrorLogsTheRequestAndRefererWithoutTheirQueryStrings(): void
+    {
+        $error = new PhpError(E_WARNING, 'Undefined array key "x"', '/var/www/html/src/Example.php', 12);
+        (new AppErrorLogger())->logError($error, $this->requestWithValuesInItsUrls(), true);
+
+        $lines = $this->lines();
+        $this->assertCount(1, $lines);
+        $this->assertStringStartsWith('warning: ', $lines[0]);
+        $this->assertOnlyPathsLogged($lines[0]);
     }
 
     public function testRealFailuresAreStillErrorsWithTheirTrace(): void

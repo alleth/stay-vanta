@@ -6,6 +6,7 @@ namespace App\Error;
 use Cake\Core\Exception\HttpErrorCodeInterface;
 use Cake\Error\ErrorLogger;
 use Cake\Http\Exception\HttpException;
+use Cake\Http\ServerRequest;
 use Psr\Http\Message\ServerRequestInterface;
 use Throwable;
 
@@ -51,6 +52,40 @@ class AppErrorLogger extends ErrorLogger
             );
         }
         $this->log('info', $line);
+    }
+
+    /**
+     * The request behind a real failure or a PHP error, as CakePHP logs it,
+     * but with the request and referring URLs cut to their paths: a query
+     * string can carry guest names, emails or phone numbers, which must not
+     * reach infrastructure logs (G5, P6; SF-2026-008).
+     *
+     * @param \Psr\Http\Message\ServerRequestInterface $request The request to read from.
+     * @return string
+     */
+    public function getRequestContext(ServerRequestInterface $request): string
+    {
+        $message = "\nRequest URL: " . $request->getUri()->getPath();
+
+        $referer = parse_url($request->getHeaderLine('Referer'));
+        if (is_array($referer) && isset($referer['host'])) {
+            $message .= sprintf(
+                "\nReferer URL: %s://%s%s%s",
+                $referer['scheme'] ?? 'https',
+                $referer['host'],
+                isset($referer['port']) ? ':' . $referer['port'] : '',
+                $referer['path'] ?? '',
+            );
+        }
+
+        if ($request instanceof ServerRequest) {
+            $clientIp = $request->clientIp();
+            if ($clientIp && $clientIp !== '::1') {
+                $message .= "\nClient IP: " . $clientIp;
+            }
+        }
+
+        return $message;
     }
 
     /**
