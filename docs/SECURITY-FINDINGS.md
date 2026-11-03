@@ -6,6 +6,46 @@ one fixed before release, so the pattern stays visible.
 
 ---
 
+## SF-2026-008 · A failing request's query string reached the error log
+
+| | |
+| --- | --- |
+| **Status** | Open: fix prepared, not deployed (2026-11-03) |
+| **Severity** | Low: personal data in a URL could reach Railway's log storage, but only when the request also failed with a 5xx or a PHP error; the screens send no personal data in URLs since SF-2026-003; not exposed to the public |
+| **Found** | 2026-11-03, by the SF-2026-001–004 regression verification (Stage C, while writing the SF-2026-003 log guard) |
+| **Fixed** | Not yet |
+| **Exploited** | No: production log review below |
+
+**What was wrong.** SF-2026-003 took query strings out of the access log and `AppErrorLogger` logs
+an expected 4xx refusal with its path only, but a real failure (any 5xx exception) and a PHP error
+during a request went through CakePHP's own `ErrorLogger::getRequestContext()`. That appends
+`Request URL:` with the full request target, query string included, and `Referer URL:` with the
+whole referring page address, query string and fragment included. A request carrying a guest's
+name, email or phone number in its URL that happened to fail would have written them to the
+container's stderr and so to Railway's log storage, outside the retention routine.
+
+No screen sends personal data in a URL (guest search and matching travel in a POST body since
+SF-2026-003; the old `GET /guests?q=` is refused with a 400, which takes the 4xx path). It needed
+an old client, a crafted request or a future endpoint, plus a failure. Stack traces were never
+affected: CakePHP formats them without argument values.
+
+**Fix.** `AppErrorLogger::getRequestContext()` logs the request's path and the referring page's
+scheme, host and path only; the client IP line is unchanged. Tests:
+`AppErrorLoggerTest::testAFailureLogsTheRequestAndRefererWithoutTheirQueryStrings`,
+`testAPhpErrorLogsTheRequestAndRefererWithoutTheirQueryStrings`.
+
+**Log review (production, read-only).** Railway keeps the API's logs from 2026-10-30 09:39 UTC
+(2,221 lines up to 2026-11-03 12:33 UTC); nothing older is available. 0 responses with a 5xx status,
+0 error-level lines, 0 `Request URL:`, `Referer URL:` or `Client IP:` lines and 0 trace frames: no
+request context was logged at all in that window. Every query parameter the API reads is an id, a
+date, a page, a status or an inventory or receipt-booklet search; none is a guest's detail.
+
+**Conclusion:** no evidence of exposure. A failure before 2026-10-30 can't be checked, since Railway
+keeps no older logs, but no screen has put personal data in a URL since SF-2026-003 went to
+production on 2026-10-09.
+
+---
+
 ## SF-2026-007 · A booking refusal could describe another hotel's room
 
 | | |
