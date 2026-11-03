@@ -478,6 +478,100 @@ class PropertyIsolationApiTest extends TestCase
     }
 
     /**
+     * Their rooms in every state a refusal could tell apart: free, under
+     * maintenance, out of service, booked over our dates, plus an id that
+     * exists nowhere. Their booking (setUp) holds `room` for days 5 to 7.
+     *
+     * @return array<string, int>
+     */
+    private function theirRoomsInEveryState(): array
+    {
+        $room = fn(string $number, string $service): int => $this->insertRow('Rooms', [
+            'property_id' => $this->theirs, 'room_number' => $number, 'room_type' => 'Deluxe',
+            'status' => 'available', 'service_status' => $service,
+        ]);
+
+        return [
+            'free' => $room('THEIRS-FREE-7', 'in_service'),
+            'under maintenance' => $room('THEIRS-MAINT-7', 'maintenance'),
+            'out of service' => $room('THEIRS-OOS-7', 'out_of_service'),
+            'booked on our dates' => $this->b['room'],
+            'nowhere' => 999999999,
+        ];
+    }
+
+    /**
+     * Each request with each of their rooms: the refusals must be identical,
+     * so none of them tells one of their rooms from another.
+     *
+     * @param array<string, int> $rooms
+     * @param callable(int): void $send Sends the request naming one room.
+     */
+    private function assertOneRefusalForEveryRoom(string $what, array $rooms, callable $send): void
+    {
+        $answers = [];
+        foreach ($rooms as $state => $roomId) {
+            $send($roomId);
+            $status = $this->_response->getStatusCode();
+            $body = (string)$this->_response->getBody();
+            $this->assertContains($status, [400, 404, 422], "$what, their room $state: $body");
+            foreach (['THEIRS-', 'maintenance', 'out of service', 'already booked'] as $marker) {
+                $this->assertStringNotContainsStringIgnoringCase($marker, $body, "$what, their room $state");
+            }
+            $answers[$state] = [$status, $body];
+        }
+        foreach ($answers as $state => $answer) {
+            $this->assertSame($answers['nowhere'], $answer, "$what: their room $state answers like a room that doesn't exist");
+        }
+    }
+
+    /**
+     * SF-2026-007: naming their room on a new booking says only that it isn't
+     * ours, never its number, its service state or whether it's booked.
+     */
+    public function testANewBookingSaysNothingAboutAnotherPropertysRoom(): void
+    {
+        $rooms = $this->theirRoomsInEveryState();
+        $this->assertOneRefusalForEveryRoom('a walk-in', $rooms, function (int $roomId): void {
+            $this->callAs($this->adminToken, 'POST', '/api/reservations', [
+                'room_id' => $roomId,
+                'source' => 'walk_in',
+                'check_out' => BusinessTime::today()->addDays(6)->format('Y-m-d'),
+            ]);
+        });
+
+        $this->assertSame(0, $this->getTableLocator()->get('Reservations')->find()
+            ->where(['property_id' => $this->ours])->count(), 'nothing was booked');
+        foreach ($rooms as $roomId) {
+            if ($roomId !== 999999999) {
+                $this->assertSame('available', $this->row('Rooms', $roomId)->status);
+            }
+        }
+    }
+
+    /**
+     * SF-2026-007: moving our booking into their room says the same.
+     */
+    public function testMovingABookingSaysNothingAboutAnotherPropertysRoom(): void
+    {
+        $ourRoom = $this->insertRow('Rooms', [
+            'property_id' => $this->ours, 'room_number' => 'OURS-301', 'room_type' => 'Deluxe', 'status' => 'available',
+        ]);
+        $ourStay = $this->insertRow('Reservations', [
+            'property_id' => $this->ours, 'room_id' => $ourRoom, 'receptionist_id' => $this->userIdFor($this->adminToken),
+            'status' => 'booked', 'source' => 'walk_in', 'payment_status' => 'unpaid', 'total_guests' => 1,
+            'check_in' => BusinessTime::today()->addDays(5)->format('Y-m-d'),
+            'check_out' => BusinessTime::today()->addDays(7)->format('Y-m-d'),
+        ]);
+
+        $this->assertOneRefusalForEveryRoom('moving our booking', $this->theirRoomsInEveryState(), function (int $roomId) use ($ourStay): void {
+            $this->callAs($this->adminToken, 'PATCH', "/api/reservations/$ourStay", ['room_id' => $roomId]);
+        });
+
+        $this->assertSame($ourRoom, (int)$this->row('Reservations', $ourStay)->room_id, 'our booking keeps our room');
+    }
+
+    /**
      * Code-only until now: a `property_id` in the body never chooses where
      * staff's new rows go, or moves an existing one.
      */
