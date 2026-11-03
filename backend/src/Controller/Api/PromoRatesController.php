@@ -55,12 +55,14 @@ class PromoRatesController extends AppController
             throw new BadRequestException('property_id is required.');
         }
 
+        // Checked before the source, which may register a new booking source.
+        $roomId = $this->ownReference('Rooms', 'room_id', $propertyId, 'The selected room was not found.');
         $source = $this->resolveSource($propertyId, (string)$this->request->getData('source_name'));
 
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $promoRates->newEntity([
             'property_id' => $propertyId,
-            'room_id' => $this->request->getData('room_id') ?: null,
+            'room_id' => $roomId,
             'source' => $source,
             'multiplier' => $this->request->getData('multiplier'),
         ]);
@@ -90,13 +92,14 @@ class PromoRatesController extends AppController
         $promoRates = $this->fetchTable('PromoRates');
         $rate = $this->scopeToProperty($promoRates->find()->where(['PromoRates.id' => $id]))->firstOrFail();
 
+        // room_id may be intentionally set to null ("all rooms").
+        $roomId = $this->ownReference('Rooms', 'room_id', (int)$rate->property_id, 'The selected room was not found.');
         $source = $this->resolveSource((int)$rate->property_id, (string)$this->request->getData('source_name'));
 
-        // room_id may be intentionally set to null ("all rooms"); read it raw.
         $promoRates->patchEntity($rate, [
             'source' => $source,
             'multiplier' => $this->request->getData('multiplier'),
-            'room_id' => $this->request->getData('room_id') ?: null,
+            'room_id' => $roomId,
         ], ['accessibleFields' => ['property_id' => false]]);
 
         if (!$promoRates->save($rate, $this->auditOptions(true))) {

@@ -62,7 +62,12 @@ class InventoryCategoriesController extends AppController
             'property_id' => $propertyId,
             'name' => $this->request->getData('name'),
             'kind' => $this->request->getData('kind') ?? 'other',
-            'parent_id' => $this->request->getData('parent_id'),
+            'parent_id' => $this->ownReference(
+                'InventoryCategories',
+                'parent_id',
+                $propertyId,
+                'The selected parent category was not found.',
+            ),
         ]);
 
         if (!$categories->save($category, $this->auditOptions())) {
@@ -94,14 +99,21 @@ class InventoryCategoriesController extends AppController
             ->firstOrFail();
 
         $items = $this->fetchTable('InventoryItems');
-        $inUse = $items->find()->where(['InventoryItems.inventory_category_id' => $id])->count() > 0;
+        // SF-2026-006: only this property's items and sub-categories; another
+        // hotel's rows are neither counted nor changed by our delete.
+        $propertyId = (int)$category->property_id;
+        $inUse = $items->exists([
+            'InventoryItems.inventory_category_id' => $id,
+            'InventoryItems.property_id' => $propertyId,
+        ]);
         if ($inUse) {
             throw new BadRequestException('This category still has items. Move or delete them first.');
         }
 
-        $categories->getConnection()->transactional(function () use ($categories, $category, $id): void {
+        $categories->getConnection()->transactional(function () use ($categories, $category, $id, $propertyId): void {
             // Each detached sub-category is its own recorded change (step 9).
-            foreach ($categories->find()->where(['parent_id' => $id])->all() as $child) {
+            $children = $categories->find()->where(['parent_id' => $id, 'property_id' => $propertyId]);
+            foreach ($children->all() as $child) {
                 $child->set('parent_id', null);
                 $categories->saveOrFail($child, $this->auditOptions());
             }

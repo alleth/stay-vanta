@@ -34,6 +34,8 @@ class InventoryCategoriesTable extends Table
         $this->belongsTo('ParentCategories', [
             'className' => 'InventoryCategories',
             'foreignKey' => 'parent_id',
+            // SF-2026-006: only a parent of the same property ever joins.
+            'conditions' => ['ParentCategories.property_id = InventoryCategories.property_id'],
         ]);
         $this->hasMany('InventoryItems');
     }
