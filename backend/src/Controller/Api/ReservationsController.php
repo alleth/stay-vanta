@@ -375,7 +375,7 @@ class ReservationsController extends AppController
                 // Serialise bookings for this room so two receptionists can't
                 // both pass the availability rule before either has saved.
                 if ($roomId) {
-                    $reservations->lockRoom((int)$roomId);
+                    $reservations->lockRoom((int)$roomId, $propertyId);
                 }
 
                 if (
@@ -424,7 +424,7 @@ class ReservationsController extends AppController
 
                 // A room off service can't take a guest now, and one out of
                 // service can't be booked at all (G4, R3).
-                $this->assertRoomCanTake($roomId ? (int)$roomId : null, $status);
+                $this->assertRoomCanTake($propertyId, $roomId ? (int)$roomId : null, $status);
 
                 $reservation = $reservations->newEntity([
                     'property_id' => $propertyId,
@@ -675,7 +675,7 @@ class ReservationsController extends AppController
                 $before = $this->stateOf($reservation);
 
                 if ($roomId) {
-                    $reservations->lockRoom((int)$roomId);
+                    $reservations->lockRoom((int)$roomId, $propertyId);
                 }
 
                 $reservations->patchEntity($reservation, [
@@ -702,7 +702,7 @@ class ReservationsController extends AppController
 
                 $previousRoomId = $reservation->getOriginal('room_id');
                 if ($reservation->room_id && (int)$previousRoomId !== (int)$reservation->room_id) {
-                    $this->assertRoomCanTake((int)$reservation->room_id, (string)$reservation->status);
+                    $this->assertRoomCanTake($propertyId, (int)$reservation->room_id, (string)$reservation->status);
                 }
                 if ($reservation->status !== 'booked') {
                     $this->correctStay($reservation);
@@ -971,7 +971,11 @@ class ReservationsController extends AppController
         }
         // Checking in needs a room in service (G4, R3).
         if ($transition === 'check-in') {
-            $this->assertRoomCanTake($reservation->room_id ? (int)$reservation->room_id : null, 'checked_in');
+            $this->assertRoomCanTake(
+                (int)$reservation->property_id,
+                $reservation->room_id ? (int)$reservation->room_id : null,
+                'checked_in',
+            );
         }
         $fromStatus = $reservation->status;
         // Cancelling an advance booking returns 90% of its downpayment (step
@@ -1072,7 +1076,14 @@ class ReservationsController extends AppController
                             (int)$reservation->guest_id,
                             (int)$reservation->id,
                         );
-                        $invoices->addLine($this->eventContext(), $invoice, 'Early check-in', $fee, 'early_check_in', (int)$reservation->id);
+                        $invoices->addLine(
+                            $this->eventContext(),
+                            $invoice,
+                            'Early check-in',
+                            $fee,
+                            'early_check_in',
+                            (int)$reservation->id,
+                        );
                     }
                 }
 
@@ -2215,16 +2226,18 @@ class ReservationsController extends AppController
      * Refuse a stay in a room that can't take it (final review G4, R3): a
      * guest checking in (or a walk-in, or a past stay still going) needs the
      * room in service; a booking for later dates is refused only when the
-     * room is out of service (maintenance is usually short, R3).
+     * room is out of service (maintenance is usually short, R3). Only this
+     * property's room is read: another property's is refused by the
+     * roomInProperty rule, and its number and state are never told (SF-2026-007).
      */
-    private function assertRoomCanTake(?int $roomId, string $status): void
+    private function assertRoomCanTake(int $propertyId, ?int $roomId, string $status): void
     {
         if ($roomId === null || $status === 'checked_out' || $status === 'cancelled') {
             return;
         }
         $room = $this->fetchTable('Rooms')->find()
             ->select(['id', 'room_number', 'service_status'])
-            ->where(['Rooms.id' => $roomId])
+            ->where(['Rooms.id' => $roomId, 'Rooms.property_id' => $propertyId])
             ->first();
         if ($room === null) {
             return;
@@ -2562,6 +2575,9 @@ class ReservationsController extends AppController
         }
     }
 
+    /**
+     * Answer with the reservation as the screens read it: its quote and billing state.
+     */
     private function respondWithReservation(Reservation $reservation, int $status): void
     {
         $reservations = $this->fetchTable('Reservations');
@@ -2569,7 +2585,10 @@ class ReservationsController extends AppController
             $reservation->id,
             contain: self::RESERVATION_CONTAIN,
         );
-        $full->set('quote', $reservations->quote($full, $this->resolveBaseRate((int)$full->property_id, $full->room_id)));
+        $full->set('quote', $reservations->quote(
+            $full,
+            $this->resolveBaseRate((int)$full->property_id, $full->room_id),
+        ));
         $chargeInvoice = $this->roomChargeStatuses([(int)$full->id])[(int)$full->id] ?? null;
         $full->set('room_charge_invoice', $chargeInvoice);
         $full->set('billing_state', self::billingState($chargeInvoice));
@@ -2579,6 +2598,11 @@ class ReservationsController extends AppController
         $this->viewBuilder()->setOption('serialize', ['reservation']);
     }
 
+    /**
+     * Answer 422 with the entity's validation and rule errors.
+     *
+     * @param array<string, mixed> $errors
+     */
     private function validationFailed(array $errors): void
     {
         $this->response = $this->response->withStatus(422);
