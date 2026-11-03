@@ -192,6 +192,35 @@ class AccessEventsApiTest extends TestCase
         $this->assertSame(['password_changed', 'session_ended'], array_map(fn($e) => $e->event_type, $this->eventsOf($adminId)));
     }
 
+    /**
+     * SF-2026-002 (A8): a password set by someone else, or changed by its
+     * owner, retires the token the device already holds; only the new
+     * password signs in again.
+     */
+    public function testASetPasswordRetiresTheOldToken(): void
+    {
+        $deskId = $this->userIdFor($this->deskToken);
+        $adminId = $this->userIdFor($this->adminToken);
+
+        $this->callAs($this->adminToken, 'POST', "/api/users/$deskId/reset-password", [
+            'password' => 'newsecret1', 'reason' => 'Forgot it',
+        ]);
+        $this->assertResponseOk();
+        $this->callAs($this->deskToken, 'GET', '/api/auth/me');
+        $this->assertResponseCode(401, 'the old token died with the reset');
+        $this->signIn($this->deskEmail, 'secret123');
+        $this->assertResponseCode(401, 'the old password is gone too');
+        $this->signIn($this->deskEmail, 'newsecret1');
+        $this->assertResponseOk();
+
+        $this->callAs($this->adminToken, 'POST', "/api/users/$adminId/reset-password", [
+            'password' => 'mynewpass1', 'current_password' => 'secret123',
+        ]);
+        $this->assertResponseOk();
+        $this->callAs($this->adminToken, 'GET', '/api/auth/me');
+        $this->assertResponseCode(401, 'your own change signs your devices out as well');
+    }
+
     public function testEachPersonSeesTheirOwnAndAManagerSeesTheirStaff(): void
     {
         $deskId = $this->userIdFor($this->deskToken);

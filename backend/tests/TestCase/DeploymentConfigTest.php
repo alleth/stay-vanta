@@ -56,6 +56,33 @@ class DeploymentConfigTest extends TestCase
         $this->assertFileDoesNotExist(ROOT . DS . 'railway.retention.json', 'Railway ignores it for the retention service');
     }
 
+    /**
+     * SF-2026-003 (G5, P6): the access log records method, path and protocol,
+     * never the query string, so no guest value in a URL reaches Railway's
+     * log storage. `%r` is the whole request line and `%q` the query string.
+     */
+    public function testTheAccessLogNeverRecordsAQueryString(): void
+    {
+        $vhost = (string)file_get_contents(ROOT . DS . 'docker' . DS . '000-default.conf');
+        $this->assertNotSame('', $vhost, 'docker/000-default.conf is missing');
+
+        preg_match_all('/^\s*LogFormat\s+"((?:[^"\\\\]|\\\\.)*)"\s+(\S+)/m', $vhost, $formats, PREG_SET_ORDER);
+        $this->assertNotEmpty($formats, 'the access log format is defined here');
+        foreach ($formats as [, $format, $name]) {
+            $this->assertStringNotContainsString('%r', $format, "$name logs the request line");
+            $this->assertStringNotContainsString('%q', $format, "$name logs the query string");
+            $this->assertStringContainsString('%m %U %H', $format, "$name logs method, path and protocol");
+        }
+
+        $names = array_column($formats, 2);
+        preg_match_all('/^\s*(CustomLog|TransferLog)\s+(\S+)(?:\s+(\S+))?/m', $vhost, $logs, PREG_SET_ORDER);
+        $this->assertNotEmpty($logs);
+        foreach ($logs as [$line, $directive, , $format]) {
+            $this->assertSame('CustomLog', $directive, 'TransferLog uses the default format, which includes %r');
+            $this->assertContains($format, $names, "\"$line\" must use a format defined above");
+        }
+    }
+
     public function testTheJobBranchWaitsForTheDatabaseThenRunsOnlyTheRoutine(): void
     {
         $job = $this->jobBranch();

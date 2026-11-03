@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 
 namespace App\Test\TestCase\Controller\Api;
@@ -29,7 +28,9 @@ class StaffHierarchyApiTest extends TestCase
     private string $deskToken;
     private string $ownerToken;
     private Connection $connection;
-    /** @var list<int> Stand-in roles inserted by a test (scaffolding, removed after). */
+    /**
+     * @var list<int> Stand-in roles inserted by a test (scaffolding, removed after).
+     */
     private array $roleIds = [];
 
     protected function setUp(): void
@@ -126,6 +127,32 @@ class StaffHierarchyApiTest extends TestCase
         $this->assertResponseOk();
         $this->callAs($this->adminToken, 'GET', "/api/users/$adminId/access-history");
         $this->assertResponseOk();
+    }
+
+    /**
+     * SF-2026-004: the other two things a Manager could do to a peer, switch
+     * them back on and change their role, are refused too, and nothing of
+     * theirs is recorded as done by the Manager.
+     */
+    public function testAManagerCannotReactivateOrChangeTheRoleOfAPeer(): void
+    {
+        $peerId = $this->userIdFor($this->peerToken);
+        $adminId = $this->userIdFor($this->adminToken);
+
+        $this->callAs($this->adminToken, 'PATCH', "/api/users/$peerId", ['role' => 'receptionist', 'reason' => 'x']);
+        $this->assertResponseCode(403);
+        $membership = $this->getTableLocator()->get('PropertyMemberships')->find('active')
+            ->contain(['Roles'])->where(['user_id' => $peerId])->firstOrFail();
+        $this->assertSame('admin', $membership->role->code, 'the peer is still a Manager');
+
+        $this->callAs($this->ownerToken, 'PATCH', "/api/users/$peerId", ['is_active' => false, 'reason' => 'On leave']);
+        $this->assertResponseOk();
+        $this->callAs($this->adminToken, 'PATCH', "/api/users/$peerId", ['is_active' => true, 'reason' => 'x']);
+        $this->assertResponseCode(403);
+        $this->assertFalse((bool)$this->getTableLocator()->get('Users')->get($peerId)->is_active);
+
+        $this->assertSame(0, $this->getTableLocator()->get('AccessEvents')->find()
+            ->where(['subject_user_id' => $peerId, 'actor_id' => $adminId])->count());
     }
 
     public function testThePlatformOwnerManagesEveryoneAndChangesRolesByData(): void
