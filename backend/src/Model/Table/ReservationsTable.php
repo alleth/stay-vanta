@@ -48,6 +48,9 @@ class ReservationsTable extends Table
      */
     public const STATUTORY_DISCOUNT = StatutoryDiscount::RATE;
 
+    /**
+     * @param array<string, mixed> $config
+     */
     public function initialize(array $config): void
     {
         parent::initialize($config);
@@ -68,6 +71,9 @@ class ReservationsTable extends Table
         $this->hasMany('ReservationExtraCharges', ['dependent' => true]);
     }
 
+    /**
+     * Field validation for a reservation.
+     */
     public function validationDefault(Validator $validator): Validator
     {
         $validator
@@ -209,9 +215,13 @@ class ReservationsTable extends Table
                         )
                     );
 
-                // A booking that no longer holds the room can't collide.
+                // A booking that no longer holds the room can't collide. Nor
+                // can one naming another property's room: roomInProperty
+                // refuses it, and saying whether that room is booked would
+                // tell one hotel about another's (SF-2026-007).
                 if (
                     $reservation->room_id === null
+                    || !($this->inSameProperty('Rooms', 'room_id'))($reservation)
                     || (!in_array($reservation->status, self::HOLDS_ROOM, true) && !$recordingPast)
                     || !$reservation->check_in
                     || !$reservation->check_out
@@ -315,12 +325,14 @@ class ReservationsTable extends Table
      * the second waits, then re-runs the rule and sees the first booking.
      *
      * Only meaningful inside a transaction — the lock is released when that
-     * transaction ends. Same idiom as ReceiptSeriesTable::assignNext().
+     * transaction ends. Same idiom as ReceiptSeriesTable::assignNext(). Only
+     * the property's own room is locked: another property's room is refused
+     * by the roomInProperty rule, and its row is never touched.
      */
-    public function lockRoom(int $roomId): void
+    public function lockRoom(int $roomId, int $propertyId): void
     {
         TableRegistry::getTableLocator()->get('Rooms')->find()
-            ->where(['Rooms.id' => $roomId])
+            ->where(['Rooms.id' => $roomId, 'Rooms.property_id' => $propertyId])
             ->epilog('FOR UPDATE')
             ->first();
     }

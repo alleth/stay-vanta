@@ -6,6 +6,103 @@ one fixed before release, so the pattern stays visible.
 
 ---
 
+## SF-2026-008 · A failing request's query string reached the error log
+
+| | |
+| --- | --- |
+| **Status** | Open: fix prepared, not deployed (2026-11-03) |
+| **Severity** | Low: personal data in a URL could reach Railway's log storage, but only when the request also failed with a 5xx or a PHP error; the screens send no personal data in URLs since SF-2026-003; not exposed to the public |
+| **Found** | 2026-11-03, by the SF-2026-001–004 regression verification (Stage C, while writing the SF-2026-003 log guard) |
+| **Fixed** | Not yet |
+| **Exploited** | No: production log review below |
+
+**What was wrong.** SF-2026-003 took query strings out of the access log and `AppErrorLogger` logs
+an expected 4xx refusal with its path only, but a real failure (any 5xx exception) and a PHP error
+during a request went through CakePHP's own `ErrorLogger::getRequestContext()`. That appends
+`Request URL:` with the full request target, query string included, and `Referer URL:` with the
+whole referring page address, query string and fragment included. A request carrying a guest's
+name, email or phone number in its URL that happened to fail would have written them to the
+container's stderr and so to Railway's log storage, outside the retention routine.
+
+No screen sends personal data in a URL (guest search and matching travel in a POST body since
+SF-2026-003; the old `GET /guests?q=` is refused with a 400, which takes the 4xx path). It needed
+an old client, a crafted request or a future endpoint, plus a failure. Stack traces were never
+affected: CakePHP formats them without argument values.
+
+**Fix.** `AppErrorLogger::getRequestContext()` logs the request's path and the referring page's
+scheme, host and path only; the client IP line is unchanged. Tests:
+`AppErrorLoggerTest::testAFailureLogsTheRequestAndRefererWithoutTheirQueryStrings`,
+`testAPhpErrorLogsTheRequestAndRefererWithoutTheirQueryStrings`.
+
+**Log review (production, read-only).** Railway keeps the API's logs from 2026-10-30 09:39 UTC
+(2,221 lines up to 2026-11-03 12:33 UTC); nothing older is available. 0 responses with a 5xx status,
+0 error-level lines, 0 `Request URL:`, `Referer URL:` or `Client IP:` lines and 0 trace frames: no
+request context was logged at all in that window. Every query parameter the API reads is an id, a
+date, a page, a status or an inventory or receipt-booklet search; none is a guest's detail.
+
+**Conclusion:** no evidence of exposure. A failure before 2026-10-30 can't be checked, since Railway
+keeps no older logs, but no screen has put personal data in a URL since SF-2026-003 went to
+production on 2026-10-09.
+
+---
+
+## SF-2026-007 · A booking refusal could describe another hotel's room
+
+| | |
+| --- | --- |
+| **Status** | Open: fix prepared, not deployed (2026-11-03) |
+| **Severity** | Low: information disclosure only (another hotel's room number, its service state and whether it was booked on given dates); no personal data, no cross-property change, no financial effect; needs a crafted API request by Manager or Front Desk Staff |
+| **Found** | 2026-11-03, by the SF-2026-001–004 regression verification (Stage C, while writing the booking-room isolation test) |
+| **Fixed** | Not yet |
+| **Exploited** | No: production read-only audit and log review below |
+
+**What was wrong.** Creating a reservation (`POST /api/reservations`) or moving one to another room
+(`PATCH /api/reservations/{id}`) with another hotel's `room_id` was refused, as the
+`roomInProperty` build rule requires, but the refusal said more than "not ours":
+- `ReservationsController::assertRoomCanTake()` read the room by id alone, before the build rules,
+  and refused with its number and state: "Room 204 is out of service…" for a booking, or
+  "Room 204 is under maintenance…" for a walk-in. `AppErrorLogger` wrote that line, with the number, to
+  the log.
+- The `roomAvailable` build rule looked for clashing bookings by `room_id` alone. CakePHP runs every
+  rule and the 422 response lists every error, so the answer also said "That room is already booked
+  for those dates." exactly when that hotel's room was booked then. Repeating it with other dates
+  would map another hotel's occupancy, room by room.
+- `ReservationsTable::lockRoom()` took a `FOR UPDATE` lock on that hotel's room row for the length
+  of the refused request.
+
+Nothing was saved: the reservation was refused either way. The Front Desk screen only offers the
+hotel's own rooms, so it took a crafted request with guessed ids.
+
+**Fix.** `assertRoomCanTake()` and `lockRoom()` read and lock only the property's own room;
+`roomAvailable` skips a room outside the property, so `roomInProperty` is the only answer. Another
+hotel's room, in any state, is now refused exactly like a room id that doesn't exist. Tests:
+`PropertyIsolationApiTest::testANewBookingSaysNothingAboutAnotherPropertysRoom`,
+`testMovingABookingSaysNothingAboutAnotherPropertysRoom` (free, under maintenance, out of service,
+booked on the requested dates, and nonexistent: identical refusals).
+
+**Historical analysis (production, read-only).** Run on 2026-11-03 12:44 UTC inside a MySQL
+`READ ONLY` transaction (MySQL 9.7.2), rolled back; printed ids and counts only.
+- 2 properties (6 and 13 rooms, none deleted); active memberships 1 Manager + 2 Front Desk Staff and
+  1 Manager + 1 Front Desk Staff.
+- 0 reservations (deleted ones included) with another property's room, 0 with a missing room.
+- 71 reservation events, 18 recording a room: 0 naming another property's room, before or after.
+- 0 room service events ever, and every room is in service: no room has ever been under maintenance
+  or out of service, so the first message could never have been produced in production.
+- No booking holds a room today or later, so the availability answer had nothing to tell today.
+
+**Log review (production, read-only).** Railway keeps the API's logs from 2026-10-30 09:39 UTC
+(1,883 access lines up to 2026-11-03 12:33 UTC); nothing older is available. Reservation create
+and edit: 6 × 201, 1 × 400 ("A past stay needs a reason…", unrelated), 1 × 422 of 87 bytes. 0 lines
+with a room refusal ("Room … is"). The 422's size matches one rule error alone (own room booked, or
+"not ours"), not the 150-byte pair that told another hotel's booking, and it sits between ordinary
+bookings made from the screen.
+
+**Conclusion:** no evidence of use. The room-state message was impossible in production; the
+availability answer can't be ruled out before 2026-10-30, the oldest log Railway keeps, since a
+refused request leaves no row.
+
+---
+
 ## SF-2026-006 · Rates, categories and items could point at another hotel's rooms or categories
 
 | | |
