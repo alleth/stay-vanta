@@ -71,6 +71,26 @@ class AppErrorLoggerTest extends TestCase
         $this->assertStringContainsString('info: 401 GET /api/guests/42: Missing or invalid token.', $lines[0]);
     }
 
+    /**
+     * SF-2026-003: a refusal of a request that carried a query string logs
+     * the path only, so the values in the URL stay out of the log.
+     */
+    public function testARefusalLogsThePathWithoutTheQueryString(): void
+    {
+        $request = new ServerRequest([
+            'url' => '/api/guests?q=Bea+Theirs&email=bea%40example.test',
+            'environment' => ['REQUEST_METHOD' => 'GET'],
+        ]);
+        (new AppErrorLogger())->logException(new BadRequestException('Search guests with POST.'), $request, true);
+
+        $lines = $this->lines();
+        $this->assertCount(1, $lines);
+        $this->assertStringContainsString('info: 400 GET /api/guests: Search guests with POST.', $lines[0]);
+        foreach (['?', 'q=', 'Bea', 'example.test'] as $value) {
+            $this->assertStringNotContainsString($value, $lines[0]);
+        }
+    }
+
     public function testRealFailuresAreStillErrorsWithTheirTrace(): void
     {
         foreach ([new RuntimeException('Deadlock found'), new InternalErrorException('Boom')] as $exception) {

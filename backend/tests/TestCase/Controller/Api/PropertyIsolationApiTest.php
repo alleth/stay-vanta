@@ -86,6 +86,19 @@ class PropertyIsolationApiTest extends TestCase
 
     protected function tearDown(): void
     {
+        // Option groups hang off menu items, which cleanupScenario() removes by property.
+        $locator = $this->getTableLocator();
+        $menuIds = $locator->get('FoodMenuItems')->find()->select(['id'])
+            ->where(['property_id IN' => [$this->ours, $this->theirs]])
+            ->all()->extract('id')->toList();
+        if ($menuIds) {
+            $groupIds = $locator->get('FoodMenuItemOptionGroups')->find()->select(['id'])
+                ->where(['food_menu_item_id IN' => $menuIds])->all()->extract('id')->toList();
+            if ($groupIds) {
+                $locator->get('FoodMenuItemOptions')->deleteAll(['food_menu_item_option_group_id IN' => $groupIds]);
+                $locator->get('FoodMenuItemOptionGroups')->deleteAll(['id IN' => $groupIds]);
+            }
+        }
         $this->cleanupScenario();
         parent::tearDown();
     }
@@ -345,6 +358,160 @@ class PropertyIsolationApiTest extends TestCase
             ->where(['inventory_item_id' => $this->b['item']])->count(), 'and their ledger has no movement of ours');
         $this->assertSame(0, $this->getTableLocator()->get('FoodOrders')->find()
             ->where(['property_id' => $this->ours])->count(), 'the refused sale left no order');
+    }
+
+    /**
+     * SF-2026-001 lesson, code-only until now: a menu item's recipe and its
+     * options' stock can't name their stock, on create or edit.
+     */
+    public function testARecipeOrAnOptionCannotUseAnotherPropertysStock(): void
+    {
+        $ownId = $this->insertRow('FoodMenuItems', [
+            'property_id' => $this->ours, 'name' => 'Our Plate', 'price' => 50, 'type' => 'food', 'is_available' => true,
+        ]);
+        $bodies = [
+            'a recipe' => ['ingredients' => [['inventory_item_id' => $this->b['item'], 'quantity' => 1]]],
+            'an option' => ['option_groups' => [[
+                'name' => 'Extras', 'kind' => 'addon',
+                'options' => [['label' => 'Their stock', 'price_delta' => 10, 'inventory_item_id' => $this->b['item']]],
+            ]]],
+        ];
+        foreach ($bodies as $what => $body) {
+            $this->callAs($this->adminToken, 'POST', '/api/food-menu-items', ['name' => 'New Plate', 'price' => 50, 'type' => 'food'] + $body);
+            $this->assertResponseCode(400, "POST with $what on their stock");
+            $this->assertNothingOfTheirs("POST /api/food-menu-items ($what)");
+
+            $this->callAs($this->adminToken, 'PATCH', "/api/food-menu-items/$ownId", ['name' => 'Our Plate', 'price' => 50] + $body);
+            $this->assertResponseCode(400, "PATCH with $what on their stock");
+            $this->assertNothingOfTheirs("PATCH /api/food-menu-items/$ownId ($what)");
+        }
+
+        $this->assertSame(0, $this->getTableLocator()->get('FoodMenuItemIngredients')->find()
+            ->where(['inventory_item_id' => $this->b['item']])->count(), 'no recipe of ours uses their stock');
+        $this->assertSame(0, $this->getTableLocator()->get('FoodMenuItemOptions')->find()
+            ->where(['inventory_item_id' => $this->b['item']])->count(), 'no option of ours uses their stock');
+        $this->assertSame(1, $this->getTableLocator()->get('FoodMenuItems')->find()
+            ->where(['property_id' => $this->ours])->count(), 'the refused create saved nothing');
+    }
+
+    /**
+     * Code-only until now: an order line can't sell their menu item or pick
+     * one of their options on ours.
+     */
+    public function testAnOrderLineCannotUseAnotherPropertysMenuItemOrOption(): void
+    {
+        $theirMenu = $this->insertRow('FoodMenuItems', [
+            'property_id' => $this->theirs, 'name' => 'Their Plate', 'price' => 80, 'type' => 'food', 'is_available' => true,
+        ]);
+        $theirGroup = $this->insertRow('FoodMenuItemOptionGroups', [
+            'food_menu_item_id' => $theirMenu, 'name' => 'Extras', 'kind' => 'addon',
+        ]);
+        $theirOption = $this->insertRow('FoodMenuItemOptions', [
+            'food_menu_item_option_group_id' => $theirGroup, 'label' => 'Their egg', 'price_delta' => 15,
+            'inventory_item_id' => $this->b['item'],
+        ]);
+        $ourMenu = $this->insertRow('FoodMenuItems', [
+            'property_id' => $this->ours, 'name' => 'Our Plate', 'price' => 50, 'type' => 'food', 'is_available' => true,
+        ]);
+
+        $lines = [
+            'their menu item' => ['food_menu_item_id' => $theirMenu, 'quantity' => 1],
+            'their option' => [
+                'food_menu_item_id' => $ourMenu, 'quantity' => 1,
+                'selected_options' => [['option_id' => $theirOption, 'quantity' => 1]],
+            ],
+        ];
+        foreach ($lines as $what => $line) {
+            $this->callAs($this->receptionistToken, 'POST', '/api/food-orders', [
+                'items' => [$line], 'payment_status' => 'paid', 'payment_method' => 'cash',
+            ]);
+            $this->assertContains($this->_response->getStatusCode(), [400, 404], "an order line with $what");
+            $this->assertNothingOfTheirs("POST /api/food-orders ($what)");
+            $this->assertStringNotContainsString('Their', (string)$this->_response->getBody());
+        }
+
+        $this->assertSame(0, $this->getTableLocator()->get('FoodOrders')->find()
+            ->where(['property_id' => $this->ours])->count(), 'the refused sales left no order');
+        $this->assertSame(10.0, (float)$this->row('InventoryItems', $this->b['item'])->quantity, 'their stock is untouched');
+        $this->assertSame(0, $this->getTableLocator()->get('StockMovements')->find()
+            ->where(['inventory_item_id' => $this->b['item']])->count());
+    }
+
+    /**
+     * Code-only until now: editing our booking can't move it into their room
+     * (the reservation's build rule), and a booking can't pick their extra
+     * charges. Their room is in service, so no service check speaks first.
+     */
+    public function testABookingCannotMoveIntoAnotherPropertysRoomOrPickTheirCharges(): void
+    {
+        $ourRoom = $this->insertRow('Rooms', [
+            'property_id' => $this->ours, 'room_number' => 'OURS-201', 'room_type' => 'Deluxe', 'status' => 'available',
+        ]);
+        $ourStay = $this->insertRow('Reservations', [
+            'property_id' => $this->ours, 'room_id' => $ourRoom, 'receptionist_id' => $this->userIdFor($this->adminToken),
+            'status' => 'booked', 'source' => 'walk_in', 'payment_status' => 'unpaid', 'total_guests' => 1,
+            'check_in' => BusinessTime::today()->addDays(10)->format('Y-m-d'),
+            'check_out' => BusinessTime::today()->addDays(12)->format('Y-m-d'),
+        ]);
+        $theirCharge = $this->insertRow('ExtraCharges', [
+            'property_id' => $this->theirs, 'name' => 'Their Cot', 'amount' => 300, 'is_active' => true,
+        ]);
+
+        $this->callAs($this->adminToken, 'PATCH', "/api/reservations/$ourStay", ['room_id' => $this->b['room']]);
+        $this->assertContains($this->_response->getStatusCode(), [400, 404, 422], (string)$this->_response->getBody());
+        $this->assertNothingOfTheirs("PATCH /api/reservations/$ourStay");
+        $this->assertSame($ourRoom, (int)$this->row('Reservations', $ourStay)->room_id, 'our booking keeps our room');
+
+        $this->callAs($this->adminToken, 'POST', '/api/reservations', [
+            'room_id' => $ourRoom,
+            'source' => 'walk_in',
+            'check_out' => BusinessTime::today()->addDays(1)->format('Y-m-d'),
+            'extra_charges' => [['extra_charge_id' => $theirCharge, 'quantity' => 1]],
+        ]);
+        $this->assertResponseCode(400);
+        $this->assertStringNotContainsString('Their Cot', (string)$this->_response->getBody());
+        $this->assertSame(0, $this->getTableLocator()->get('ReservationExtraCharges')->find()
+            ->where(['extra_charge_id' => $theirCharge])->count(), 'no booking carries their charge');
+        $this->assertSame(1, $this->getTableLocator()->get('Reservations')->find()
+            ->where(['property_id' => $this->ours])->count(), 'the refused booking saved nothing');
+        $this->assertSame('available', $this->row('Rooms', $this->b['room'])->status);
+    }
+
+    /**
+     * Code-only until now: a `property_id` in the body never chooses where
+     * staff's new rows go, or moves an existing one.
+     */
+    public function testAPropertyIdInTheBodyNeverPlacesOrMovesARow(): void
+    {
+        $this->callAs($this->adminToken, 'POST', '/api/rooms', [
+            'room_number' => 'BODY-1', 'room_type' => 'Standard', 'property_id' => $this->theirs,
+        ]);
+        $this->assertResponseCode(201);
+        $roomId = (int)$this->responseJson()['room']['id'];
+        $this->assertSame($this->ours, (int)$this->row('Rooms', $roomId)->property_id);
+
+        $this->callAs($this->receptionistToken, 'POST', '/api/guests', [
+            'full_name' => 'Body Placed', 'guest_type' => 'local', 'property_id' => $this->theirs,
+        ]);
+        $this->assertResponseCode(201);
+        $guestId = (int)$this->responseJson()['guest']['id'];
+        $this->assertSame($this->ours, (int)$this->row('Guests', $guestId)->property_id);
+
+        $this->callAs($this->receptionistToken, 'PATCH', "/api/guests/$guestId", [
+            'address' => 'Somewhere', 'property_id' => $this->theirs,
+        ]);
+        $this->assertResponseOk();
+        $this->assertSame($this->ours, (int)$this->row('Guests', $guestId)->property_id);
+        $this->callAs($this->adminToken, 'PATCH', "/api/rooms/$roomId", [
+            'room_number' => 'BODY-1', 'room_type' => 'Suite', 'property_id' => $this->theirs,
+        ]);
+        $this->assertResponseOk();
+        $this->assertSame($this->ours, (int)$this->row('Rooms', $roomId)->property_id);
+
+        foreach (['Rooms', 'Guests'] as $table) {
+            $this->assertSame(0, $this->getTableLocator()->get($table)->find()
+                ->where(['property_id' => $this->theirs, 'id IN' => [$roomId, $guestId]])->count(), "no $table row of ours moved to theirs");
+        }
     }
 
     // ------------------------------------------------- the platform owner
