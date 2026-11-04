@@ -150,6 +150,14 @@ once per hotel day) stay regardless.
 
 ## Smaller items
 
+- [ ] **Operations feed: `recorded` on guest and room-service lines (from UI-004, 2026-11-04).**
+  `OperationsController`'s feed lines for `guest_events` and `room_events` don't carry
+  `recorded`, so an imported row (`source = 'import'`, e.g. a room under maintenance when room
+  history began) reads "Unknown user" in Operations → Activity instead of "Before recording
+  began". The fix is additive: `'recorded' => $e->source !== 'import'` on those two lines, the
+  same field every other feed line sends; the frontend (`utils/actors.js`) already uses it. Kept
+  out of UI-004, which was frontend only by decision. Needs its own approval (API change).
+
 - [x] **Step 8 follow-ups (in production 2026-10-04, `d9cda62`).** `reservations.receptionist_id`
   is no longer stamped or returned (G8b; L-D2: the column and its values stay). The catch-all routes that answered 401 for a non-existent API
   path were removed in G8a: an unknown path now answers 404.
