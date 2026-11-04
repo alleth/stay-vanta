@@ -222,7 +222,7 @@ before then with no sale in between would leave no trace; nothing suggests one.
 
 | | |
 | --- | --- |
-| **Status** | Fixed in Permissions Phase 3a (`1ea4e25`, on staging 2026-10-12; production on the user's go) |
+| **Status** | Fixed in Permissions Phase 3a (`1ea4e25`); in production 2026-10-12 (`08c75e8`) |
 | **Severity** | Low to medium: a Manager could deactivate (sign out and lock out), reactivate or rename another Manager at the same property, against the documented rule that Managers manage only Front Desk Staff |
 | **Found** | 2026-10-12, while moving the staff hierarchy from role codes to permissions (Phase 3a) |
 | **Fixed** | Phase 3a: `App\Auth\StaffHierarchy` decides who manages whom for every account action (create, edit, reset password, access history): only roles whose permissions are a strict subset of yours |
@@ -267,7 +267,7 @@ Railway's own log retention. Test: `RetentionApiTest::testGuestSearchAndMatching
 
 | | |
 | --- | --- |
-| **Status** | Fixed on staging (release 10a); production when 10a is promoted |
+| **Status** | Fixed (release 10a); in production 2026-10-06 (`9312559`) |
 | **Severity** | Low: needs a deactivated account to be reactivated within 30 days, and a device that still holds its old token |
 | **Found** | 2026-10-05, while preparing the build step 10 proposal (reading `UsersController::edit()`) |
 | **Fixed** | Build step 10, part 1 (decision A8): deactivating revokes the token in the same transaction |
