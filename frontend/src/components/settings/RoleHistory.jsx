@@ -3,6 +3,7 @@ import { Alert, Button, ListGroup } from '../ui'
 import { Skeleton } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
 import { permissionLabel } from '../../utils/permissionLabels'
+import { BEFORE_RECORDING, actorLabel } from '../../utils/actors'
 
 const LABELS = {
   role_created: 'Role created',
@@ -58,9 +59,9 @@ export default function RoleHistory({ load }) {
             {e.changes?.name && <div className="text-sm">{e.changes.name.before} → {e.changes.name.after}</div>}
             <div className="text-sm text-muted">
               {e.source === 'import'
-                ? 'Not recorded: who approved it and why were never kept'
+                ? `${BEFORE_RECORDING}: who approved it and why were never kept`
                 : (e.source === 'web'
-                  ? `${e.actor ?? 'Unknown user'} (Platform Owner)`
+                  ? `${actorLabel(e.actor, true)} (Platform Owner)`
                   : `Release${e.commit ? ` ${e.commit.slice(0, 7)}` : ''}`)
                   + (e.active_memberships !== null && e.active_memberships !== undefined
                     ? ` · ${e.active_memberships} ${e.active_memberships === 1 ? 'person' : 'people'} held this role`

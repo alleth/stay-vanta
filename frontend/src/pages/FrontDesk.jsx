@@ -20,6 +20,7 @@ import {
   listExtraCharges,
 } from '../api/frontdesk'
 import { describeError } from '../utils/apiError'
+import { actorLabel } from '../utils/actors'
 import ReasonModal from '../components/ReasonModal'
 import RefundMethodSelect from '../components/RefundMethodSelect'
 import ReservationHistory from '../components/ReservationHistory'
@@ -623,7 +624,7 @@ export default function FrontDesk() {
                         {r.checked_out_at && <div>Out: {fmtDateTime(r.checked_out_at)}</div>}
                       </td>
                       <td className="text-xs text-muted">
-                        {r.booked_by ? (r.booked_by.recorded ? r.booked_by.name ?? 'Unknown user' : 'Not recorded') : '—'}
+                        {r.booked_by ? actorLabel(r.booked_by.name, r.booked_by.recorded) : '—'}
                       </td>
                       <td className="text-right" onClick={(e) => e.stopPropagation()}>
                         {r.deleted_at ? <Badge bg="secondary">Deleted</Badge> : (

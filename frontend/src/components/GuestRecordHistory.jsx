@@ -3,7 +3,7 @@ import { Alert, Badge, Button, ListGroup } from './ui'
 import { Skeleton } from './Skeleton'
 import { guestHistory } from '../api/guests'
 import { describeError } from '../utils/apiError'
-import { actorRoleLabel } from '../utils/roles'
+import { actorWithRole } from '../utils/actors'
 import { guestEventDetails, guestEventLabel } from '../utils/guestEvents'
 
 const ATTENTION = new Set(['renamed', 'registered_despite_matches'])
@@ -42,9 +42,7 @@ export default function GuestRecordHistory({ guestId }) {
               <span className="ml-auto text-xs text-muted">{new Date(e.at).toLocaleString()}</span>
             </div>
             <div className="text-sm text-muted">
-              {e.recorded === false
-                ? 'Not recorded (from before guest history began)'
-                : `${e.actor ?? 'Unknown user'}${e.actor_role ? ` (${actorRoleLabel(e)})` : ''}`}
+              {actorWithRole(e)}
             </div>
             {guestEventDetails(e).map((line) => <div key={line} className="text-sm">{line}</div>)}
             {e.reason && <div className="text-sm">“{e.reason}”</div>}

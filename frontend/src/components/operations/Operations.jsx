@@ -9,6 +9,7 @@ import { roleLabel, roomServiceLabel } from '../../utils/roles'
 import { SkeletonTable } from '../Skeleton'
 import { describeError } from '../../utils/apiError'
 import { refundMethodLabel } from '../../utils/refunds'
+import { actorLabel } from '../../utils/actors'
 import { eventLabel, fieldLabel, formatValue, subjectText } from '../../utils/configChanges'
 import { accessLabel, accessDetail } from '../../utils/accessEvents'
 import { guestEventDetails, guestEventLabel } from '../../utils/guestEvents'
@@ -662,8 +663,8 @@ function ActivityItem({ e }) {
   return (
     <ListGroup.Item className="px-4 py-2">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 truncate font-medium">
-          {e.actor ?? (e.recorded === false ? 'Not recorded' : 'Unknown')}
+        <span className="min-w-0 truncate font-medium" title={actorLabel(e.actor, e.recorded)}>
+          {actorLabel(e.actor, e.recorded)}
         </span>
         <span className="shrink-0 text-xs tabular-nums text-muted">{when(e.at)}</span>
       </div>
@@ -738,7 +739,9 @@ function ActivityModal({ onHide }) {
                   <span className="w-16 shrink-0 text-xs tabular-nums text-muted">
                     {new Date(e.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
                   </span>
-                  <span className="w-32 shrink-0 truncate font-medium">{e.actor ?? 'Unknown'}</span>
+                  <span className="w-32 shrink-0 truncate font-medium" title={actorLabel(e.actor, e.recorded)}>
+                    {actorLabel(e.actor, e.recorded)}
+                  </span>
                   <span className="min-w-0 flex-1 truncate text-muted" title={activityText(e)}>{activityText(e)}</span>
                 </ListGroup.Item>
               ))}
