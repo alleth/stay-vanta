@@ -31,6 +31,10 @@ markup for something that looks like a button, card, form field, table, dialog, 
   — pass `hover` for row-hover highlighting. Don't add your own `overflow-x-auto` wrapper.
 - `Modal`: controlled via `show`/`onHide` (not a portal-managed open state of its own); `size` is
   `undefined | 'lg' | 'xl'`. Handles Escape-to-close and body-scroll-lock already — don't re-implement.
+  For a long form, pass `scrollable`: the dialog is capped at the screen height, header and footer
+  stay in place and only `Modal.Body` scrolls, so Save/Book stays visible. A `<Form>` placed directly
+  inside the dialog is laid out for it automatically. Don't add your own `max-h-*`/`overflow-y-auto`
+  inside the body: one scroll area per dialog.
 - `Form.Control`/`Form.Select`: `size="sm"` for compact controls (used throughout filter bars).
 - `Alert`: `variant` is `danger | success | warning | info | secondary`; pass `dismissible` +
   `onClose` for a close button.

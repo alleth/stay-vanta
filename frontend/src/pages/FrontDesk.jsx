@@ -54,6 +54,9 @@ const BOOKING_TYPES = [
   { id: ONLINE, label: 'Online booking', hint: 'Agoda, Cocotel, …' },
 ]
 
+// The longest reason the API keeps for a reservation change.
+const REASON_MAX = 500
+
 // The promo multiplier that applies to a source + room: the admin's
 // room-specific row wins over a property-wide one; null when none is
 // configured. The promo nightly price is the room's base rate × this.
@@ -469,7 +472,7 @@ export default function FrontDesk() {
       ) : (
         <>
         {/* Three questions instead of eight tiles: how full are the rooms,
-            what happened today, and what's still to collect. The last one is
+            what happened today, and what's outstanding. The last one is
             ringed when anything is owed, and its figures open the list behind
             them. */}
         <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -688,7 +691,7 @@ export default function FrontDesk() {
           </Tab>
 
           {/* ---- Invoices ---- the same panel as Finance, so the desk
-              can settle a guest's bill at check-out without leaving; settling
+              can settle a guest's invoice at check-out without leaving; settling
               refreshes the billing badges above. */}
           <Tab eventKey="invoices" title="Invoices">
             <InvoicesPanel propertyId={propertyId} onSettled={refresh} />
@@ -745,7 +748,7 @@ export default function FrontDesk() {
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
               <div className="lg:col-span-5">
                 <Card className="h-full">
-                  <Card.Header>Available rooms</Card.Header>
+                  <Card.Header>Free rooms</Card.Header>
                   {availableOnDate.length === 0 ? (
                     <Card.Body><p className="mb-0 text-muted">No rooms free on this date.</p></Card.Body>
                   ) : (
@@ -901,7 +904,7 @@ export default function FrontDesk() {
               earlyConfirm.guest_id ? (
                 <Alert variant="warning" className="mb-0">
                   An early check-in fee of <strong>{formatMoney(earlyFee)}</strong> will be added
-                  to the guest&apos;s bill.
+                  to the guest&apos;s invoice.
                 </Alert>
               ) : (
                 <Alert variant="secondary" className="mb-0">
@@ -975,7 +978,7 @@ function ReservationModal({
   )
   const [totalGuests, setTotalGuests] = useState(Number(reservation?.total_guests) || 1)
 
-  // The admin's custom extra charges (Extra Charges tab), each with a
+  // The admin's custom extra charges (Settings → Extra charges), each with a
   // quantity: {extra_charge_id: qty}. A charge already on the booking is
   // offered at the name/amount it was picked at, even if it has since been
   // repriced or switched off — the backend keeps that snapshot too. Early
@@ -1245,7 +1248,7 @@ function ReservationModal({
 
   return (
     <>
-    <Modal show={!confirmDelete} onHide={onClose} centered size="xl">
+    <Modal show={!confirmDelete} onHide={onClose} centered size="xl" scrollable>
       <Form onSubmit={(e) => { e.preventDefault(); if (!readOnly) book(false) }}>
         <Modal.Header closeButton>
           <Modal.Title>
@@ -1275,6 +1278,10 @@ function ReservationModal({
               walk-in has no channel, so those fields don't exist for it —
               they're not skipped, they don't apply. */}
           <div className="w-full shrink-0 border-b border-line p-4 md:w-60 md:border-b-0 md:border-r">
+           {/* Pinned while the form beside it scrolls, so the booking type
+               and the estimate stay in view (the rail itself keeps its full
+               height, and with it the divider). */}
+           <div className="md:sticky md:top-4">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.04em] text-muted">
               Booking type
             </div>
@@ -1308,7 +1315,7 @@ function ReservationModal({
             </div>
             {!hasChannels && (
               <p className="mt-2 mb-0 text-xs text-muted">
-                No channels yet — add one on the Promo Rates tab.
+                No booking sources yet — a Manager adds one by setting a promo rate in Settings → Promo rates.
               </p>
             )}
             {editing && (
@@ -1322,9 +1329,12 @@ function ReservationModal({
               </div>
               <EstimateBreakdown {...estimate} />
             </div>
+           </div>
           </div>
 
-          <div className="min-w-0 flex-1 p-4 md:max-h-[70vh] md:overflow-y-auto">
+          {/* No scroll area of its own: the dialog body is the one scroll
+              area, so the footer's Book/Save stays in view. */}
+          <div className="min-w-0 flex-1 p-4">
           {err && <Alert variant="danger">{err}</Alert>}
           {editing && (
             <div className="mb-4 flex items-center gap-2">
@@ -1371,7 +1381,7 @@ function ReservationModal({
             <div className="-mt-2 mb-4">
               <Form.Text muted>
                 {pastEnded
-                  ? 'Past stay — saved as checked out. Find it under “All” to mark it paid.'
+                  ? 'Past stay — saved as checked out. Find it under “All” to post its room charge.'
                   : 'Started before today — saved as checked in.'}
               </Form.Text>
             </div>
@@ -1399,7 +1409,7 @@ function ReservationModal({
                 <Form.Text muted>The channel&apos;s confirmation number.</Form.Text>
               </Form.Group>
               <Form.Group className="mb-4 md:col-span-4">
-                <Form.Label>Sales stayed (based rate)</Form.Label>
+                <Form.Label>Channel&apos;s sold rate</Form.Label>
                 <Form.Control type="number" min={0.01} step="0.01" value={form.sold_rate}
                   onChange={set('sold_rate')} placeholder="Optional" />
                 <Form.Text muted>
@@ -1551,7 +1561,7 @@ function ReservationModal({
                 )}
                 {form.source !== WALK_IN && multiplier !== null && baseRate <= 0 && (
                   <Form.Text muted>
-                    This room has no rate yet — add one on the Rates tab first.
+                    This room has no rate yet — a Manager sets it in Settings → Rates.
                   </Form.Text>
                 )}
               </Form.Group>
@@ -1696,19 +1706,38 @@ function ReservationModal({
               </Alert>
             )}
           </section>
+
+          {/* One reason covers the whole save, so it ends the form, right
+              above Book/Save, rather than sitting beside whichever field
+              asked for it. */}
+          {reasonNeeded && !readOnly && (
+            <section id="reason" data-section className="mt-6 border-t border-line pt-5">
+              <Form.Group className="mb-0">
+                <Form.Label htmlFor="reservation-reason">Reason</Form.Label>
+                <Form.Control id="reservation-reason" as="textarea" rows={2} maxLength={REASON_MAX}
+                  required minLength={5} className="resize-y"
+                  aria-describedby="reservation-reason-help reservation-reason-count"
+                  value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this is being done" />
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <Form.Text id="reservation-reason-help" className="mt-0">
+                    Needed because {reasonNeeded.toLowerCase()}. Saved with the change and can’t be edited later.
+                  </Form.Text>
+                  <span id="reservation-reason-count" className="shrink-0 text-xs tabular-nums text-muted">
+                    {reason.length} / {REASON_MAX}
+                  </span>
+                </div>
+              </Form.Group>
+            </section>
+          )}
           </div>
          </div>
-          {reasonNeeded && !readOnly && (
-            <Form.Group className="mt-4">
-              <Form.Label htmlFor="reservation-reason">Reason</Form.Label>
-              <Form.Control id="reservation-reason" as="textarea" rows={2} maxLength={500} required minLength={5}
-                value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this is being done" />
-              <Form.Text>Needed because {reasonNeeded.toLowerCase()}. Saved with the change and can’t be edited later.</Form.Text>
-            </Form.Group>
-          )}
          </fieldset>
-          {editing && <ReservationPrice reservationId={reservation.id} rooms={rooms} rates={rates} />}
-          {editing && <ReservationHistory reservationId={reservation.id} rooms={rooms} />}
+          {editing && (
+            <div className="px-4 pb-4">
+              <ReservationPrice reservationId={reservation.id} rooms={rooms} rates={rates} />
+              <ReservationHistory reservationId={reservation.id} rooms={rooms} />
+            </div>
+          )}
         </Modal.Body>
         <Modal.Footer>
           {readOnly ? (
