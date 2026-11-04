@@ -1,3 +1,4 @@
+import { actorLabel } from './actors'
 import { roleLabel } from './roles'
 
 // Words for access events (build step 10): your own sign-ins, a staff
@@ -53,12 +54,13 @@ export function accessDetail(e) {
   return null
 }
 
-/** Who acted, as a line says it. */
+/** Who acted, as a line says it. "System" stays here only (UI-004: no new uses). */
 export function accessActor(e) {
-  if (e.recorded === false) return 'Not recorded'
+  if (e.recorded === false) return actorLabel(e.actor, false)
   if (!e.proven) return 'Someone (not signed in)'
   if (e.self) return 'You'
-  return e.actor ?? (e.source === 'system' ? 'System' : 'Unknown user')
+  if (!e.actor && e.source === 'system') return 'System'
+  return actorLabel(e.actor, true)
 }
 
 // A user agent, roughly as people name it: "Chrome on Windows".

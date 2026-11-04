@@ -152,6 +152,11 @@ size="sm" />` inside it), and render `err` in an `Alert variant="danger"`. It al
 readable message from CakePHP's `{ errors: { field: { rule: message } } }` validation-error shape,
 so don't re-implement that parsing.
 
+Name who did something with `actorLabel` / `byActor` / `actorWithRole` from
+`frontend/src/utils/actors.js` ("Before recording began" for imported history, "Unknown user"
+when a recorded person can't be found) — never write a local fallback like `actor ?? 'Unknown'`.
+Don't add new "System" labels: only sign-in history and the Settings change log show one.
+
 Format money with `formatMoney` from `frontend/src/utils/format.js` (Philippine peso) — never
 hand-format currency with `toFixed`/`toLocaleString` inline.
 
