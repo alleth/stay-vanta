@@ -10,10 +10,10 @@ one fixed before release, so the pattern stays visible.
 
 | | |
 | --- | --- |
-| **Status** | Open: fix prepared, not deployed (2026-11-03) |
+| **Status** | Fixed, in production 2026-11-04 (`03a6b06`) |
 | **Severity** | Low: personal data in a URL could reach Railway's log storage, but only when the request also failed with a 5xx or a PHP error; the screens send no personal data in URLs since SF-2026-003; not exposed to the public |
 | **Found** | 2026-11-03, by the SF-2026-001–004 regression verification (Stage C, while writing the SF-2026-003 log guard) |
-| **Fixed** | Not yet |
+| **Fixed** | 2026-11-03, commit `3b4a790` (merged `77f7cbf`); deployed to production 2026-11-04 (`03a6b06`) |
 | **Exploited** | No: production log review below |
 
 **What was wrong.** SF-2026-003 took query strings out of the access log and `AppErrorLogger` logs
@@ -50,10 +50,10 @@ production on 2026-10-09.
 
 | | |
 | --- | --- |
-| **Status** | Open: fix prepared, not deployed (2026-11-03) |
+| **Status** | Fixed, in production 2026-11-04 (`03a6b06`) |
 | **Severity** | Low: information disclosure only (another hotel's room number, its service state and whether it was booked on given dates); no personal data, no cross-property change, no financial effect; needs a crafted API request by Manager or Front Desk Staff |
 | **Found** | 2026-11-03, by the SF-2026-001–004 regression verification (Stage C, while writing the booking-room isolation test) |
-| **Fixed** | Not yet |
+| **Fixed** | 2026-11-03, commit `47c1538` (merged `1c6ea75`); deployed to production 2026-11-04 (`03a6b06`) |
 | **Exploited** | No: production read-only audit and log review below |
 
 **What was wrong.** Creating a reservation (`POST /api/reservations`) or moving one to another room
@@ -107,10 +107,10 @@ refused request leaves no row.
 
 | | |
 | --- | --- |
-| **Status** | Open: fix prepared, not deployed (2026-10-25) |
+| **Status** | Fixed, in production 2026-11-04 (`03a6b06`) |
 | **Severity** | Low-Medium (confirmed 2026-10-25 after the audit): mostly cross-property read (another hotel's room details and category names); one cross-property write (deleting a category changed, and recorded, another hotel's sub-category filed under it); every path needs a crafted API request by a Manager |
 | **Found** | 2026-10-21, by the SF-2026-001–004 regression verification (stage B.1, the inventory of ids that arrive in request bodies), alongside SF-2026-005 |
-| **Fixed** | Not yet |
+| **Fixed** | 2026-11-03, commit `68a571f` (merged `03a6b06`); deployed to production 2026-11-04 (`03a6b06`) |
 | **Exploited** | No: the production read-only audit (below) found no cross-property link, no category-delete trace and no change-log evidence (the change log starts on 2026-10-04) |
 
 **What was wrong.** Four ids were saved from the request without checking that the row they name
@@ -170,10 +170,10 @@ log starts on 2026-10-04, so a link set and removed before then would leave no t
 
 | | |
 | --- | --- |
-| **Status** | Open: fix prepared, not deployed (2026-10-21) |
+| **Status** | Fixed, in production 2026-11-04 (`03a6b06`) |
 | **Severity** | Medium: cross-property read (another hotel's stock item name, quantity and category) and cross-property write (each sale moved the other hotel's stock); needs a crafted API request by a Manager |
 | **Found** | 2026-10-21, by the SF-2026-001–004 regression verification (stage B.1, the inventory of ids that arrive in request bodies) |
-| **Fixed** | Not yet |
+| **Fixed** | 2026-10-24, commit `2576d40` (merged `c5f4440`); deployed to production 2026-11-04 (`03a6b06`) |
 | **Exploited** | No: the production read-only audit (below) found no cross-property link and no cross-property stock movement, ever |
 
 **What was wrong.** `POST /api/food-menu-items` and `PATCH /api/food-menu-items/{id}` saved the
@@ -222,7 +222,7 @@ before then with no sale in between would leave no trace; nothing suggests one.
 
 | | |
 | --- | --- |
-| **Status** | Fixed in Permissions Phase 3a (`1ea4e25`, on staging 2026-10-12; production on the user's go) |
+| **Status** | Fixed in Permissions Phase 3a (`1ea4e25`); in production 2026-10-12 (`08c75e8`) |
 | **Severity** | Low to medium: a Manager could deactivate (sign out and lock out), reactivate or rename another Manager at the same property, against the documented rule that Managers manage only Front Desk Staff |
 | **Found** | 2026-10-12, while moving the staff hierarchy from role codes to permissions (Phase 3a) |
 | **Fixed** | Phase 3a: `App\Auth\StaffHierarchy` decides who manages whom for every account action (create, edit, reset password, access history): only roles whose permissions are a strict subset of yours |
@@ -267,7 +267,7 @@ Railway's own log retention. Test: `RetentionApiTest::testGuestSearchAndMatching
 
 | | |
 | --- | --- |
-| **Status** | Fixed on staging (release 10a); production when 10a is promoted |
+| **Status** | Fixed (release 10a); in production 2026-10-06 (`9312559`) |
 | **Severity** | Low: needs a deactivated account to be reactivated within 30 days, and a device that still holds its old token |
 | **Found** | 2026-10-05, while preparing the build step 10 proposal (reading `UsersController::edit()`) |
 | **Fixed** | Build step 10, part 1 (decision A8): deactivating revokes the token in the same transaction |
