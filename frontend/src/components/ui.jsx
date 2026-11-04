@@ -3,7 +3,7 @@
 // Modal show/onHide, Form.* compound components — so the call sites keep
 // their shape, but every style below is a plain Tailwind class. Bootstrap's
 // CSS is not loaded anywhere.
-import { Children, createContext, useContext, useEffect, useRef, useState } from 'react'
+import { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { isDescribedError } from '../utils/apiError'
 
 const cx = (...parts) => parts.filter(Boolean).join(' ')
@@ -13,6 +13,7 @@ const cx = (...parts) => parts.filter(Boolean).join(' ')
 const unless = (className, re, def) => (re.test(className) ? '' : def)
 const PAD = /(^|\s)p[xytrbl]?-/
 const MB = /(^|\s)mb-/
+const MT = /(^|\s)mt-/
 const B0 = /(^|\s)border-0(\s|$)/
 
 /* ---------------------------------------------------------------- Button */
@@ -152,9 +153,16 @@ export function Table({ hover, className = '', children }) {
 
 /* ----------------------------------------------------------------- Modal */
 
-const ModalCtx = createContext(null)
+const ModalCtx = createContext({ onHide: undefined, scrollable: false })
 
-export function Modal({ show = true, onHide, size, children }) {
+// `scrollable`: the dialog never grows past the screen. Header and footer
+// stay in place and only the body scrolls, so a long form keeps its actions
+// in view. Off by default: the backdrop scrolls a dialog that's taller than
+// the screen. A <form> directly inside the dialog is laid out as a column
+// too, so the usual <Form><Modal.Header/><Modal.Body/><Modal.Footer/></Form>
+// works as is.
+export function Modal({ show = true, onHide, size, scrollable = false, children }) {
+  const ctx = useMemo(() => ({ onHide, scrollable }), [onHide, scrollable])
   useEffect(() => {
     if (!show) return undefined
     const onKey = (e) => { if (e.key === 'Escape') onHide?.() }
@@ -171,13 +179,19 @@ export function Modal({ show = true, onHide, size, children }) {
   const width = size === 'xl' ? 'max-w-5xl' : size === 'lg' ? 'max-w-3xl' : 'max-w-lg'
 
   return (
-    <ModalCtx.Provider value={onHide}>
-      <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40">
+    <ModalCtx.Provider value={ctx}>
+      <div className={cx('fixed inset-0 z-50 bg-black/40', scrollable ? 'overflow-hidden' : 'overflow-y-auto')}>
         <div
-          className="flex min-h-full items-center justify-center p-4"
+          className={cx('flex items-center justify-center p-4', scrollable ? 'h-full' : 'min-h-full')}
           onMouseDown={(e) => { if (e.target === e.currentTarget) onHide?.() }}
         >
-          <div className={cx('w-full rounded-xl bg-surface shadow-xl', width)}>{children}</div>
+          <div className={cx(
+            'w-full rounded-xl bg-surface shadow-xl',
+            scrollable && 'flex max-h-full flex-col overflow-hidden [&>form]:flex [&>form]:min-h-0 [&>form]:flex-1 [&>form]:flex-col',
+            width,
+          )}>
+            {children}
+          </div>
         </div>
       </div>
     </ModalCtx.Provider>
@@ -185,10 +199,11 @@ export function Modal({ show = true, onHide, size, children }) {
 }
 
 function ModalHeader({ closeButton, className = '', children }) {
-  const onHide = useContext(ModalCtx)
+  const { onHide, scrollable } = useContext(ModalCtx)
   return (
     <div className={cx(
       'flex items-center justify-between gap-3',
+      scrollable && 'shrink-0',
       unless(className, PAD, 'px-4 py-3'),
       unless(className, B0, 'border-b border-line'),
       className,
@@ -213,13 +228,24 @@ function ModalTitle({ className = '', children }) {
 }
 
 function ModalBody({ className = '', children }) {
-  return <div className={cx(unless(className, PAD, 'p-4'), className)}>{children}</div>
+  const { scrollable } = useContext(ModalCtx)
+  return (
+    <div className={cx(
+      scrollable && 'min-h-0 flex-1 overflow-y-auto overscroll-contain',
+      unless(className, PAD, 'p-4'),
+      className,
+    )}>
+      {children}
+    </div>
+  )
 }
 
 function ModalFooter({ className = '', children }) {
+  const { scrollable } = useContext(ModalCtx)
   return (
     <div className={cx(
       'flex items-center justify-end gap-2',
+      scrollable && 'shrink-0',
       unless(className, PAD, 'px-4 py-3'),
       unless(className, B0, 'border-t border-line'),
       className,
@@ -244,9 +270,9 @@ function FormGroup({ className = '', children }) {
   return <div className={className}>{children}</div>
 }
 
-function FormLabel({ className = '', children }) {
+function FormLabel({ className = '', children, ...rest }) {
   return (
-    <label className={cx('block text-sm font-medium', unless(className, MB, 'mb-1'), className)}>
+    <label className={cx('block text-sm font-medium', unless(className, MB, 'mb-1'), className)} {...rest}>
       {children}
     </label>
   )
@@ -283,13 +309,14 @@ function FormCheck({ type = 'checkbox', id, label, className = '', ...rest }) {
   )
 }
 
-function FormText({ muted, className = '', children }) {
+function FormText({ muted, className = '', children, ...rest }) {
   return (
     <div className={cx(
-      'mt-1 text-xs',
+      'text-xs',
+      unless(className, MT, 'mt-1'),
       (muted || !/(^|\s)text-(red|amber|emerald|sky|gray)/.test(className)) && 'text-muted',
       className,
-    )}>
+    )} {...rest}>
       {children}
     </div>
   )
