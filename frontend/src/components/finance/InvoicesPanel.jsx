@@ -9,6 +9,8 @@ import { P } from '../../auth/permissions'
 import ReasonModal from '../ReasonModal'
 import RefundMethodSelect from '../RefundMethodSelect'
 import { newRefundKey, refundMethodLabel } from '../../utils/refunds'
+// Who did it, from the invoice's ledger; imported history names nobody.
+import { actorLabel, byActor } from '../../utils/actors'
 
 // The guests' invoices — the list, the folio view and Settle — as one panel,
 // rendered as a tab by Front Desk and Finance. Settling is where
@@ -28,10 +30,6 @@ const vatBreakdown = (total) => {
 // Today on the device's own clock (the hotel's), not UTC.
 const todayStr = () => new Date().toLocaleDateString('en-CA')
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : '—')
-
-// Who did it, from the invoice's ledger. History imported from before the
-// ledger existed has no actor, and we say so rather than guess.
-const actorLabel = (name, recorded) => (recorded === false ? 'Not recorded' : name ?? 'Unknown user')
 
 const EVENT_LABELS = {
   opened: 'Invoice opened',
@@ -130,7 +128,7 @@ export function InvoicesPanel({ propertyId, onSettled }) {
                     </div>
                   )}
                   {inv.settled_by && (
-                    <div className="whitespace-nowrap text-[11px] text-muted">by {actorLabel(inv.settled_by.name, inv.settled_by.recorded)}</div>
+                    <div className="whitespace-nowrap text-[11px] text-muted">{byActor(inv.settled_by.name, inv.settled_by.recorded)}</div>
                   )}
                 </td>
                 <td className="whitespace-nowrap text-right">
@@ -335,7 +333,7 @@ function InvoiceModal({ id, onClose, onChanged }) {
                         </div>
                         <div className="text-[11px] text-muted">
                           {fmtDateTime(ev?.at ?? l.created)}
-                          {ev && <> · {isReversal ? 'reversed' : 'added'} by {actorLabel(ev.actor, ev.recorded)}</>}
+                          {ev && <> · {isReversal ? 'reversed' : 'added'} {byActor(ev.actor, ev.recorded)}</>}
                         </div>
                         {isReversal && ev?.reason && (
                           <div className="text-[11px] text-muted">Reason: {ev.reason}</div>
@@ -376,7 +374,7 @@ function InvoiceModal({ id, onClose, onChanged }) {
             {settled && (
               <p className="mt-2 mb-0 text-center text-xs text-muted">
                 Paid in full · settled {fmtDateTime(invoice.settled_at)}
-                {invoice.settled_by && <> by {actorLabel(invoice.settled_by.name, invoice.settled_by.recorded)}</>}
+                {invoice.settled_by && <> {byActor(invoice.settled_by.name, invoice.settled_by.recorded)}</>}
               </p>
             )}
 
@@ -394,7 +392,7 @@ function InvoiceModal({ id, onClose, onChanged }) {
                         {EVENT_LABELS[r.event] ?? r.event} · {refundMethodLabel(r.method)}
                       </div>
                       <div className="text-[11px] text-muted">
-                        {fmtDateTime(r.at)} · by {actorLabel(r.actor, r.recorded)}
+                        {fmtDateTime(r.at)} · {byActor(r.actor, r.recorded)}
                         {r.reason && <> · {r.reason}</>}
                       </div>
                     </div>

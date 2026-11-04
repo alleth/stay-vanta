@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext'
 import { P } from '../../auth/permissions'
 import { changeEnforcement, getEnforcement } from '../../api/platform'
 import { describeError } from '../../utils/apiError'
-import { actorRoleLabel } from '../../utils/roles'
+import { BEFORE_RECORDING, actorWithRole } from '../../utils/actors'
 
 const PHASES = {
   report: 'Report only',
@@ -145,9 +145,9 @@ export default function EnforcementPanel({ onChanged }) {
                   {e.snapshot?.moved_stricter > 0 && ` · ${e.snapshot.moved_stricter} propert${e.snapshot.moved_stricter === 1 ? 'y' : 'ies'} moved to a stricter stage`}
                 </div>
                 <div className="text-sm text-muted">
-                  {e.source === 'import' && 'Not recorded: who set it, when and why were never kept'}
+                  {e.source === 'import' && `${BEFORE_RECORDING}: who set it, when and why were never kept`}
                   {e.source === 'system' && 'Observed by the app at start-up (when it was seen, not when it was set)'}
-                  {e.source === 'web' && `${e.actor ?? 'Unknown user'}${e.actor_role ? ` (${actorRoleLabel(e)})` : ''}`}
+                  {e.source === 'web' && actorWithRole({ ...e, recorded: true })}
                 </div>
                 {e.reason && <div className="text-sm">“{e.reason}”</div>}
                 <div className="text-xs text-muted">Reference: {String(e.request_id).slice(0, 8)}</div>

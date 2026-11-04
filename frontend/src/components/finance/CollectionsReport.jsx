@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Alert, Card, Form, Table } from '../ui'
 import { formatMoney } from '../../utils/format'
 import { refundMethodLabel } from '../../utils/refunds'
+import { actorLabel } from '../../utils/actors'
 import { collections } from '../../api/finance'
 import { SkeletonCards } from '../Skeleton'
 import { StatTiles } from '../StatCard'
@@ -165,7 +166,7 @@ function RefundsTable({ refunds }) {
                 {r.type === 'refunded_on_cancel' && <div className="text-[11px] text-muted">Downpayment, booking cancelled</div>}
               </td>
               <td>{refundMethodLabel(r.method)}</td>
-              <td className="text-xs">{r.recorded === false && !r.actor ? 'Not recorded' : r.actor ?? 'Unknown user'}</td>
+              <td className="text-xs">{actorLabel(r.actor, r.recorded)}</td>
               <td className="max-w-[240px] text-xs text-muted">{r.reason ?? '—'}</td>
               <td className="text-right tabular-nums">{formatMoney(r.amount)}</td>
             </tr>

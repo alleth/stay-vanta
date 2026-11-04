@@ -1,3 +1,4 @@
+import { BEFORE_RECORDING, actorLabel } from './actors'
 import { formatMoney } from './format'
 
 // Words for configuration changes (build step 9): the Settings change log,
@@ -115,11 +116,16 @@ export function changeLines(change, roomName) {
 export const subjectText = (change) =>
   `${entityLabel(change.entity_type)}${change.label ? ` “${change.label}”` : ''}`
 
-/** Who did it, as a line can say it: unknown before the audit began. */
+/**
+ * Who did it, as a line can say it. When the API hides who changed the
+ * configuration (Front Desk, `shows_actors`), no name is returned; an imported
+ * row still says it came from before recording began, which names nobody.
+ * "System" stays here only (UI-004: no new uses).
+ */
 export function actorText(change, showsActors = true) {
-  if (change.recorded === false) return 'Not recorded'
-  if (!showsActors) return null
-  return change.actor ?? (change.source === 'system' ? 'System' : 'Unknown user')
+  if (!showsActors) return change.recorded === false ? BEFORE_RECORDING : null
+  if (!change.actor && change.source === 'system') return 'System'
+  return actorLabel(change.actor, change.recorded)
 }
 
 /** True when the API refused a save because a reason was missing (a form then asks for one). */

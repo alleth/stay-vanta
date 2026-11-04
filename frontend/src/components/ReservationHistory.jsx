@@ -5,6 +5,7 @@ import { reservationHistory } from '../api/frontdesk'
 import { describeError } from '../utils/apiError'
 import { formatMoney } from '../utils/format'
 import { refundMethodLabel } from '../utils/refunds'
+import { BEFORE_RECORDING, actorLabel } from '../utils/actors'
 
 // A reservation's timeline (build step 8): its own events and the invoice
 // events of its money, oldest first. This is the record of who did what to a
@@ -66,7 +67,7 @@ const FLAG_TEXT = {
 }
 
 const fmtWhen = (s) => (s ? new Date(s).toLocaleString() : '—')
-const who = (item) => (item.recorded === false ? 'Not recorded' : item.actor ?? 'Unknown user')
+const who = (item) => actorLabel(item.actor, item.recorded)
 
 function describeValue(field, value, roomName) {
   if (value === null || value === undefined || value === '') return '—'
@@ -165,8 +166,8 @@ export default function ReservationHistory({ reservationId, rooms = [] }) {
       )}
       {partial && (
         <p className="mt-3 mb-0 text-xs text-muted">
-          <Badge bg="secondary" className="mr-1">Not recorded</Badge>
-          History from before reservation records began is partial: who did those steps wasn&apos;t recorded.
+          <Badge bg="secondary" className="mr-1">{BEFORE_RECORDING}</Badge>
+          Steps marked this way were imported; who did them wasn&apos;t recorded.
         </p>
       )}
     </section>
