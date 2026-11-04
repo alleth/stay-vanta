@@ -148,6 +148,35 @@ around the new source of truth (today it checks that `railway.json` carries noth
 service-specific); staging first, then production; the retention job's own guards (database wait,
 once per hotel day) stay regardless.
 
+## Documentation cleanup: CLAUDE.md and memory (frozen)
+
+**Ready when:** all three are true: Phase 3d-3 is complete; the production verification work is
+closed; the current release cycle is finished. Until then the freeze on major `CLAUDE.md`
+restructuring stays: factual corrections only. The freeze is also recorded in Claude's project
+memory as `feedback-claude-md-freeze`, so assistant sessions keep to it. The pending working-tree
+edits to `CLAUDE.md` and `frontend/src/pages/PrivacyPolicy.jsx` stay uncommitted until this
+package is approved, and are committed separately from each other and from this entry.
+
+**Why:** a review on 2026-11-04 (agreed by the user) found `CLAUDE.md` at about 67 KB, loaded into
+every session, much of it rollout history rather than current rules. Restructuring it mid-release,
+while 3d-3 and production verification still change the facts it records, would mean doing it twice.
+
+Do together, as one package:
+- [ ] **Separate history from rules.** Keep current rules, tables, commands and conventions in
+  `CLAUDE.md` (target about 15–20 KB); move build-order status, Phase 2/3 rollout detail
+  (3a–3d, support sessions, subscription stages), backfill decisions, release dates and commit
+  hashes to a linked `docs/` file. Nothing is dropped, only moved.
+- [ ] **Consolidate repeated sections:** "The accountability model" vs "Accountability standard";
+  "Roles & subscriptions" vs "Permission strategy" Phase 2; `reservations.receptionist_id`
+  (explained three times); "Reservation billing" vs the "Room charge" bullet.
+- [ ] **Update the legacy "stamp the acting user from `AppController::$currentUser`" wording**
+  (two places): new state changes go through `EventContext` + `record()`; direct stamping is
+  legacy.
+- [ ] **Remove counts and dates that go stale** from the rules (e.g. "50 as of 2026-10-20"
+  permissions; `PermissionsTest` already keeps code and `docs/PERMISSIONS.md` in step).
+- [ ] **Correct the Claude memory entry** describing the frontend stack ("React/Tailwind/RB"):
+  the frontend is pure Tailwind v4, no React-Bootstrap.
+
 ## Smaller items
 
 - [x] **Step 8 follow-ups (in production 2026-10-04, `d9cda62`).** `reservations.receptionist_id`
