@@ -211,7 +211,8 @@ class BookingReferenceApiTest extends TestCase
             ->where(['reservation_id' => $id, 'event_type' => 'booking_reference_added'])->firstOrFail();
         $this->assertNotNull($event->actor_id);
         $changes = is_string($event->changes) ? json_decode($event->changes, true) : $event->changes;
-        $this->assertSame(['before' => null, 'after' => 'AG-777'], $changes['booking_reference']);
+        // MySQL's JSON type stores keys in its own order: compare by key.
+        $this->assertEquals(['before' => null, 'after' => 'AG-777'], $changes['booking_reference']);
     }
 
     public function testAPlaceholderCountsAsMissingAndCanBeReplaced(): void
