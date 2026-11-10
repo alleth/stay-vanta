@@ -135,10 +135,12 @@ function CollectedTodayKpi({ revenue, pos }) {
 // The top of the page: Rooms overview (two thirds) beside Today and Collected today
 // stacked — what's visible on login without scrolling. With a dozen-odd rooms
 // the two sides come out about the same height.
-export function TopRow({ data, onPickGuests }) {
+export function TopRow({ data, onPickGuests, roomFilter, onRoomFilter, roomsRef }) {
   return (
     <div className="mb-8 grid grid-cols-1 gap-3 lg:grid-cols-3">
-      <RoomsOverview rooms={data.rooms} className="lg:col-span-2" />
+      <div ref={roomsRef} tabIndex={-1} className="scroll-mt-4 outline-none lg:col-span-2">
+        <RoomsOverview rooms={data.rooms} filter={roomFilter} onFilter={onRoomFilter} />
+      </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-1">
         <TodayKpi guests={data.guests} onPick={onPickGuests} />
         <CollectedTodayKpi revenue={data.revenue_today} pos={data.pos} />
@@ -150,63 +152,122 @@ export function TopRow({ data, onPickGuests }) {
 /* ------------------------------------------------------- Needs attention */
 
 // The computed notification panel: nothing is stored or marked read — each
-// line is a live count, shown only while it's non-zero, most urgent first.
+// line is a live count, shown only while it's non-zero. "Now" holds only guests
+// already past their date; everything else is "Today", most important first.
+// A line says where it leads; acting on it stays in the module that owns it.
 const SEVERITY = {
   danger: 'bg-red-500',
   warning: 'bg-amber-500',
   info: 'bg-sky-500',
 }
 
-function attentionItems(a) {
+// On a phone, Today shows this many lines until "Show more" is tapped.
+const TODAY_LINES_ON_PHONE = 3
+
+function attentionItems(a, { onPickGuests, onPickRooms, onPickInventory, onOpenPos }) {
+  const arrivals = { hint: 'Arrivals', onClick: () => onPickGuests('arrivals') }
+  const departures = { hint: 'Departures', onClick: () => onPickGuests('departures') }
+  const inventory = { hint: 'Inventory', onClick: onPickInventory }
   const items = [
-    { n: a.late_arrivals, sev: 'danger', text: (n) => `${plural(n, 'late arrival')} not checked in`, guests: 'arrivals' },
-    { n: a.overdue_departures, sev: 'danger', text: (n) => `${plural(n, 'overdue check-out')}`, guests: 'departures' },
-    { n: a.out_of_stock, sev: 'danger', text: (n) => `${plural(n, 'item')} out of stock` },
-    { n: a.arrivals_pending - a.late_arrivals, sev: 'info', text: (n) => `${plural(n, 'arrival')} due today`, guests: 'arrivals' },
-    { n: a.departures_pending - a.overdue_departures, sev: 'info', text: (n) => `${plural(n, 'check-out')} due today`, guests: 'departures' },
-    { n: a.low_stock, sev: 'warning', text: (n) => `${plural(n, 'item')} at or below reorder level` },
-    { n: a.open_food_orders, sev: 'info', text: (n) => `${plural(n, 'food order')} still open` },
-    { n: a.maintenance_rooms, sev: 'info', text: (n) => `${plural(n, 'room')} under maintenance` },
-    { n: a.out_of_service_rooms, sev: 'warning', text: (n) => `${plural(n, 'room')} out of service` },
-    { n: a.new_bookings, sev: 'info', text: (n) => `${plural(n, 'new booking')} today` },
+    { key: 'late', group: 'now', n: a.late_arrivals, sev: 'danger', text: (n) => `${plural(n, 'late arrival')} not checked in`, ...arrivals },
+    { key: 'overdue', group: 'now', n: a.overdue_departures, sev: 'danger', text: (n) => `${plural(n, 'overdue check-out')}`, ...departures },
+    { key: 'out', group: 'today', n: a.out_of_stock, sev: 'danger', text: (n) => `${plural(n, 'item')} out of stock`, ...inventory },
+    { key: 'off', group: 'today', n: a.out_of_service_rooms, sev: 'warning', text: (n) => `${plural(n, 'room')} out of service`, hint: 'Rooms', onClick: () => onPickRooms('out_of_service') },
+    { key: 'low', group: 'today', n: a.low_stock, sev: 'warning', text: (n) => `${plural(n, 'item')} at or below reorder level`, ...inventory },
+    { key: 'in', group: 'today', n: a.arrivals_pending - a.late_arrivals, sev: 'info', text: (n) => `${plural(n, 'arrival')} due today`, ...arrivals },
+    { key: 'leaving', group: 'today', n: a.departures_pending - a.overdue_departures, sev: 'info', text: (n) => `${plural(n, 'check-out')} due today`, ...departures },
+    // Plain text for anyone who can't open POS (a custom role, for example).
+    { key: 'orders', group: 'today', n: a.open_food_orders, sev: 'info', text: (n) => `${plural(n, 'food order')} still open`, hint: 'POS', onClick: onOpenPos },
+    { key: 'repair', group: 'today', n: a.maintenance_rooms, sev: 'info', text: (n) => `${plural(n, 'room')} under maintenance`, hint: 'Rooms', onClick: () => onPickRooms('maintenance') },
   ]
   return items.filter((i) => i.n > 0)
 }
 
-export function AttentionPanel({ attention, onPickGuests, className = '' }) {
-  const items = attentionItems(attention)
-  const urgent = items.some((i) => i.sev === 'danger')
-  return (
-    <Card className={`${urgent ? 'ring-1 ring-accent' : ''} ${className}`}>
-      <Card.Header className="flex items-center justify-between">
-        <span>Needs attention</span>
-        {items.length > 0 && <Badge bg={urgent ? 'danger' : 'secondary'}>{items.length}</Badge>}
-      </Card.Header>
-      {items.length === 0 ? (
-        <Empty>
-          <span className="text-emerald-700 dark:text-emerald-400">✓</span> All clear — nothing waiting on you.
-        </Empty>
-      ) : (
-        <ListGroup>
-          {items.map((i) => {
-            const body = (
-              <>
-                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${SEVERITY[i.sev]}`} />
-                <span className="min-w-0 flex-1">{i.text(i.n)}</span>
-                {i.guests && <span aria-hidden="true" className="text-muted">›</span>}
-              </>
-            )
-            return i.guests ? (
-              <button key={i.text(i.n)} type="button" onClick={() => onPickGuests(i.guests)}
-                className="flex w-full items-start gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-subtle">
-                {body}
-              </button>
-            ) : (
-              <ListGroup.Item key={i.text(i.n)} className="flex items-start gap-3 px-4 py-2.5">{body}</ListGroup.Item>
-            )
-          })}
-        </ListGroup>
+function GroupTitle({ tone = 'text-muted', children }) {
+  return <h3 className={`px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-[0.04em] ${tone}`}>{children}</h3>
+}
+
+function AttentionLine({ item, className = 'flex' }) {
+  const row = `${className} min-h-11 w-full items-start gap-3 px-4 py-2.5 text-left text-sm sm:min-h-0`
+  const body = (
+    <>
+      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${SEVERITY[item.sev]}`} />
+      <span className="min-w-0 flex-1">{item.text(item.n)}</span>
+      {item.onClick && (
+        <span className="shrink-0 text-xs leading-5 text-muted">{item.hint} <span aria-hidden="true">›</span></span>
       )}
+    </>
+  )
+  return item.onClick ? (
+    <button type="button" onClick={item.onClick} className={`${row} transition-colors hover:bg-subtle`}>{body}</button>
+  ) : (
+    <div className={row}>{body}</div>
+  )
+}
+
+export function AttentionPanel({ attention, onPickGuests, onPickRooms, onPickInventory, onOpenPos }) {
+  const [showAll, setShowAll] = useState(false)
+  const items = attentionItems(attention, { onPickGuests, onPickRooms, onPickInventory, onOpenPos })
+  const now = items.filter((i) => i.group === 'now')
+  const today = items.filter((i) => i.group === 'today')
+  const hiddenOnPhone = today.length - TODAY_LINES_ON_PHONE
+  const newBookings = attention.new_bookings > 0 && (
+    <span className="text-xs text-muted">{plural(attention.new_bookings, 'new booking')} today</span>
+  )
+
+  if (items.length === 0) {
+    return (
+      <Card className="mb-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3">
+          <div className="text-sm">
+            <span className="font-semibold">Needs attention</span>
+            <span className="ml-3 text-muted">
+              <span className="text-emerald-700 dark:text-emerald-400">✓</span> All clear — nothing waiting on you.
+            </span>
+          </div>
+          {newBookings}
+        </div>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className={`mb-6 ${now.length > 0 ? 'ring-1 ring-accent' : ''}`}>
+      <Card.Header className="flex flex-wrap items-center justify-between gap-2">
+        <span>Needs attention</span>
+        <span className="flex gap-1.5">
+          {now.length > 0 && <Badge bg="danger">{now.length} now</Badge>}
+          {today.length > 0 && <Badge>{today.length} today</Badge>}
+        </span>
+      </Card.Header>
+      <div className="grid grid-cols-1 lg:grid-cols-3">
+        <section className="border-b border-line pb-2 lg:border-b-0 lg:border-r">
+          <GroupTitle tone={now.length > 0 ? 'text-red-700 dark:text-red-300' : 'text-muted'}>Needs action now</GroupTitle>
+          {now.length === 0
+            ? <p className="px-4 py-2.5 text-sm text-muted">Nothing overdue.</p>
+            : now.map((i) => <AttentionLine key={i.key} item={i} />)}
+        </section>
+        <section className="pb-2 lg:col-span-2">
+          <GroupTitle>Today</GroupTitle>
+          {today.length === 0 ? (
+            <p className="px-4 py-2.5 text-sm text-muted">Nothing else due today.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2">
+              {today.map((i, index) => (
+                <AttentionLine key={i.key} item={i}
+                  className={!showAll && index >= TODAY_LINES_ON_PHONE ? 'hidden sm:flex' : 'flex'} />
+              ))}
+            </div>
+          )}
+          {hiddenOnPhone > 0 && (
+            <button type="button" aria-expanded={showAll} onClick={() => setShowAll((s) => !s)}
+              className="min-h-11 w-full px-4 py-2.5 text-left text-sm font-medium text-ink transition-colors hover:bg-subtle sm:hidden">
+              {showAll ? 'Show fewer' : `Show ${hiddenOnPhone} more`}
+            </button>
+          )}
+        </section>
+      </div>
+      {newBookings && <div className="border-t border-line px-4 py-2">{newBookings}</div>}
     </Card>
   )
 }
@@ -224,31 +285,44 @@ const ROOM_FLAG = {
 
 // All room monitoring in one card: the summary (occupancy, total, the four
 // status counts) on top, every room as a colour-coded tile below. The status
-// counts double as the grid's legend and filter, so nothing is shown twice;
-// "Needs action" narrows the grid to flagged rooms.
-function RoomsOverview({ rooms, className = '' }) {
-  const [filter, setFilter] = useState(null) // null | status key | 'flagged'
+// counts double as the grid's legend and filter, so nothing is shown twice.
+// Now and Today narrow the grid to flagged rooms, in the panel's words; they
+// count rooms, while the panel counts stays, so the two can differ.
+function RoomsOverview({ rooms, filter, onFilter }) {
   const status = Object.fromEntries(ROOM_STATUS.map((s) => [s.key, s]))
-  const flagged = rooms.map.filter((r) => r.flag)
-  const shown = filter === 'flagged'
-    ? flagged
-    : filter ? rooms.map.filter((r) => r.status === filter) : rooms.map
-  const toggle = (key) => setFilter((f) => (f === key ? null : key))
+  const flagNow = rooms.map.filter((r) => ROOM_FLAG[r.flag]?.urgent)
+  const flagToday = rooms.map.filter((r) => r.flag && !ROOM_FLAG[r.flag]?.urgent)
+  const shown = filter === 'now'
+    ? flagNow
+    : filter === 'today'
+      ? flagToday
+      : filter ? rooms.map.filter((r) => r.status === filter) : rooms.map
+  const toggle = (key) => onFilter(filter === key ? null : key)
   const pct = (n) => (rooms.total > 0 ? `${(n / rooms.total) * 100}%` : '0%')
   const chip = (active) => `flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
     active ? 'border-ink bg-subtle' : 'border-line hover:bg-subtle'}`
+  // A chip stays while it's the active filter, so a refresh that empties it
+  // can't leave the grid filtered with no way back.
+  const flagChips = [
+    { key: 'now', label: 'Now', rows: flagNow, dot: 'ring-2 ring-red-500' },
+    { key: 'today', label: 'Today', rows: flagToday, dot: 'bg-sky-500' },
+  ].filter((c) => c.rows.length > 0 || filter === c.key)
 
   return (
-    <Card className={`h-full ${className}`}>
+    <Card className="h-full">
       <Card.Body className="border-b border-line">
-        <div className="mb-2 flex items-baseline justify-between gap-2">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
           <span className="text-xs font-medium uppercase tracking-[0.04em] text-muted">Rooms overview</span>
-          {flagged.length > 0 && (
-            <button type="button" aria-pressed={filter === 'flagged'} onClick={() => toggle('flagged')}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-                filter === 'flagged' ? 'border-ink bg-subtle text-body' : 'border-line text-muted hover:bg-subtle hover:text-body'}`}>
-              <span className="h-2 w-2 rounded-full ring-2 ring-red-500" />Needs action ({flagged.length})
-            </button>
+          {flagChips.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {flagChips.map((c) => (
+                <button key={c.key} type="button" aria-pressed={filter === c.key} onClick={() => toggle(c.key)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                    filter === c.key ? 'border-ink bg-subtle text-body' : 'border-line text-muted hover:bg-subtle hover:text-body'}`}>
+                  <span className={`h-2 w-2 rounded-full ${c.dot}`} />{c.label} · {plural(c.rows.length, 'room')}
+                </button>
+              ))}
+            </div>
           )}
         </div>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -283,7 +357,9 @@ function RoomsOverview({ rooms, className = '' }) {
           <p className="mb-0 text-sm text-muted">No rooms set up yet — add them on Front Desk.</p>
         ) : shown.length === 0 ? (
           <p className="mb-0 text-sm text-muted">
-            No rooms are {filter === 'flagged' ? 'flagged' : status[filter]?.label.toLowerCase()}.
+            {filter === 'now' && 'No rooms need action now.'}
+            {filter === 'today' && 'No rooms are arriving or leaving today.'}
+            {status[filter] && `No rooms are ${status[filter].label.toLowerCase()}.`}
           </p>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-2">

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Alert, Button, Spinner } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { P } from '../auth/permissions'
+import { canOpen, navItem } from '../nav'
 import { operationsToday } from '../api/operations'
 import { SkeletonCards, SkeletonTable } from '../components/Skeleton'
 import {
@@ -29,12 +31,16 @@ const REFRESH_MS = 5 * 60 * 1000
 // rooms, arrivals/departures, collected today, what needs attention — then the
 // module summaries. Front Desk Staff get the same page minus Staff.
 export default function Operations() {
-  const { user, can } = useAuth()
+  const { user, can, scope } = useAuth()
+  const navigate = useNavigate()
   const seesStaff = can(P.OPERATIONS_STAFF_VIEW)
   const [state, setState] = useState({ data: null, error: null, at: null })
   const [loadingNow, setLoadingNow] = useState(false)
   const [guestTab, setGuestTab] = useState('arrivals')
+  const [roomFilter, setRoomFilter] = useState(null) // null | status key | 'now' | 'today'
   const guestsRef = useRef(null)
+  const roomsRef = useRef(null)
+  const inventoryRef = useRef(null)
   const alive = useRef(true)
 
   const load = useCallback(() => {
@@ -54,10 +60,20 @@ export default function Operations() {
     return () => { alive.current = false; clearTimeout(first); clearInterval(timer) }
   }, [load])
 
-  // A KPI figure or attention line jumps to the guest list behind it.
+  // A jump lands keyboard and screen reader users on the section too.
+  const jumpTo = (ref) => {
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    ref.current?.focus({ preventScroll: true })
+  }
+
+  // A KPI figure or attention line jumps to the list behind it.
   const pickGuests = (key) => {
     setGuestTab(key)
-    guestsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    jumpTo(guestsRef)
+  }
+  const pickRooms = (key) => {
+    setRoomFilter(key)
+    jumpTo(roomsRef)
   }
 
   const { data, error, at } = state
@@ -87,20 +103,18 @@ export default function Operations() {
             <Alert variant="warning">Couldn’t refresh — showing figures from {at?.toLocaleTimeString()}. {error.message}</Alert>
           )}
 
-          {/* Rooms overview beside Today + POS sales. */}
-          <TopRow data={data} onPickGuests={pickGuests} />
+          {/* The action list comes first on every screen size. */}
+          <AttentionPanel attention={data.attention} onPickGuests={pickGuests} onPickRooms={pickRooms}
+            onPickInventory={() => jumpTo(inventoryRef)}
+            onOpenPos={canOpen(navItem('/pos'), { scope, can }) ? () => navigate('/pos') : null} />
 
-          {/* Guests beside "Needs attention", stretched to one height so the
-              shorter card doesn't leave a hole. On a phone the alerts come
-              first: they're the action list. */}
-          <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <div className="lg:col-start-3 lg:row-start-1">
-              <AttentionPanel attention={data.attention} onPickGuests={pickGuests} className="h-full" />
-            </div>
-            <section ref={guestsRef} className="scroll-mt-4 lg:col-span-2 lg:col-start-1 lg:row-start-1">
-              <GuestMonitor guests={data.guests} tab={guestTab} onTab={setGuestTab} className="h-full" />
-            </section>
-          </div>
+          {/* Rooms overview beside Today + POS sales. */}
+          <TopRow data={data} onPickGuests={pickGuests} roomFilter={roomFilter} onRoomFilter={setRoomFilter}
+            roomsRef={roomsRef} />
+
+          <section ref={guestsRef} tabIndex={-1} className="mb-8 scroll-mt-4 outline-none">
+            <GuestMonitor guests={data.guests} tab={guestTab} onTab={setGuestTab} />
+          </section>
 
           {/* POS, Inventory and (admin) Staff side by side. Each section is
               title + card, the card filling the row — so all three end level.
@@ -112,7 +126,7 @@ export default function Operations() {
               <SectionTitle>POS overview</SectionTitle>
               <PosOverview pos={data.pos} />
             </section>
-            <section className="grid grid-rows-[auto_1fr]">
+            <section ref={inventoryRef} tabIndex={-1} className="grid scroll-mt-4 grid-rows-[auto_1fr] outline-none">
               <SectionTitle>Inventory</SectionTitle>
               <InventoryMonitor inventory={data.inventory} />
             </section>
