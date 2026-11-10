@@ -697,7 +697,11 @@ beneficiaries. Each beneficiary (`discount_type` senior|pwd, name, ID) gets its 
 - **Walk-in vs online**: `add()` decides from `source`, not the form. A walk-in forces `check_in` to
   today, saves `checked_in`, flips the room to `occupied` — no early check-in fee, no downpayment,
   and `booking_reference`/`sold_rate`/channel discount nulled. An online booking is saved `booked`,
-  **requires `booking_reference`** (build rule), and may record `sold_rate` — which is
+  may leave `booking_reference` blank (a value with no letter or digit, like "-", is refused when
+  entered; `?booking_reference=missing` lists the gaps) and fill it later with
+  `POST /reservations/{id}/booking-reference` (`booking_reference_added`) only while the reservation
+  is editable (`editRefusal()`: Front Desk Staff before check-in, a Manager until the room charge
+  posts, never once settled), and may record `sold_rate` — which is
   **recorded, never priced** (only for reconciling the OTA remittance).
 - **Past stays are admin-only**: a check-in before today (`ReservationsController::isBackdated()`)
   is refused for anyone but `admin` — except a receptionist's walk-in, whose date is simply forced

@@ -135,7 +135,7 @@ several properties.
 | `POST /invoices/{id}/refund` | `finance.invoice.refund` | Needs `reason`, `amount`, `method`; settled invoices only, up to what's refundable; a repeated `refund_key` is 409 (build step 7c) |
 | `POST/PATCH/PUT/DELETE /receipt-series…` | `finance.receipt_series.manage` | |
 | `GET /reservations`, `GET /reservations/stats` | `front_desk.reservation.view` | |
-| `POST /reservations`, `PATCH/PUT /reservations/{id}` (a booking), `POST /reservations/{id}/{transition}`, `POST /reservations/{id}/post-room-charge` | `front_desk.reservation.manage` | |
+| `POST /reservations`, `PATCH/PUT /reservations/{id}` (a booking), `POST /reservations/{id}/{transition}`, `POST /reservations/{id}/post-room-charge`, `POST /reservations/{id}/booking-reference` | `front_desk.reservation.manage` | |
 | Booking or moving a check-in before today | `front_desk.reservation.backdate` | Rule kept: a walk-in without it is forced to today, not refused. Needs `reason` (step 8) |
 | Editing a checked-in/checked-out stay | `front_desk.reservation.correct` | Refused with **400**, not 403, today; Phase 1 keeps the status code. Needs `reason` (step 8) |
 | `DELETE /reservations/{id}` | `front_desk.reservation.delete` | Soft delete; needs `reason` (step 8) |

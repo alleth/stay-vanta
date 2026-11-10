@@ -98,6 +98,13 @@ export const transitionReservation = (id, transition, data = {}) =>
 export const postRoomCharge = (id) =>
   client.post(`/reservations/${id}/post-room-charge`).then((r) => r.data.reservation)
 
+// Add Booking ID: fills an online booking's missing channel ID (blank or "-")
+// while the reservation can still be edited. No reason needed; changing a real
+// ID is an edit.
+export const addBookingReference = (id, bookingReference) =>
+  client.post(`/reservations/${id}/booking-reference`, { booking_reference: bookingReference })
+    .then((r) => r.data.reservation)
+
 // Reverse room charge (Manager, reason required): reverses the stay's room
 // charge lines and downpayment credit on the open invoice (Billed → Not
 // billed). Refused once the invoice is settled.

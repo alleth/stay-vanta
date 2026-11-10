@@ -155,6 +155,15 @@ class ReservationsTable extends Table
     }
 
     /**
+     * Whether a Booking ID is a real one: it has at least one letter or
+     * digit. Blank, "-" and other placeholders mean the ID is still missing.
+     */
+    public static function isRealBookingReference(?string $value): bool
+    {
+        return $value !== null && preg_match('/[\p{L}\p{N}]/u', $value) === 1;
+    }
+
+    /**
      * A reservation's room and guest must belong to the same property as the
      * reservation itself.
      *
@@ -182,17 +191,20 @@ class ReservationsTable extends Table
             'message' => 'That guest does not belong to this property.',
         ]);
 
-        // An online booking is the channel's booking too: without its
-        // reference number there's nothing to quote back when a stay is
-        // disputed or a remittance doesn't add up. A walk-in has no channel,
-        // so it never carries one.
+        // An online booking may be saved before the channel's Booking ID is
+        // known (approved 2026-11-10): staff add it later instead of typing
+        // "-". So a placeholder with no letter or digit is refused whenever
+        // the ID is entered or changed. Rows saved with one before this rule
+        // keep it, and can still be edited for anything else.
         $rules->add(
-            fn(Reservation $reservation): bool => $reservation->source === BookingSourcesTable::WALK_IN
-                || trim((string)$reservation->booking_reference) !== '',
-            'bookingReferenceRequired',
+            fn(Reservation $reservation): bool => $reservation->booking_reference === null
+                || (!$reservation->isNew()
+                    && $reservation->getOriginal('booking_reference') === $reservation->booking_reference)
+                || self::isRealBookingReference($reservation->booking_reference),
+            'bookingReferenceNotPlaceholder',
             [
                 'errorField' => 'booking_reference',
-                'message' => "Enter the channel's booking ID for an online booking.",
+                'message' => "Enter the channel's Booking ID, or leave it blank and add it later.",
             ],
         );
 

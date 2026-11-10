@@ -40,6 +40,8 @@ class ReservationEventsTable extends Table
     public const CANCELLED_AFTER_PAYMENT = 'cancelled_after_payment';
     /** A Manager deletes a reservation entered by mistake: soft, with a reason. */
     public const DELETED = 'deleted';
+    /** A missing online Booking ID is filled in later, while the reservation can still be edited. */
+    public const BOOKING_REFERENCE_ADDED = 'booking_reference_added';
 
     public const TYPES = [
         self::BOOKED,
@@ -53,6 +55,7 @@ class ReservationEventsTable extends Table
         self::CANCELLED,
         self::CANCELLED_AFTER_PAYMENT,
         self::DELETED,
+        self::BOOKING_REFERENCE_ADDED,
     ];
 
     public const REQUIRES_REASON = [

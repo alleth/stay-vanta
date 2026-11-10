@@ -115,6 +115,24 @@ class ReservationsController extends AppController
             $this->notBilled($query);
         }
 
+        // `booking_reference=missing`: online bookings, not cancelled, whose
+        // channel Booking ID hasn't been entered yet — blank, or a placeholder
+        // such as "-" (no letter or digit; see isRealBookingReference()).
+        $bookingReference = $this->request->getQuery('booking_reference');
+        if ($bookingReference !== null && $bookingReference !== '') {
+            if ($bookingReference !== 'missing') {
+                throw new BadRequestException('booking_reference must be missing.');
+            }
+            $query->where([
+                'Reservations.source !=' => BookingSourcesTable::WALK_IN,
+                'Reservations.status !=' => 'cancelled',
+                'OR' => [
+                    'Reservations.booking_reference IS' => null,
+                    'Reservations.booking_reference NOT REGEXP' => '[[:alnum:]]',
+                ],
+            ]);
+        }
+
         $since = $this->queryDate('since');
         if ($since !== null) {
             $from = BusinessTime::startOf($since);
@@ -543,27 +561,11 @@ class ReservationsController extends AppController
         $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
             ->firstOrFail();
 
-        if ($this->isSettled($reservation)) {
-            throw new BadRequestException(
-                "This reservation's invoice is already settled, so it can no longer be edited.",
-            );
+        $refusal = $this->editRefusal($reservation);
+        if ($refusal !== null) {
+            throw new BadRequestException($refusal);
         }
         $isStay = in_array($reservation->status, ['checked_in', 'checked_out'], true);
-        // Correcting a stay is a permission; refusing it stays a 400, as before.
-        $mayCorrect = $isStay && $this->can(Permissions::FRONT_DESK_RESERVATION_CORRECT);
-        if ($reservation->status !== 'booked' && !$mayCorrect) {
-            throw new BadRequestException("Only a booking that hasn't checked in yet can be edited.");
-        }
-        if ((float)$reservation->downpayment > 0) {
-            throw new BadRequestException(
-                'This booking already collected a downpayment — cancel and rebook instead of editing it.',
-            );
-        }
-        if ($isStay && $this->fetchTable('Invoices')->invoiceForLine('reservation', (int)$reservation->id)) {
-            throw new BadRequestException(
-                "This stay's room charge is already on the guest's invoice, so it can no longer be edited.",
-            );
-        }
 
         $source = $this->request->getData('source') ?? $reservation->source;
         if (
@@ -753,6 +755,108 @@ class ReservationsController extends AppController
                     default => ReservationEventsTable::EDITED,
                 };
                 $this->recordReservationEvent($reservation, $type, $changes);
+
+                return true;
+            },
+        );
+
+        if (!$saved) {
+            $this->validationFailed($reservation->getErrors());
+
+            return;
+        }
+
+        $this->respondWithReservation($reservation, 200);
+    }
+
+    /**
+     * Why this reservation can't be edited by the person asking, or null when
+     * it can. The one rule for edit() and anything that must follow it (adding
+     * a missing Booking ID): a booking until check-in; a started stay only for
+     * someone who may correct it, until its room charge is posted; nothing
+     * once a downpayment was collected; nothing at all once settled.
+     */
+    private function editRefusal(Reservation $reservation): ?string
+    {
+        if ($this->isSettled($reservation)) {
+            return "This reservation's invoice is already settled, so it can no longer be edited.";
+        }
+        $isStay = in_array($reservation->status, ['checked_in', 'checked_out'], true);
+        // Correcting a stay is a permission; refusing it stays a 400, as before.
+        $mayCorrect = $isStay && $this->can(Permissions::FRONT_DESK_RESERVATION_CORRECT);
+        if ($reservation->status !== 'booked' && !$mayCorrect) {
+            return "Only a booking that hasn't checked in yet can be edited.";
+        }
+        if ((float)$reservation->downpayment > 0) {
+            return 'This booking already collected a downpayment — cancel and rebook instead of editing it.';
+        }
+        if ($isStay && $this->fetchTable('Invoices')->invoiceForLine('reservation', (int)$reservation->id)) {
+            return "This stay's room charge is already on the guest's invoice, so it can no longer be edited.";
+        }
+
+        return null;
+    }
+
+    /**
+     * POST /api/reservations/{id}/booking-reference {booking_reference}
+     * (Manager + Front Desk Staff) — fill in an online booking's missing
+     * channel Booking ID (approved 2026-11-10).
+     *
+     * Only when the ID is still missing (blank or a placeholder such as "-");
+     * changing a real ID stays an edit or a correction. Only while the
+     * reservation can still be edited, by the same rule as edit(): so after
+     * check-in only a Manager, until the room charge posts, and never once
+     * settled. No reason is needed: it fills a blank. Records one
+     * `booking_reference_added` event; the same request twice records once.
+     */
+    public function addBookingReference(int $id): void
+    {
+        $this->request->allowMethod('post');
+        $this->authorize(Permissions::FRONT_DESK_RESERVATION_MANAGE);
+
+        $value = $this->trimmedOrNull('booking_reference');
+        if (!ReservationsTable::isRealBookingReference($value)) {
+            throw new BadRequestException("Enter the channel's Booking ID.");
+        }
+
+        $reservations = $this->fetchTable('Reservations');
+        $reservation = $this->scopeToProperty($reservations->find()->where(['Reservations.id' => $id]))
+            ->firstOrFail();
+
+        $saved = $reservations->getConnection()->transactional(
+            function () use ($reservations, $reservation, $value): bool {
+                // Lock, then check, then change, then record.
+                $locked = $reservations->lockReservation((int)$reservation->id);
+                if ($locked === null) {
+                    throw new NotFoundException('Reservation not found.');
+                }
+                if ($locked->source === BookingSourcesTable::WALK_IN) {
+                    throw new BadRequestException('A walk-in has no Booking ID.');
+                }
+                if (ReservationsTable::isRealBookingReference($locked->booking_reference)) {
+                    throw new BadRequestException(
+                        'This reservation already has a Booking ID. To change it, edit the reservation.',
+                    );
+                }
+                $refusal = $this->editRefusal($locked);
+                if ($refusal !== null) {
+                    throw new BadRequestException(
+                        'The Booking ID can only be added while the reservation can be edited. ' . $refusal,
+                    );
+                }
+
+                $before = $this->stateOf($locked);
+                $locked->set('booking_reference', $value);
+                if ($reservations->save($locked) === false) {
+                    $reservation->setErrors($locked->getErrors());
+
+                    return false;
+                }
+                $this->recordReservationEvent(
+                    $locked,
+                    ReservationEventsTable::BOOKING_REFERENCE_ADDED,
+                    $this->changesBetween($before, $this->stateOf($locked)),
+                );
 
                 return true;
             },
