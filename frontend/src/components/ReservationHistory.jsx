@@ -24,6 +24,7 @@ const EVENT_LABELS = {
   cancelled: 'Cancelled',
   cancelled_after_payment: 'Cancelled after payment',
   deleted: 'Deleted',
+  booking_reference_added: 'Booking ID added',
   // Invoice
   opened: 'Invoice opened',
   line_added: 'Charge posted',
@@ -43,7 +44,7 @@ const FIELD_LABELS = {
   check_out: 'Check-out',
   status: 'Status',
   source: 'Source',
-  booking_reference: 'Booking reference',
+  booking_reference: 'Booking ID',
   sold_rate: 'Sold rate',
   channel_discount_type: 'Channel discount',
   channel_discount_value: 'Channel discount value',

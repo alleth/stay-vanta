@@ -226,6 +226,7 @@ class PropertyIsolationApiTest extends TestCase
             ['PATCH', '/api/reservations/' . $b['reservation'], ['total_guests' => 2]],
             ['POST', '/api/reservations/' . $b['reservation'] . '/cancel', []],
             ['POST', '/api/reservations/' . $b['reservation'] . '/post-room-charge', []],
+            ['POST', '/api/reservations/' . $b['reservation'] . '/booking-reference', ['booking_reference' => 'AG-X']],
             ['DELETE', '/api/reservations/' . $b['reservation'], ['reason' => 'Not ours']],
             ['PATCH', '/api/inventory-items/' . $b['item'], ['name' => 'Renamed']],
             ['DELETE', '/api/inventory-items/' . $b['item'], []],

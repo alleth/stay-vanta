@@ -16,7 +16,7 @@ import {
   listRooms, setRoomService, listRoomRates, listBookingSources, listPromoRates,
   listReservations, pageReservations, reservationStats,
   createReservation, updateReservation, deleteReservation, transitionReservation,
-  postRoomCharge, reverseRoomCharge,
+  postRoomCharge, reverseRoomCharge, addBookingReference,
   listExtraCharges,
 } from '../api/frontdesk'
 import { describeError } from '../utils/apiError'
@@ -111,6 +111,25 @@ function editBlockReason(r, canCorrect) {
   if (r.status === 'cancelled') return 'A cancelled reservation can’t be edited.'
   if (r.status !== 'booked' && !canCorrect) return 'Only a Manager can change a stay that’s checked in or out.'
   return null
+}
+
+// A Booking ID counts only if it has a letter or digit ("-" is a placeholder),
+// as on the server (ReservationsTable::isRealBookingReference()).
+const isRealBookingId = (v) => /[\p{L}\p{N}]/u.test(v ?? '')
+
+// An online booking still waiting for its channel's Booking ID.
+const missingBookingId = (r) =>
+  r.source !== WALK_IN && r.status !== 'cancelled' && !r.deleted_at && !isRealBookingId(r.booking_reference)
+
+// Whether this user may add the missing ID now: the same rule as an edit
+// (ReservationsController::editRefusal()). A booking before check-in without a
+// downpayment; a started stay only for a Manager, until its room charge posts;
+// never once settled.
+function mayAddBookingId(r, canCorrect) {
+  if (!missingBookingId(r) || editBlockReason(r, canCorrect)) return false
+  if (Number(r.downpayment) > 0) return false
+  if (r.status !== 'booked' && r.billing_state !== 'not_billed') return false
+  return true
 }
 
 // The Rooms card: one occupancy figure and a bar split by status, instead of
@@ -280,6 +299,9 @@ export default function FrontDesk() {
   // Set by clicking the Receivables "not billed" figure: the table then lists
   // exactly what that number counts.
   const [resBilling, setResBilling] = useState(null) // null | 'not_billed'
+  // Online bookings still waiting for the channel's Booking ID.
+  const [resMissingId, setResMissingId] = useState(false)
+  const [bookingIdFor, setBookingIdFor] = useState(null) // reservation getting its Booking ID
   // Controlled so the summary cards can jump to the list behind a number.
   const [tab, setTab] = useState('reservations')
   const [pending, setPending] = useState(null) // key of the in-flight inline action
@@ -306,6 +328,7 @@ export default function FrontDesk() {
         listPromoRates(propertyId),
         pageReservations(propertyId, {
           page: resPage, limit: RESERVATIONS_PER_PAGE, since, billing: resBilling ?? undefined, deleted: deletedOnly,
+          booking_reference: resMissingId ? 'missing' : undefined,
         }),
         listReservations(propertyId, { on_date: calDate }),
         reservationStats(propertyId), listExtraCharges(propertyId),
@@ -327,7 +350,7 @@ export default function FrontDesk() {
     } finally {
       setLoading(false)
     }
-  }, [propertyId, resPage, since, resBilling, calDate, deletedOnly])
+  }, [propertyId, resPage, since, resBilling, resMissingId, calDate, deletedOnly])
 
   // The active early check-in fee (0 if none) — shown in the warning and billed
   // automatically by the backend when an early check-in is confirmed.
@@ -505,7 +528,11 @@ export default function FrontDesk() {
                 <Form.Group className="mb-0 flex items-center gap-2">
                   <Form.Label className="mb-0 text-muted">Show</Form.Label>
                   <Form.Select size="sm" value={resFilter} style={{ width: 'auto' }}
-                    onChange={(e) => { setResFilter(e.target.value); setResPage(1) }}>
+                    onChange={(e) => {
+                      setResFilter(e.target.value)
+                      if (e.target.value === 'deleted') setResMissingId(false)
+                      setResPage(1)
+                    }}>
                     <option value="today">Today&apos;s activity</option>
                     <option value="week">This week</option>
                     <option value="all">All</option>
@@ -516,6 +543,22 @@ export default function FrontDesk() {
                   <Button size="sm" variant="outline-secondary" title="Show every reservation again"
                     onClick={() => { setResBilling(null); setResPage(1) }}>
                     Not billed only ✕
+                  </Button>
+                )}
+                {resFilter !== 'deleted' && (
+                  <Button size="sm" variant={resMissingId ? 'outline-primary' : 'outline-secondary'}
+                    aria-pressed={resMissingId}
+                    title={resMissingId
+                      ? 'Show every reservation again'
+                      : 'Online bookings still waiting for the channel’s Booking ID'}
+                    onClick={() => {
+                      // Over every date, like the not billed list: a gap
+                      // from last week is still a gap.
+                      if (!resMissingId) setResFilter('all')
+                      setResMissingId(!resMissingId)
+                      setResPage(1)
+                    }}>
+                    {resMissingId ? 'Booking ID missing ✕' : 'Booking ID missing'}
                   </Button>
                 )}
               </div>
@@ -556,6 +599,12 @@ export default function FrontDesk() {
                       <td className="text-xs">{r.check_in} → {r.check_out}</td>
                       <td className="text-xs">
                         {sourceLabel(bookingSources, r.source)}
+                        {missingBookingId(r) && (
+                          <Badge bg="warning" className="ml-1"
+                            title="Add the channel’s Booking ID while the reservation can still be edited.">
+                            Booking ID missing
+                          </Badge>
+                        )}
                         {/* One badge per qualified guest, since a room can
                             hold several — "senior ×2" beats a bare flag. */}
                         {DISCOUNT_KINDS.map(({ type, label }) => {
@@ -651,6 +700,14 @@ export default function FrontDesk() {
                                 : 'Add a guest first to post the room charge.'}
                               onClick={() => onPostCharge(r)}>
                               {pending === `charge-${r.id}` ? <Spinner size="sm" /> : 'Post room charge'}
+                            </Button>
+                          )}
+                          {mayAddBookingId(r, canCorrect) && (
+                            <Button size="sm" variant="outline-secondary"
+                              disabled={pending !== null}
+                              title="Record the channel’s Booking ID"
+                              onClick={() => setBookingIdFor(r)}>
+                              Add Booking ID
                             </Button>
                           )}
                           {canReverse && r.billing_state === 'billed' && (
@@ -861,6 +918,15 @@ export default function FrontDesk() {
           setReverseFor(null)
           await refresh()
         }} />
+      {bookingIdFor && (
+        <BookingIdModal reservation={bookingIdFor}
+          sourceName={sourceLabel(bookingSources, bookingIdFor.source)}
+          onHide={() => setBookingIdFor(null)}
+          onSaved={async () => {
+            setBookingIdFor(null)
+            await refresh()
+          }} />
+      )}
       {serviceChange && (
         <ReasonModal show
           title={`Room ${serviceChange.room.room_number}: ${SERVICE_ACTIONS[serviceChange.target].title}`}
@@ -937,6 +1003,59 @@ export default function FrontDesk() {
 // isn't editable here (that's the Guests module's job), and the backend
 // blocks the edit entirely once checked in or once a downpayment has been
 // collected against the original quote (cancel and rebook instead).
+// Add Booking ID: records the channel's ID on an online booking saved without
+// one. No reason is asked: it fills a blank, and the history records who and when.
+function BookingIdModal({ reservation, sourceName, onHide, onSaved }) {
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const valid = isRealBookingId(value)
+
+  async function save(e) {
+    e.preventDefault()
+    if (!valid) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await addBookingReference(reservation.id, value.trim())
+      await onSaved()
+    } catch (ex) {
+      setErr(describeError(ex, 'Could not add the Booking ID.'))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal show onHide={onHide} centered>
+      <Form onSubmit={save}>
+        <Modal.Header closeButton><Modal.Title>Add Booking ID</Modal.Title></Modal.Header>
+        <Modal.Body>
+          {err && <Alert variant="danger">{err}</Alert>}
+          <p className="mb-3 text-sm text-muted">
+            {reservation.guest?.full_name ?? 'This booking'} · Room {reservation.room?.room_number ?? '—'}
+            {' · '}{reservation.check_in} → {reservation.check_out} · {sourceName}
+          </p>
+          <Form.Group>
+            <Form.Label>Booking ID</Form.Label>
+            <Form.Control value={value} onChange={(e) => setValue(e.target.value)} autoFocus
+              maxLength={100} placeholder="e.g. 4821993077" />
+            <Form.Text muted>
+              The channel&apos;s confirmation number. To change an ID once it&apos;s recorded, edit the
+              reservation.
+            </Form.Text>
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="outline-secondary" onClick={onHide} disabled={busy}>Cancel</Button>
+          <Button type="submit" disabled={busy || !valid}>
+            {busy ? <Spinner size="sm" /> : 'Save Booking ID'}
+          </Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  )
+}
+
 function ReservationModal({
   rooms, rates, bookingSources, promoRates, extraCharges = [], propertyId, defaultRoomId, defaultCheckIn, reservation,
   onClose, onSaved,
@@ -1404,10 +1523,13 @@ function ReservationModal({
                 </Form.Select>
               </Form.Group>
               <Form.Group className="mb-4 md:col-span-4">
-                <Form.Label>Booking ID</Form.Label>
+                <Form.Label>Booking ID <span className="font-normal text-muted">(optional)</span></Form.Label>
                 <Form.Control value={form.booking_reference} onChange={set('booking_reference')}
-                  required placeholder="e.g. 4821993077" />
-                <Form.Text muted>The channel&apos;s confirmation number.</Form.Text>
+                  maxLength={100} placeholder="e.g. 4821993077" />
+                <Form.Text muted>
+                  The channel&apos;s confirmation number. Don&apos;t have it yet? Leave it blank and add
+                  it later; the booking shows “Booking ID missing” until then.
+                </Form.Text>
               </Form.Group>
               <Form.Group className="mb-4 md:col-span-4">
                 <Form.Label>Channel&apos;s sold rate</Form.Label>

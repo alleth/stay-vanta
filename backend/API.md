@@ -338,7 +338,9 @@ Reading it:
   invoice is the source of truth for billing, not `payment_status`.**
   `billing=not_billed` = a stay that has started (`checked_in`/`checked_out`) with no room charge
   posted (correlated `NOT EXISTS` on `reservation` invoice lines); future bookings aren't in it. The
-  same set as the stats' `not_billed`. Any other `billing` value → 400. The old
+  same set as the stats' `not_billed`. Any other `billing` value → 400.
+  `booking_reference=missing` = non-cancelled online bookings (any source but `walk_in`) whose
+  Booking ID is blank or has no letter or digit (e.g. "-"); any other value → 400. The old
   `payment_status=` filter is refused with 400 (G8): nothing keeps `payment_status` true.
   `since` is the table's
   window (booked/checked-in always; checked-out/cancelled only if that happened on/after it);
@@ -358,7 +360,9 @@ Reading it:
 - `POST /api/reservations`
   - `walk_in` source → saved straight to `checked_in`, `check_in` forced to today, room flipped
     to `occupied`.
-  - Any other source requires `booking_reference`; may carry `sold_rate` and a channel discount
+  - Any other source may carry `booking_reference` (optional: blank means "add it later"; a value
+    with no letter or digit, such as "-", is refused with 422 when entered or changed — rows that
+    already hold one keep it), `sold_rate` and a channel discount
     (`channel_discount_type` percent|fixed + `channel_discount_value`).
   - `total_guests` (default 1) + `discount_beneficiaries[]` (`{discount_type: senior|pwd, name,
     id_number}`); beneficiaries can't outnumber `total_guests`.
@@ -441,6 +445,15 @@ Reading it:
   billed."), no guest ("Add a guest first to post the room charge."), no resolvable room rate
   (rolled back, no empty invoice left). Also sets `payment_status = paid` (nothing reads it).
   The old `POST /api/reservations/{id}/payment` (Mark paid / Mark unpaid) was removed in G8 (404).
+- `POST /api/reservations/{id}/booking-reference` `{booking_reference}` (Manager + Front Desk Staff,
+  `front_desk.reservation.manage`) — **Add Booking ID** to an online booking whose ID is missing
+  (blank or a placeholder such as "-"). Trimmed; 400 when the value has no letter or digit. Allowed
+  only while the reservation can be edited, by the same rule as `PATCH`: a `booked` reservation
+  without a downpayment (anyone who manages reservations); a checked-in/out stay only for holders of
+  `front_desk.reservation.correct` (Manager) until its room charge is posted; never once settled or
+  cancelled (400 with the reason). 400 for a walk-in and when a real ID is already there (change it
+  by editing the reservation). Records `booking_reference_added` (no reason); a repeat is refused and
+  records nothing. → `{reservation}`.
 - `POST /api/reservations/{id}/reverse-room-charge` `{reason}` — **Manager only**
   (`finance.invoice.reverse`, elevated: 400 without a reason). Under a `FOR UPDATE` lock on the
   reservation, reverses every active `reservation`-sourced line (room charge, extras) and, if any

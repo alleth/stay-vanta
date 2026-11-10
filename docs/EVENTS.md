@@ -209,6 +209,7 @@ one transaction.
 | `cancelled` | | | Cancelled with no money taken |
 | `cancelled_after_payment` | yes | | Cancelled after a downpayment was collected or charges were posted |
 | `deleted` | yes | | A Manager deletes a reservation entered by mistake: soft, the whole reservation in `changes` |
+| `booking_reference_added` | | | A missing online Booking ID (blank or a placeholder such as "-") is filled in later, while the reservation can still be edited; `changes` holds before/after |
 
 Rules (decided 2026-10-04):
 - **One event per action**, refused with the action: the second of two identical check-ins,

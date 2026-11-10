@@ -90,6 +90,7 @@ class PermissionMatrixApiTest extends TestCase
         ['PUT', '/api/reservations/{id}', 'front_desk.reservation.manage'],
         ['POST', '/api/reservations/{id}/{transition}', 'front_desk.reservation.manage'],
         ['POST', '/api/reservations/{id}/post-room-charge', 'front_desk.reservation.manage'],
+        ['POST', '/api/reservations/{id}/booking-reference', 'front_desk.reservation.manage'],
         ['POST', '/api/reservations/{id}/reverse-room-charge', 'finance.invoice.reverse', '', ['reason' => 'Matrix probe']],
         ['DELETE', '/api/reservations/{id}', 'front_desk.reservation.delete'],
         // Guests

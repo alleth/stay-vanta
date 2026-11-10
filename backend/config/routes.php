@@ -226,6 +226,11 @@ return function (RouteBuilder $routes): void {
             '/reservations/{id}/post-room-charge',
             ['controller' => 'Reservations', 'action' => 'postCharge'],
         )->setPatterns(['id' => '\d+'])->setPass(['id']);
+        // Reservation Types phase 1: fill in a missing online Booking ID later.
+        $builder->post(
+            '/reservations/{id}/booking-reference',
+            ['controller' => 'Reservations', 'action' => 'addBookingReference'],
+        )->setPatterns(['id' => '\d+'])->setPass(['id']);
         $builder->post(
             '/reservations/{id}/reverse-room-charge',
             ['controller' => 'Reservations', 'action' => 'reverseRoomCharge'],
