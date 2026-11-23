@@ -402,6 +402,8 @@ export default function FrontDesk() {
     () => rooms.filter((r) => inService(r) && !occupiedOnDate.has(r.id)),
     [rooms, occupiedOnDate],
   )
+  // A future date with no booking source: nothing can book it (see the Calendar).
+  const futureWithoutChannels = calDate > today && bookingSources.length === 0
 
   // Reservations touching the date (inclusive of arrival & departure days).
   const reservationsOnDate = useMemo(
@@ -807,6 +809,18 @@ export default function FrontDesk() {
               <div className="lg:col-span-5">
                 <Card className="h-full">
                   <Card.Header>Free rooms</Card.Header>
+                  {/* A future date can only be an online booking, and that needs
+                      a booking source. Without one the form's only type is
+                      walk-in, which checks the guest in today: so no Book
+                      button until a source exists, and the reason instead. */}
+                  {futureWithoutChannels && availableOnDate.length > 0 && (
+                    <Card.Body className="border-b border-line">
+                      <p className="mb-0 text-sm text-muted">
+                        Booking ahead needs a booking source. A Manager adds one by setting a promo
+                        rate in Settings → Promo rates.
+                      </p>
+                    </Card.Body>
+                  )}
                   {availableOnDate.length === 0 ? (
                     <Card.Body><p className="mb-0 text-muted">No rooms free on this date.</p></Card.Body>
                   ) : (
@@ -817,7 +831,7 @@ export default function FrontDesk() {
                             <span className="font-semibold">{r.room_number}</span>
                             <span className="ml-2 text-xs text-muted">{r.room_type ?? 'Room'}</span>
                           </span>
-                          {calDate >= today && (
+                          {calDate >= today && !futureWithoutChannels && (
                             <Button size="sm" variant="outline-primary"
                               onClick={() => openReservation(r.id, calDate)}>Book</Button>
                           )}
@@ -1065,6 +1079,10 @@ function ReservationModal({
   // New bookings start as a walk-in, since that's the common case at a desk —
   // but opening the form from a future date on the Calendar clearly isn't one,
   // so that defaults to a channel instead (and keeps the date that was picked).
+  // Never walk-in for a future date, even with no channel to fall back on: a
+  // walk-in checks the guest in today whatever date the form shows. With no
+  // source the form can't be saved (the source is required), which is right;
+  // the Calendar doesn't offer Book in that case anyway.
   const forFutureDate = Boolean(defaultCheckIn) && defaultCheckIn > todayStr()
   const [form, setForm] = useState({
     room_id: reservation?.room_id ?? defaultRoomId ?? firstAvailable?.id ?? '',
@@ -1073,7 +1091,7 @@ function ReservationModal({
     check_in: reservation?.check_in ?? defaultCheckIn ?? todayStr(),
     check_out: reservation?.check_out ?? '',
     source: reservation?.source
-      ?? (forFutureDate ? bookingSources[0]?.code ?? WALK_IN : WALK_IN),
+      ?? (forFutureDate ? bookingSources[0]?.code ?? '' : WALK_IN),
     booking_reference: reservation?.booking_reference ?? '',
     sold_rate: reservation?.sold_rate ?? '',
     // The channel's own promotion: '' (none) | percent | fixed.
